@@ -1548,8 +1548,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlayback(track) {
             val currentState = _uiState.value
             val queue = currentState.queue
-            val shouldResumePlayback = playbackManager.shouldResumeAfterTrackChange()
-
             val trackIndex = queue.indexOfFirst { it.uuid == track.uuid }
             if (trackIndex == -1) return@launchPlayback
 
@@ -1559,7 +1557,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     currentTrack = track,
                     queueIndex = trackIndex,
                     position = 0L,
-                    isPlaying = shouldResumePlayback,
+                    isPlaying = playbackManager.isPlayingFlow.value,
                     duration = track.durationSec.toLong() * 1000
                 )
             }
@@ -1844,7 +1842,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         startPositionMs = if (positionMs > 0) positionMs else androidx.media3.common.C.TIME_UNSET,
                         playWhenReady = play)
                     _uiState.update { it.copy(queue = playable, queueIndex = startIndex, currentTrack = start,
-                        isPlaying = play, position = positionMs.coerceAtLeast(0), duration = start.durationSec * 1000L) }
+                        isPlaying = playbackManager.isPlayingFlow.value, position = positionMs.coerceAtLeast(0), duration = start.durationSec * 1000L) }
                 },
                 synchronize = sync@{ playable ->
                     if (!synchronizeQueue || !`in`.synthora.musicbox.network.NetworkFeedback.online.value) return@sync

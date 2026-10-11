@@ -65,6 +65,9 @@ class EchoController(
     private var pollingForeground = false
     private val pollLock = Mutex()
     private val transportLock = Mutex()
+    private var seekIntent = 0L
+    private var pendingSeek: EchoSeekPreview? = null
+    private val volumeLock = Mutex()
     private var transportIntent = 0L
     private var transportConfirmationJob: Job? = null
     private var lastVolumeRefresh = 0L
@@ -125,6 +128,10 @@ class EchoController(
     }
 
     private fun setSerial(serial: String) {
+        pendingSeek = null
+        seekIntent++
+        transportIntent++
+        transportConfirmationJob?.cancel()
         volumeJob?.cancel()
         volumeSeq++
         volumeGraceUntil = 0L
@@ -197,10 +204,11 @@ class EchoController(
         if (force || now - lastVolumeRefresh > (if (_state.value.playing && pollingForeground) 15_000 else 60_000)) {
             lastVolumeRefresh = now
             // Volume/account refresh must never hold up playback confirmation.
+            val readSequence = volumeSeq
             scope.launch { safely {
                 val volume = Backend.get("/alexa/volume/", mapOf("serial" to serial)).objectOrEmpty()
                 val value = (volume["volume"] as? JsonPrimitive)?.intOrNull
-                if (serial == _serial.value && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
+                if (serial == _serial.value && readSequence == volumeSeq && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
                     _state.update { it.copy(volume = value.coerceIn(0, 100)) }
                 }
             } }
@@ -219,7 +227,10 @@ class EchoController(
             parsed.sharedOutput.epoch == previous.sharedOutput.epoch && parsed.sharedOutput.owner == previous.sharedOutput.owner &&
             parsed.playbackRevision >= 0 && parsed.playbackRevision < previous.playbackRevision) return
         // A pause, close or volume preview during decoding wins over this response.
-        _state.compareAndSet(previous, parsed)
+        val preview = pendingSeek
+        val reconciled = preview?.reconcile(parsed, now) ?: parsed
+        if (_state.compareAndSet(previous, reconciled) && preview != null && reconciled === parsed && pendingSeek === preview)
+            pendingSeek = null
     }
 
     suspend fun applySharedSnapshot(snapshot: JsonObject) { apply(snapshot) }
@@ -246,6 +257,8 @@ class EchoController(
     }
 
     suspend fun command(action: String, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
+        pendingSeek = null
+        seekIntent++
         val previous = _state.value
         val transport = action == "play" || action == "pause"
         val intent = if (transport) ++transportIntent else transportIntent
@@ -290,15 +303,44 @@ class EchoController(
     }
 
     suspend fun seek(positionMs: Long, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
-        send("/alexa/seek/", buildJsonObject {
-            put("serial", requireSerial()); put("position_ms", positionMs)
-            if (expectedPhoneToken != null) {
-                put("output_owner", PhonePlaybackOwnership.ownerId); put("output_token", expectedPhoneToken)
-                put("phone_paused", true)
+        val serial = requireSerial()
+        val previous = _state.value
+        val position = positionMs.coerceIn(0, if (previous.durationMs > 0) (previous.durationMs - 1_000).coerceAtLeast(0) else Long.MAX_VALUE)
+        val intent = ++seekIntent
+        val now = SystemClock.elapsedRealtime()
+        pendingSeek = EchoSeekPreview(previous, position, Long.MAX_VALUE)
+        _state.value = previous.copy(positionMs = position, anchoredAt = now,
+            processing = previous.playing, confirmed = !previous.playing)
+        transportLock.withLock {
+            if (intent != seekIntent || serial != _serial.value) return@withLock
+            try {
+                send("/alexa/seek/", buildJsonObject {
+                    put("serial", serial); put("position_ms", position)
+                    previous.track?.ytVideoId?.let { put("video_id", it) }
+                    if (previous.index >= 0) put("expected_queue_index", previous.index)
+                    if (expectedPhoneToken != null) {
+                        put("output_owner", PhonePlaybackOwnership.ownerId); put("output_token", expectedPhoneToken)
+                        put("phone_paused", true)
+                    }
+                })
+                if (intent == seekIntent && serial == _serial.value)
+                    pendingSeek = pendingSeek?.copy(until = SystemClock.elapsedRealtime() + 8_000)
+            } catch (e: Exception) {
+                if (intent == seekIntent && serial == _serial.value) {
+                    val unconfirmed = pendingSeek != null
+                    pendingSeek = null
+                    if (unconfirmed) _state.update {
+                        if (it.track?.ytVideoId == previous.track?.ytVideoId && it.index == previous.index)
+                            it.copy(positionMs = previous.livePosition(), anchoredAt = SystemClock.elapsedRealtime(),
+                                playing = previous.playing, confirmed = previous.confirmed, processing = previous.processing)
+                        else it
+                    }
+                }
+                throw e
+            } finally {
+                if (refreshAfter && intent == seekIntent && serial == _serial.value) refreshSoon()
             }
-        })
-        _state.update { it.copy(positionMs = positionMs, anchoredAt = SystemClock.elapsedRealtime()) }
-        if (refreshAfter) refreshSoon()
+        }
     }
 
     /** Volume slider: shows the value at once, sends the last value of a drag after 220 ms. */
@@ -306,25 +348,27 @@ class EchoController(
         val value = volume.coerceIn(0, 100)
         val serial = _serial.value.ifBlank { return }
         val seq = ++volumeSeq
-        volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
+        volumeGraceUntil = Long.MAX_VALUE
         _state.update { it.copy(volume = value) }
-        volumeJob?.cancel()
+        // Do not cancel an HTTP request already dispatched: order it before the next value.
         volumeJob = scope.launch {
             delay(220)
-            if (_serial.value != serial || prefs.getString("playback_output", "PHONE") != "ALEXA") return@launch
-            try {
-                send("/alexa/command/", buildJsonObject {
-                    put("serial", serial); put("action", "volume"); put("value", value)
-                })
-                if (seq == volumeSeq) volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (seq != volumeSeq) return@launch
-                volumeGraceUntil = 0
-                onError(e.message ?: "Couldn't change the volume")
-                lastVolumeRefresh = 0
-                safely { refresh(force = true) }
+            volumeLock.withLock {
+                if (seq != volumeSeq || _serial.value != serial || prefs.getString("playback_output", "PHONE") != "ALEXA") return@withLock
+                try {
+                    send("/alexa/command/", buildJsonObject {
+                        put("serial", serial); put("action", "volume"); put("value", value)
+                    })
+                    if (seq == volumeSeq) volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (seq != volumeSeq || serial != _serial.value) return@withLock
+                    volumeGraceUntil = 0
+                    onError(e.message ?: "Couldn't change the volume")
+                    lastVolumeRefresh = 0
+                    safely { refresh(force = true) }
+                }
             }
         }
     }
@@ -495,6 +539,10 @@ class EchoController(
 
     fun clear() {
         stopPolling()
+        pendingSeek = null
+        seekIntent++
+        transportIntent++
+        transportConfirmationJob?.cancel()
         volumeJob?.cancel()
         volumeSeq++
         volumeGraceUntil = 0

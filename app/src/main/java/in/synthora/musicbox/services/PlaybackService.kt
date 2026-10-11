@@ -504,16 +504,15 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    private val callGuard = object : Player.Listener {
-        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-            if (playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS && inCall()) {
-                player.pause()
-                mainHandler.removeCallbacks(resumeAfterCall)
-                mainHandler.postDelayed(resumeAfterCall, 500)
-                Log.d(TAG, "Focus returned during a call - held")
-            }
-        }
-    }
+    private val callGuard = CallPlaybackGuard(
+        isInCall = ::inCall,
+        pause = { player.pause() },
+        scheduleResume = {
+            mainHandler.removeCallbacks(resumeAfterCall)
+            mainHandler.postDelayed(resumeAfterCall, 500)
+        },
+        cancelResume = { mainHandler.removeCallbacks(resumeAfterCall) }
+    )
 
     private val outputPrefs by lazy { getSharedPreferences("music_settings_prefs", MODE_PRIVATE) }
     private val outputListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -1502,8 +1501,8 @@ class PlaybackService : MediaLibraryService() {
         val bitmapLoader = SharedArtworkBitmapLoader(this, serviceScope)
 
         val sessionPlayer = ResumableSessionPlayer(player, ::resumeFromSession,
-            onPause = { cancelSessionResume(); player.pause() },
-            onStop = { saveResumptionState(); cancelSessionResume(); player.stop() })
+            onPause = { mainHandler.removeCallbacks(resumeAfterCall); cancelSessionResume(); player.pause() },
+            onStop = { mainHandler.removeCallbacks(resumeAfterCall); saveResumptionState(); cancelSessionResume(); player.stop() })
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, MediaLibrarySessionCallback())
             .apply {
                 sessionActivityPendingIntent?.let { setSessionActivity(it) }

@@ -594,7 +594,6 @@ fun PlayerHeader(
             if (track != null && mediaMenu != null) {
                 val extras = listOf(
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Lyrics, "Lyrics", onToggleLyrics),
-                    `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Timer, "Sleep timer", onShowSleepTimer),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Refresh, "Refresh lyrics", onRefreshLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off", onToggleRomanizedLyrics)
                 )
@@ -611,7 +610,6 @@ fun PlayerHeader(
                 fun run(action: () -> Unit) { showMenu = false; action() }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Lyrics, if (showLyrics) "Hide lyrics" else "Lyrics") { run(onToggleLyrics) }
                 if (isAlbumAvailable) `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Album, "Go to album") { run(onNavigateToAlbum) }
-                `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Timer, "Sleep timer") { run(onShowSleepTimer) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Refresh, "Refresh lyrics") { run(onRefreshLyrics) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off") { run(onToggleRomanizedLyrics) }
             }
