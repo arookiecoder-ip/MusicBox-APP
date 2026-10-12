@@ -26,7 +26,7 @@ fun ResponsivePlayerLayout(artwork: @Composable () -> Unit, controls: @Composabl
             val fraction = if (paneWidth > paneHeight) 0.5f else 0.6f
             Box(Modifier.fillMaxWidth().height(paneHeight * fraction).testTag("Player artwork pane")) { artwork() }
             Box(Modifier.weight(1f).fillMaxWidth().testTag("Player controls pane"), contentAlignment = if (paneWidth > paneHeight) Alignment.BottomCenter else Alignment.TopCenter) {
-                Box(Modifier.widthIn(max = 680.dp).fillMaxWidth()) { controls() }
+                Box(Modifier.widthIn(max = 680.dp).fillMaxWidth().testTag("Player controls content")) { controls() }
             }
         }
     }

@@ -36,10 +36,12 @@ class CollectionParityRegressionTest {
                 options = if (downloaded) listOf(ExtraSongOption(Icons.Default.CheckBoxOutlineBlank, "Select songs") {}) else emptyList()) }
         } } }
         val originalBounds = compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot
+        val density = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
+        val artworkSize = if (originalBounds.width / density >= 840) 220.dp else 200.dp
         for (local in listOf(false, true)) {
             compose.runOnIdle { downloaded = local }
             assertEquals(originalBounds, compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot)
-            compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).assertWidthIsEqualTo(200.dp).assertHeightIsEqualTo(200.dp)
+            compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).assertWidthIsEqualTo(artworkSize).assertHeightIsEqualTo(artworkSize)
             compose.onNodeWithContentDescription("Play collection").performClick()
             compose.onNodeWithContentDescription("Shuffle collection").performClick()
             compose.onNodeWithContentDescription("Add collection to queue").performClick()

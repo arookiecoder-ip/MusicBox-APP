@@ -8,6 +8,11 @@ class LyricCenteringTest {
         assertEquals(-50f, lyricCenterDelta(200, 200, 0, 700), 0f)
         assertEquals(0f, lyricCenterDelta(250, 200, 0, 700), 0f)
     }
+    @Test fun farSeekPlacesTargetInsideViewportWithSymmetricOrUnequalPadding() {
+        assertEquals(0, lyricInitialScrollOffset(-210, 210))
+        assertEquals(-50, lyricInitialScrollOffset(-300, 400))
+        assertEquals(-210, lyricInitialScrollOffset(0, 420))
+    }
     @Test fun contentPaddingDoesNotMoveTheVisualCenter() {
         assertEquals(0f, lyricCenterDelta(25, 50, -300, 400), 0f)
     }

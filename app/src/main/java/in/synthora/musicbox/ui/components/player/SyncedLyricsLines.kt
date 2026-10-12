@@ -33,7 +33,7 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
         var item = layout.visibleItemsInfo.firstOrNull { it.index == index }
         if (item == null) {
             // Large seeks place the target near the center before measuring its real height.
-            list.scrollToItem(index, -(layout.viewportEndOffset - layout.viewportStartOffset) / 2)
+            list.scrollToItem(index, lyricInitialScrollOffset(layout.viewportStartOffset, layout.viewportEndOffset))
             withFrameNanos { }
             layout = list.layoutInfo
             item = layout.visibleItemsInfo.firstOrNull { it.index == index }

@@ -28,7 +28,7 @@ class TabletPlaybackRegressionTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
     private val context get() = instrumentation.targetContext
 
-    @Test fun portraitAndLandscapePlayerKeepControlsBesideOrBelowArtwork() {
+    @Test fun portraitAndLandscapePlayerKeepControlsBelowArtworkWithoutQueue() {
         var landscape by mutableStateOf(false)
         compose.setContent { JUKETheme { Surface(Modifier.requiredSize(if (landscape) 1000.dp else 700.dp, if (landscape) 700.dp else 1000.dp)) {
             ResponsivePlayerLayout(artwork = { Text("Artwork") }, controls = { Text("Controls") })
@@ -36,11 +36,12 @@ class TabletPlaybackRegressionTest {
         var artwork = compose.onNodeWithTag("Player artwork pane").fetchSemanticsNode().boundsInRoot
         var controls = compose.onNodeWithTag("Player controls pane").fetchSemanticsNode().boundsInRoot
         assertTrue(controls.top >= artwork.bottom)
-        assertTrue(controls.width <= 680 * context.resources.displayMetrics.density + 1)
+        val content = compose.onNodeWithTag("Player controls content").fetchSemanticsNode().boundsInRoot
+        assertTrue(content.width <= 680 * context.resources.displayMetrics.density + 1)
         compose.runOnIdle { landscape = true }
         artwork = compose.onNodeWithTag("Player artwork pane").fetchSemanticsNode().boundsInRoot
         controls = compose.onNodeWithTag("Player controls pane").fetchSemanticsNode().boundsInRoot
-        assertTrue(controls.left >= artwork.right)
+        assertTrue(controls.top >= artwork.bottom)
         assertTrue(controls.height > artwork.height * 0.8f)
     }
     @Test fun playerAdaptsToActualDeviceRotation() {

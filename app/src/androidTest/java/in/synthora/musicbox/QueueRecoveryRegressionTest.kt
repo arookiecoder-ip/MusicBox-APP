@@ -95,7 +95,8 @@ class QueueRecoveryRegressionTest {
             val folder = File(context.cacheDir, "preload-test-${UUID.randomUUID()}")
             val cache = SimpleCache(folder, LeastRecentlyUsedCacheEvictor(8L * 1024 * 1024), StandaloneDatabaseProvider(context))
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            val warmer = UpcomingAudioPreloader(playbackDataSources(context, cache, server.base, "fixture-key"), scope)
+            val warmer = UpcomingAudioPreloader(playbackDataSources(context, cache, server.base, "fixture-key"), scope,
+                policyOverride = { buffering -> preloadPolicy(online = true, metered = false, allowMetered = true, buffering = buffering) })
             lateinit var player: ExoPlayer
             val urls = (0..8).map { deviceAudioUrl(server.base, "video00000$it") }
             try {

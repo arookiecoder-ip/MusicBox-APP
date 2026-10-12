@@ -41,3 +41,15 @@ Repeat the same tablet capture and variant after installing this build, using
 the journeys in PERFORMANCE_MEASUREMENT.md. Physical-device frame timing,
 Home/Library traces and long-duration tablet scrolling remain device checks;
 no measured improvement or elimination of all tablet lag is claimed here.
+
+The broader emulator run also exposed a far-seek lyrics bug: symmetric content
+padding made the old half-height initial scroll offset put a target line beyond
+the viewport. Initial positioning now uses the actual viewport center, then
+measures and centers the complete line. Unit cases cover padded/unpadded origins.
+Existing local fixtures were corrected to use the documented Library swipe
+order, adaptive collection artwork sizes and actual bounded controls content.
+The preloader fixture explicitly enables speculative work instead of inheriting
+its disabled no-context/metered default. Production preload policy is unchanged.
+Live-server audio tests retain their assertions and still require CI credentials;
+`local_ui_tests` exercises authenticated localhost audio plus all UI fixtures
+without pretending those live-server checks passed.

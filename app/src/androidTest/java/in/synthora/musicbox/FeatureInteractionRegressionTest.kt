@@ -28,12 +28,12 @@ class FeatureInteractionRegressionTest {
             LibraryPages(pager) { page -> Box(Modifier.fillMaxSize()) { Text(names[page]) } }
         } } }
         for (name in names.drop(1)) {
-            compose.onNodeWithTag("Library pages").performTouchInput { swipeRight() }
+            compose.onNodeWithTag("Library pages").performTouchInput { swipeLeft() }
             compose.waitForIdle()
             compose.onNodeWithText(name).assertIsDisplayed()
         }
         for (name in names.dropLast(1).reversed()) {
-            compose.onNodeWithTag("Library pages").performTouchInput { swipeLeft() }
+            compose.onNodeWithTag("Library pages").performTouchInput { swipeRight() }
             compose.waitForIdle()
             compose.onNodeWithText(name).assertIsDisplayed()
         }
