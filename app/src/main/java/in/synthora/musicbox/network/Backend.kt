@@ -3,7 +3,6 @@ package `in`.synthora.musicbox.network
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.IOException
 import android.content.Context
 import android.content.SharedPreferences
@@ -136,14 +135,8 @@ object Backend {
     }
 
     private suspend fun call(method: HttpMethod, path: String, query: Map<String, String>, body: JsonObject?): JsonElement = coroutineScope {
-        // Only nag about slowness while the app is visible; background polls (Doze-throttled)
-        // routinely exceed 8s and must stay silent.
-        val slowNotice = launch {
-            delay(8_000)
-            if (NetworkFeedback.isForeground) {
-                NetworkFeedback.notify("Taking longer than usual to load. Please wait…")
-            }
-        }
+        // Background presence/queue polls share this client with browsing. A slow
+        // request is not a user-visible failure; feature loaders show pending work.
         try {
             try { performCall(method, path, query, body) }
             catch (error: BackendHttpException) {
@@ -160,8 +153,6 @@ object Backend {
                 throw IOException(message, error)
             }
             throw error
-        } finally {
-            slowNotice.cancel()
         }
     }
 

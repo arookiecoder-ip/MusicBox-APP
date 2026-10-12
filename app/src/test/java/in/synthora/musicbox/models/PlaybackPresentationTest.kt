@@ -39,6 +39,25 @@ class PlaybackPresentationTest {
         assertEquals(actual.queue, pending.queue)
         assertSame(actual, withPendingPlayback(actual, null))
     }
+    @Test fun pendingSelectionHighlightsImmediatelyAndConfirmationOrFailureWins() {
+        val a = Track("a", "A", "Artist", durationSec = 100)
+        val b = Track("b", "B", "Artist", durationSec = 100)
+        val original = MusicUiState(currentTrack = a, queue = listOf(a, b), queueIndex = 0)
+        assertEquals(1, withPendingPlayback(original, b).queueIndex)
+        assertSame(original, withPendingPlayback(original, null))
+        val confirmed = original.copy(currentTrack = b, queueIndex = 1, isPlaying = true)
+        assertSame(confirmed, withPendingPlayback(confirmed, null))
+        assertEquals(-1, withPendingPlayback(original, b.copy(uuid = "not-in-queue")).queueIndex)
+    }
+    @Test fun duplicateQueueTapKeepsTheTappedOccurrenceAndRemovedIndexFallsBackSafely() {
+        val a = Track("a", "A", "Artist", durationSec = 100)
+        val b = Track("b", "B", "Artist", durationSec = 100)
+        val state = MusicUiState(currentTrack = b, queue = listOf(a, b, a), queueIndex = 1)
+        assertEquals(2, withPendingPlayback(state, a, 2).queueIndex)
+        assertEquals(0, withPendingPlayback(state.copy(queue = listOf(a, b)), a, 2).queueIndex)
+        assertEquals(0, withPendingPlayback(state, a, 99).queueIndex)
+    }
+
     @Test fun handoffKeepsTheTransferredCursorWhenTheSameItemIsPrepared() {
         val song = Track("entry", "Song", "Artist", durationSec = 200)
         val handedOff = MusicUiState(currentTrack = song, queue = listOf(song), queueIndex = 0, position = 75000L)

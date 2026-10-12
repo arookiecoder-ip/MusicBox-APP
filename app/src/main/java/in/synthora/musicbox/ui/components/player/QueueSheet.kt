@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
@@ -45,29 +47,26 @@ import kotlin.math.roundToInt
 fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex: Int, uiState: MusicUiState,
     onClose: () -> Unit, onMoveTrack: (Int, Int) -> Unit, onRemoveTrack: (String, (Boolean) -> Unit) -> Unit,
     onPlayTrack: (Track) -> Unit, statusText: String? = null, onShuffleUpcoming: () -> Unit = {},
-    error: String? = null, onRetry: () -> Unit = {}, onSortUpcoming: () -> Unit = {}, onClearPlayed: () -> Unit = {}, onSaveAsPlaylist: () -> Unit = {}, showClose: Boolean = true) {
+    error: String? = null, onRetry: () -> Unit = {}, onSortUpcoming: () -> Unit = {}, onClearPlayed: () -> Unit = {}, onSaveAsPlaylist: () -> Unit = {}, showClose: Boolean = true,
+    preparedRows: `in`.synthora.musicbox.services.PreparedQueueRows? = null,
+    onPlayEntry: ((Track, Int) -> Unit)? = null) {
     val haptics = `in`.synthora.musicbox.utils.rememberJukeHaptics()
     val menu = LocalMediaMenu.current
     val scope = rememberCoroutineScope()
-    val rows = remember(queue, currentTrack) { queue.ifEmpty { listOf(currentTrack) } }
-    val currentIndex = if (queue.isEmpty()) 0 else queueIndex.takeIf { it in queue.indices }
-        ?: queue.indexOfFirst { it.uuid == currentTrack.uuid || (it.ytVideoId != null && it.ytVideoId == currentTrack.ytVideoId) }
+    val fallbackRows = remember(queue, currentTrack) { queue.ifEmpty { listOf(currentTrack) } }
+    val prepared = preparedRows ?: remember(fallbackRows) {
+        `in`.synthora.musicbox.services.PreparedQueueRows.prepare(fallbackRows)
+    }
+    val rows = prepared.tracks
+    val currentIndex = queueIndex.takeIf { rows.getOrNull(it)?.uuid == currentTrack.uuid }
+        ?: rows.indexOfFirst { it.uuid == currentTrack.uuid }
     val upcoming = (rows.size - currentIndex - 1).coerceAtLeast(0)
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (currentIndex - 1).coerceAtLeast(0))
     val rowHeight = with(LocalDensity.current) { 64.dp.toPx() }
     var toolsOpen by remember { mutableStateOf(false) }
-    // Start at the current song on the first frame. Updates preserve the user's scroll position.
-    val keys = remember(rows) {
-        val occurrences = mutableMapOf<String, Int>()
-        val videoCounts = rows.groupingBy { it.ytVideoId ?: it.uuid }.eachCount()
-        rows.map { track ->
-            val occurrence = occurrences.getOrDefault(track.uuid, 0)
-            occurrences[track.uuid] = occurrence + 1
-            "${track.uuid}:$occurrence:${videoCounts[track.ytVideoId ?: track.uuid]}"
-        }
-    }
-    val byKey = remember(keys, rows) { keys.zip(rows).toMap() }
-    val keyIndices = remember(keys) { keys.withIndex().associate { it.value to it.index } }
+    val keys = prepared.keys
+    val byKey = prepared.byKey
+    val keyIndices = prepared.indices
     var order by remember(keys) { mutableStateOf(keys) }
     var draggedKey by remember { mutableStateOf<String?>(null) }
     var origin by remember { mutableIntStateOf(-1) }
@@ -170,7 +169,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                     exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(250), shrinkTowards = Alignment.Top)) {
                 SwipeToDismissBox(dismiss, enableDismissFromStartToEnd = false,
                     enableDismissFromEndToStart = editable && !active && !dragging,
-                    modifier = Modifier.testTag("Queue row ${track.uuid}").shadow(if (dragging) 8.dp else 0.dp),
+                    modifier = Modifier.testTag("Queue row ${track.uuid}").semantics { selected = active }.shadow(if (dragging) 8.dp else 0.dp),
                     backgroundContent = {
                         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
                             Icon(Icons.Default.Delete, "Remove from queue", tint = MaterialTheme.colorScheme.onErrorContainer)
@@ -178,17 +177,17 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                     }) {
                     fun songOptions() {
                         menu?.show(track, QueueSongActions(
-                            play = { onPlayTrack(track) },
+                            play = { if (onPlayEntry != null) onPlayEntry(track, index) else onPlayTrack(track) },
                             remove = if (editable && !active) ({ onRemoveTrack(track.uuid) {} }) else null
                         ))
                     }
                     QueueWebRow(track, position + 1, active, dragging, grip,
-                        onPlay = { onPlayTrack(track) }, onLongClick = ::songOptions, onOptions = ::songOptions) {}
+                        onPlay = { if (onPlayEntry != null) onPlayEntry(track, index) else onPlayTrack(track) }, onLongClick = ::songOptions, onOptions = ::songOptions) {}
 
                 }
                 }
             }
-            if (uiState.isLoading && queue.isEmpty()) item { `in`.synthora.musicbox.ui.components.TrackRowsSkeleton(4) }
+            if (uiState.isLoading && rows.isEmpty()) item { `in`.synthora.musicbox.ui.components.TrackRowsSkeleton(4) }
             if (upcoming == 0 && !uiState.isLoading) item { Text("No upcoming songs", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }

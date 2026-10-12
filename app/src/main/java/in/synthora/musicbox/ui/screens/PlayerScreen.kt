@@ -207,9 +207,9 @@ fun PlayerScreen(
         }
     }
     val presentation = remember(musicViewModel) {
-        musicViewModel.uiState.map { it.copy(position = 0L) }.distinctUntilChanged()
+        musicViewModel.uiState.map { it.copy(position = 0L, queue = emptyList(), queueIndex = -1) }.distinctUntilChanged()
     }
-    val uiState by presentation.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.copy(position = 0L))
+    val uiState by presentation.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.copy(position = 0L, queue = emptyList(), queueIndex = -1))
     val currentTrack = uiState.currentTrack
     var showQueue by remember { mutableStateOf(false) }
     LaunchedEffect(showQueue) { if (showQueue) musicViewModel.refreshQueue() }
@@ -338,12 +338,19 @@ fun PlayerScreen(
 
     val stableQueueTrack = remember(currentTrack) { currentTrack }
     val queueContent: @Composable () -> Unit = {
+        val queuePresentation = remember(musicViewModel) {
+            musicViewModel.uiState.map { it.queue to it.queueIndex }.distinctUntilChanged()
+        }
+        val queueState by queuePresentation.collectAsStateWithLifecycle(
+            initialValue = musicViewModel.uiState.value.let { it.queue to it.queueIndex })
+        val prepared by musicViewModel.queueRows.collectAsStateWithLifecycle()
+        val preparingRows = queueState.first.isNotEmpty() && prepared.tracks != queueState.first
         val rec by musicViewModel.recStatus.collectAsStateWithLifecycle()
         val queueError by musicViewModel.queueLoadError.collectAsStateWithLifecycle()
         // The queue does not display the playback clock. Keep its inputs stable
         // while progress updates so visible rows are not rebuilt every tick.
-        val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress) {
-            MusicUiState(isLoading = uiState.isLoading, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
+        val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
+            MusicUiState(isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress || preparingRows)
         }
             QueueBottomSheetContent(
                 statusText = when {
@@ -352,13 +359,15 @@ fun PlayerScreen(
                 },
                 error = queueError, onRetry = musicViewModel::refreshQueue,
                 currentTrack = stableQueueTrack,
-                queue = uiState.queue,
-                queueIndex = uiState.queueIndex,
+                queue = queueState.first,
+                queueIndex = queueState.second,
                 uiState = queueUiState,
                 onClose = { showQueue = false }, showClose = !tabletLandscape,
                 onMoveTrack = { from, to -> musicViewModel.moveInQueue(from, to) },
                 onRemoveTrack = { id, complete -> musicViewModel.removeFromQueue(id, complete) },
                 onPlayTrack = { track -> musicViewModel.playTrackFromQueue(track) },
+                preparedRows = prepared.takeIf { queueState.first.isNotEmpty() },
+                onPlayEntry = { track, index -> musicViewModel.playTrackFromQueue(track, index) },
                 onShuffleUpcoming = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.SHUFFLE_UPCOMING) },
                 onSortUpcoming = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.SORT_UPCOMING) },
                 onClearPlayed = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.CLEAR_PLAYED) },
@@ -852,7 +861,12 @@ internal fun PlayerBannerMetadata(track: Track, compact: Boolean, onArtistClick:
 @Composable
 private fun ClockedPlayerArtwork(state: MusicUiState, track: Track, lyrics: Boolean,
     music: MusicViewModel, tablet: Boolean, toggleLyrics: () -> Unit) {
-    PlayerArtwork(queue = state.queue, queueIndex = state.queueIndex, currentTrack = track,
+    val queuePresentation = remember(music) {
+        music.uiState.map { it.queue to it.queueIndex }.distinctUntilChanged()
+    }
+    val queue by queuePresentation.collectAsStateWithLifecycle(
+        initialValue = music.uiState.value.let { it.queue to it.queueIndex })
+    PlayerArtwork(queue = queue.first, queueIndex = queue.second, currentTrack = track,
         currentPosition = state.position, showLyrics = lyrics, musicViewModel = music,
         isTablet = tablet, onToggleLyrics = toggleLyrics)
 }

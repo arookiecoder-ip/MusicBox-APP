@@ -192,6 +192,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
 
     private val pendingPlayback = MutableStateFlow<Track?>(null)
+    private val pendingQueueIndex = MutableStateFlow<Int?>(null)
     private var pendingPlaybackJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
     private var playlistBackfillJob: Job? = null
@@ -207,14 +208,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var remoteTransportSequence = 0L
     private val remoteTransportMutex = kotlinx.coroutines.sync.Mutex()
 
-    val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview) { state, busy, pending, preview ->
-        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending)
+    val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview, pendingQueueIndex) { state, busy, pending, preview, selectedIndex ->
+        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending, selectedIndex)
         val presented = if (isRemotePhone && pending == null && preview != null && preview.owner == _remoteMobileOutput.value.owner)
             preview.present(base, android.os.SystemClock.elapsedRealtime()) else base
         presented.copy(phase = `in`.synthora.musicbox.services.playbackPhase(presented.currentTrack != null,
             _isSwitchingOutput.value, pending != null,
             presented.isLoading, presented.isPlaying, presented.error != null))
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
+
+    // Prepared once per queue change, before opening either the player or its sheet.
+    val queueRows = `in`.synthora.musicbox.services.preparedQueueRows(viewModelScope, uiState)
 
     private fun Track.withLike(liked: Set<String>) =
         if (isFavourite == (ytVideoId in liked)) this else copy(isFavourite = ytVideoId in liked)
@@ -726,9 +730,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun remoteControl(action: String, payload: JsonObject = buildJsonObject {}, requestedTrack: Track? = null) {
+    private fun remoteControl(action: String, payload: JsonObject = buildJsonObject {}, requestedTrack: Track? = null, queueIndex: Int? = null) {
         if (requestedTrack != null) {
-            launchPlayback(requestedTrack) {
+            launchPlayback(requestedTrack, queueIndex = queueIndex) {
                 `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, action, payload)
             }
             return
@@ -1334,7 +1338,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Show the requested song immediately, until local preparation or Echo confirmation finishes. */
-    private fun launchPlayback(track: Track, localOnly: Boolean = false, block: suspend () -> Unit) {
+    private fun launchPlayback(track: Track, localOnly: Boolean = false, queueIndex: Int? = null, block: suspend () -> Unit) {
         ++remoteTransportSequence
         remoteTransportJob?.cancel()
         remoteTransportPreview.value = null
@@ -1343,6 +1347,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // A new song supersedes any in-flight playlist backfill: its chunks
         // belong to the previous song's queue and must not be appended.
         playlistBackfillJob?.cancel()
+        pendingQueueIndex.value = queueIndex
         pendingPlayback.value = track
         pendingPlaybackJob = viewModelScope.launch {
             try {
@@ -1352,12 +1357,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         echo.state.first { it.track?.ytVideoId == track.ytVideoId && it.confirmed && it.playing && !it.processing }
                         true
                     }
-                    if (confirmed != true) _messages.tryEmit("The other device hasn't confirmed playback yet")
+                    if (confirmed != true && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The other device hasn't confirmed playback yet")
                 } else if (isAlexa && !localOnly) {
                     runEcho {
                         block()
                         val videoId = requireNotNull(track.ytVideoId)
-                        if (!echo.awaitPlaying(videoId)) _messages.tryEmit("The Echo hasn't confirmed playback yet")
+                        if (!echo.awaitPlaying(videoId) && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The Echo hasn't confirmed playback yet")
                     }
                 } else {
                     block()
@@ -1367,7 +1372,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         playbackManager.isBufferingFlow.first { !it }
                         true
                     }
-                    if (ready != true) _messages.tryEmit("Playback is taking longer than usual")
+                    if (ready != true && requestId == playbackRequestId &&
+                        playbackManager.isBufferingFlow.value && !playbackManager.isPlayingFlow.value)
+                        `in`.synthora.musicbox.network.NetworkFeedback.notify("Playback hasn't started yet. Check the connection or tap play to retry.")
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
@@ -1551,17 +1558,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun playTrackFromQueue(track: Track) {
-        if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("queue_index", uiState.value.queue.indexOfFirst { it.uuid == track.uuid }) }, requestedTrack = track); return }
+    fun playTrackFromQueue(track: Track, selectedIndex: Int? = null) {
+        val index = selectedIndex?.takeIf { uiState.value.queue.getOrNull(it)?.uuid == track.uuid }
+            ?: uiState.value.queue.indexOfFirst { it.uuid == track.uuid }
+        if (index < 0) return
+        if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("queue_index", index) }, requestedTrack = track, queueIndex = index); return }
         if (isAlexa) {
-            val index = uiState.value.queue.indexOfFirst { it.uuid == track.uuid }
-            if (index >= 0) launchPlayback(track) { echo.playQueueIndex(track, index) }
+            launchPlayback(track, queueIndex = index) { echo.playQueueIndex(track, index) }
             return
         }
-        launchPlayback(track) {
+        launchPlayback(track, queueIndex = index) {
             val currentState = _uiState.value
             val queue = currentState.queue
-            val trackIndex = queue.indexOfFirst { it.uuid == track.uuid }
+            val trackIndex = index.takeIf { queue.getOrNull(it)?.uuid == track.uuid } ?: -1
             if (trackIndex == -1) return@launchPlayback
 
             playbackManager.seekToIndex(trackIndex)
@@ -2486,9 +2495,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-internal fun withPendingPlayback(state: MusicUiState, pending: Track?): MusicUiState =
-    if (pending == null) state else state.copy(currentTrack = pending, position = 0L,
+internal fun withPendingPlayback(state: MusicUiState, pending: Track?, selectedIndex: Int? = null): MusicUiState {
+    if (pending == null) return state
+    val index = selectedIndex?.takeIf { state.queue.getOrNull(it)?.uuid == pending.uuid }
+        ?: state.queue.indexOfFirst { it.uuid == pending.uuid }
+    return state.copy(currentTrack = pending, queueIndex = index, position = 0L,
         duration = pending.durationSec * 1000L, isPlaying = false, isLoading = true)
+}
 
 /**
  * Songs that backfill Up Next behind an already-playing fast start.

@@ -75,7 +75,7 @@ fun PlayerArtwork(
             userSwipe = false
             // An output handoff may rebuild/reorder the same queue. A changed
             // page index alone is not a new song and must not animate artwork.
-            if (!`in`.synthora.musicbox.services.animateSongChange(alignedSong, currentTrack.ytVideoId ?: currentTrack.uuid, switching || handoff != alignedHandoff)) pagerState.scrollToPage(queueIndex)
+            if (!`in`.synthora.musicbox.services.animateSongChange(alignedSong, currentTrack.ytVideoId ?: currentTrack.uuid, switching || handoff != alignedHandoff) || kotlin.math.abs(pagerState.currentPage - queueIndex) > 1) pagerState.scrollToPage(queueIndex)
             else pagerState.animateScrollToPage(queueIndex)
         }
         alignedSong = currentTrack.ytVideoId ?: currentTrack.uuid
@@ -85,7 +85,7 @@ fun PlayerArtwork(
         if (!pagerState.isScrollInProgress && userSwipe) {
             userSwipe = false
             if (pagerState.settledPage != queueIndex && pagerState.settledPage in queue.indices) {
-                musicViewModel.playTrackFromQueue(queue[pagerState.settledPage])
+                musicViewModel.playTrackFromQueue(queue[pagerState.settledPage], pagerState.settledPage)
                 haptic.click()
             }
         }
