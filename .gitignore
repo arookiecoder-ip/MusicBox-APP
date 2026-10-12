@@ -23,3 +23,5 @@ spotdown-kv-worker/wrangler.json
 
 diff.txt
 .kiro/*
+/performance/build/
+/scripts/__pycache__/

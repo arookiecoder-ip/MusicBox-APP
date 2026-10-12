@@ -25,7 +25,7 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val dragged by list.interactionSource.collectIsDraggedAsState()
-    val active = remember(lines, position) { lines.indexOfLast { it.timeMs <= position }.coerceAtLeast(0) }
+    val active = remember(lines, position) { `in`.synthora.musicbox.utils.lyricIndexAt(lines.size, position) { lines[it].timeMs }.coerceAtLeast(0) }
     val currentActive by rememberUpdatedState(active)
     suspend fun center(index: Int) {
         if (index !in lines.indices || dragged) return

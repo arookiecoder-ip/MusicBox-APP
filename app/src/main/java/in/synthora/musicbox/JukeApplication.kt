@@ -27,13 +27,15 @@ class JukeApplication : Application(), ImageLoaderFactory, androidx.lifecycle.Vi
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override fun newImageLoader(): ImageLoader {
+        val lowMemory = getSystemService(android.app.ActivityManager::class.java).isLowRamDevice
+        val imageBudget = minOf(Runtime.getRuntime().maxMemory() / 8, (if (lowMemory) 16 else 64) * 1024L * 1024L)
         return ImageLoader.Builder(this)
             // Limit simultaneous decoding so dense shelves do not compete with UI/render threads.
-            .decoderDispatcher(kotlinx.coroutines.Dispatchers.Default.limitedParallelism(2))
+            .decoderDispatcher(kotlinx.coroutines.Dispatchers.Default.limitedParallelism(if (lowMemory) 1 else 2))
             .memoryCache {
                 MemoryCache.Builder(this)
-                    // 25% of heap — keep aggressive in-memory caching for fast track switches
-                    .maxSizePercent(0.25)
+                    // Bound artwork memory on small heaps; disk cache still preserves reuse.
+                    .maxSizeBytes(imageBudget.toInt())
                     .build()
             }
             .diskCache {

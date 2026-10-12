@@ -17,7 +17,8 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
     private val policyOverride: ((Boolean) -> PreloadPolicy)? = null,
     private val nowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val demandFactory: DataSource.Factory = factory,
-    private val guardFactory: (() -> AudioDownloadGuard)? = null) {
+    private val guardFactory: (() -> AudioDownloadGuard)? = null,
+    private val powerState: () -> PreloadPowerState = { preloadPowerState(context) }) {
     private data class Work(val writer: CacheWriter, val source: CacheDataSource, val job: Job, val demand: Boolean)
     private val work = mutableMapOf<String, Work>()
     private val completed = mutableMapOf<String, Long>()
@@ -35,7 +36,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
         val connectivity = context?.getSystemService(android.net.ConnectivityManager::class.java)
         val policy = policyOverride?.invoke(buffering) ?: preloadPolicy(`in`.synthora.musicbox.network.NetworkFeedback.online.value,
             connectivity?.isActiveNetworkMetered ?: true,
-            context?.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)?.getBoolean("prefetch_mobile_data", false) ?: false, buffering)
+            context?.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)?.getBoolean("prefetch_mobile_data", false) ?: false, buffering, powerState())
         val current = currentUrl?.takeIf { Uri.parse(it).scheme in listOf("https", "http") }
         val currentComplete = current != null && fullyCached(current)
         // A failed speculative download cannot delay a newly selected song.

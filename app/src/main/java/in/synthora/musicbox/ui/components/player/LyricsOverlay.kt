@@ -44,6 +44,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -153,8 +154,11 @@ fun LyricsOverlay(
         }
 
         if (syncedLyrics != null) {
-            val lyricLines = remember(syncedLyrics, localOffsetMs) {
-                parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
+            val lyricLines by produceState<List<`in`.synthora.musicbox.ui.screens.LyricLine>>(emptyList(), syncedLyrics, localOffsetMs) {
+                value = emptyList()
+                value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
+                    parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
+                }
             }
             SyncedLyricsLines(lyricLines, currentPosition,
                 onSeek = musicViewModel::seekTo,

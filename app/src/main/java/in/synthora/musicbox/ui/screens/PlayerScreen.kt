@@ -261,17 +261,6 @@ fun PlayerScreen(
     val shareSong = `in`.synthora.musicbox.ui.components.rememberShareAction()
 
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    // Poll the position only while playing; paused, one read is enough (no 300 ms wakeups).
-    LaunchedEffect(lifecycleOwner, uiState.isPlaying) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            musicViewModel.updateProgress()
-            while (uiState.isPlaying) {
-                delay(300)
-                musicViewModel.updateProgress()
-            }
-        }
-    }
 
     if (currentTrack == null) {
         if (uiState.isLoading) {
@@ -863,16 +852,13 @@ internal fun PlayerBannerMetadata(track: Track, compact: Boolean, onArtistClick:
 @Composable
 private fun ClockedPlayerArtwork(state: MusicUiState, track: Track, lyrics: Boolean,
     music: MusicViewModel, tablet: Boolean, toggleLyrics: () -> Unit) {
-    val positionFlow = remember(music) { music.uiState.map { it.position }.distinctUntilChanged() }
-    val position = if (lyrics) positionFlow.collectAsStateWithLifecycle(initialValue = music.uiState.value.position).value else 0L
     PlayerArtwork(queue = state.queue, queueIndex = state.queueIndex, currentTrack = track,
-        currentPosition = position, showLyrics = lyrics, musicViewModel = music,
+        currentPosition = state.position, showLyrics = lyrics, musicViewModel = music,
         isTablet = tablet, onToggleLyrics = toggleLyrics)
 }
 
 @Composable
 private fun ClockedPlayerProgress(state: MusicUiState, music: MusicViewModel, modifier: Modifier) {
-    val positionFlow = remember(music) { music.uiState.map { it.position }.distinctUntilChanged() }
-    val position by positionFlow.collectAsStateWithLifecycle(initialValue = music.uiState.value.position)
-    PlayerProgress(currentPosition = position, uiState = state.copy(position = position), musicViewModel = music, modifier = modifier)
+    val progress by music.playbackProgress.collectAsStateWithLifecycle()
+    PlayerProgress(currentPosition = progress.positionMs, uiState = state.copy(position = progress.positionMs, duration = progress.durationMs.takeIf { it > 0 } ?: state.duration), musicViewModel = music, modifier = modifier)
 }

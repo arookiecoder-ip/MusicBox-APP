@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -191,13 +192,17 @@ private fun ArtworkCardContent(
                 1f to androidx.compose.ui.graphics.Color.Transparent)))
 
         if (showLyrics) {
-            LyricsOverlay(
-                currentTrack = track,
-                currentPosition = currentPosition,
-                musicViewModel = musicViewModel,
-                isTablet = isTablet,
-                onDismiss = onToggleLyrics
-            )
+            ClockedLyricsOverlay(track, currentPosition, musicViewModel, isTablet, onToggleLyrics)
         }
     }
+}
+
+/** Lyrics own their clock subscription; the cover and artwork pager remain static. */
+@Composable
+private fun ClockedLyricsOverlay(track: Track, fallbackPosition: Long, music: MusicViewModel,
+    tablet: Boolean, dismiss: () -> Unit) {
+    val progress by music.playbackProgress.collectAsStateWithLifecycle()
+    LyricsOverlay(currentTrack = track,
+        currentPosition = if (music.uiState.value.currentTrack?.uuid == track.uuid) progress.positionMs else fallbackPosition,
+        musicViewModel = music, isTablet = tablet, onDismiss = dismiss)
 }

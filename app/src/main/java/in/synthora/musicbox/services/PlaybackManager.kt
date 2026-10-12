@@ -116,12 +116,15 @@ class PlaybackManager private constructor(private val context: Context) {
 
     private val _snapshot = MutableStateFlow(PhonePlaybackSnapshot())
     val snapshot: StateFlow<PhonePlaybackSnapshot> = _snapshot.asStateFlow()
+    private val _cursorRevision = MutableStateFlow(0L)
+    val cursorRevision: StateFlow<Long> = _cursorRevision.asStateFlow()
     private var connectionFailures = 0
     private var connectionRetry: kotlinx.coroutines.Job? = null
     private var pendingQueueAction: ((MediaController) -> Unit)? = null
     private var userQueueRequested = false
     private var pausedAtMs = android.os.SystemClock.elapsedRealtime()
     private fun publishSnapshot(ctrl: MediaController) {
+        _cursorRevision.value++
         _snapshot.value = PhonePlaybackSnapshot((0 until ctrl.mediaItemCount).map { ctrl.getMediaItemAt(it).mediaId },
             ctrl.currentMediaItem?.mediaId, ctrl.currentMediaItem?.let { item ->
                 val metadata = ctrl.mediaMetadata
@@ -248,6 +251,9 @@ class PlaybackManager private constructor(private val context: Context) {
                     // Add a Player.Listener on the controller's underlying player
                     playerListener = object : Player.Listener {
                         override fun onEvents(player: Player, events: Player.Events) {
+                            if (events.contains(Player.EVENT_POSITION_DISCONTINUITY) ||
+                                events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
+                                events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)) _cursorRevision.value++
                             if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED))
                                 controller?.let(::publishSnapshot)
                         }
@@ -393,12 +399,8 @@ class PlaybackManager private constructor(private val context: Context) {
                                     Log.d(TAG, "Polled controller index updated: $currentIndex")
                                 }
 
-                                // Save position every 5 seconds when playing
-                                if (playing) {
-                                    withContext(Dispatchers.Main) {
-                                        savePlaybackState()
-                                    }
-                                }
+                                // PlaybackService owns the periodic resume save. Controller
+                                // polling is only a fallback for missed player events.
                                 kotlinx.coroutines.delay(5000)
                             } catch (e: Exception) {
                                 Log.w(TAG, "Polling loop error: ${e.message}")

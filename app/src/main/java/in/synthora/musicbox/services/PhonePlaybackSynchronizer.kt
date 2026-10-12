@@ -119,14 +119,15 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                 if (claim.isBlank() || PhonePlaybackOwnership.localHandoff || !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                 try {
                     val mediaId = player.currentMediaItem?.mediaId
-                    val current = mediaId?.let { trackById(it) } ?: continue
-                    if (player.currentMediaItem?.mediaId != mediaId ||
-                        !canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff) ||
-                        !PhonePlaybackOwnership.permitsPlayback(claim)) continue
-                    val cursor = PublishedCursor(claim, current.uuid, player.isPlaying,
+                    if (mediaId == null) continue
+                    val cursor = PublishedCursor(claim, mediaId, player.isPlaying,
                         player.playbackState == Player.STATE_BUFFERING, player.currentPosition.coerceAtLeast(0),
                         android.os.SystemClock.elapsedRealtime())
                     if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || !cursor.needsPublication(published)) continue
+                    val current = trackById(mediaId) ?: continue
+                    if (player.currentMediaItem?.mediaId != mediaId ||
+                        !canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff) ||
+                        !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                     current.ytVideoId?.takeIf { it.isNotBlank() }?.let { video ->
                         val completed = withTimeoutOrNull(4_000) {
                             `in`.synthora.musicbox.network.AlexaBackendApi.updateQueue("current", video, emptyList(),

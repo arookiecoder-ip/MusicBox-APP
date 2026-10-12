@@ -21,6 +21,45 @@ import java.util.concurrent.atomic.AtomicBoolean
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class UpcomingAudioPreloaderTest {
+    @Test fun powerConstraintsPreserveCurrentCacheAndResumeAllFiveLazySongsAfterRecovery() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "power-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val acquired = AtomicInteger()
+        val released = AtomicInteger()
+        var power = PreloadPowerState(batterySaver = true)
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val preloader = UpcomingAudioPreloader(CacheDataSource.Factory().setCache(cache)
+            .setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }, childScope,
+            policyOverride = { preloadPolicy(true, false, true, false, power) }, guardFactory = {
+                acquired.incrementAndGet()
+                object : AudioDownloadGuard {
+                    override fun progress() {}
+                    override fun close() { released.incrementAndGet() }
+                }
+            })
+        val current = "https://audio.example/current"
+        val next = (1..5).map { "https://audio.example/next$it" }
+        suspend fun finish() { withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } } }
+        try {
+            preloader.update(next, currentUrl = current); finish()
+            assertTrue(cache.isCached(current, 0, 8_192))
+            preloader.update(next, currentUrl = current); finish()
+            next.forEach { assertFalse(cache.isCached(it, 0, 8_192)) }
+            assertEquals(1, acquired.get()); assertEquals(1, released.get())
+            power = PreloadPowerState()
+            preloader.update(next, currentUrl = current); finish()
+            next.forEach { assertTrue(cache.isCached(it, 0, 8_192)) }
+            cache.removeResource(current)
+            power = PreloadPowerState(thermalStatus = 4)
+            preloader.update(next, currentUrl = current); finish()
+            assertTrue(cache.isCached(current, 0, 8_192))
+            assertEquals(2, acquired.get()); assertEquals(2, released.get())
+        } finally {
+            preloader.clearAndAwait(); childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
+
     @Test fun lazyFailureDoesNotDelaySelectedSongButServerRateLimitStillApplies() = runBlocking {
         for (limited in listOf(false, true)) {
             val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "retry-promotion-${System.nanoTime()}")

@@ -158,7 +158,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Ticks the Echo progress while the player screen asks for updates.
-    private val _tick = MutableStateFlow(0L)
     private val _colors = MutableStateFlow<ExtractedColors?>(null)
     /** Lyrics fetched for Echo songs, keyed by video id (phone songs keep theirs in the database). */
     private val _echoLyrics = MutableStateFlow<Map<String, Track>>(emptyMap())
@@ -182,7 +181,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _uiState,
         echo.state,
         AccountRepository.liked,
-        combine(_tick, _colors, _echoLyrics) { _, colors, lyrics -> colors to lyrics }
+        combine(_colors, _echoLyrics) { colors, lyrics -> colors to lyrics }
     ) { output, phone, echoState, liked, (colors, lyrics) ->
         val state = if (output != PlaybackOutput.PHONE) echoUiState(echoState, lyrics) else phone
         state.copy(
@@ -199,6 +198,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val phoneQueueMutex = kotlinx.coroutines.sync.Mutex()
     private var sharedPhoneQueueReady = false
     private var serverPlaybackChecked = false
+    private var phoneQueueCheckVersion = -1L
+    private var phoneQueueCheckToken = ""
     private var playbackRequestId = 0L
 
     private val remoteTransportPreview = MutableStateFlow<`in`.synthora.musicbox.services.RemoteTransportPreview?>(null)
@@ -429,7 +430,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (current.ytVideoId.isNullOrBlank()) continue
                 val claim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
                 try {
-                    val snapshot = AlexaBackendApi.phoneQueueSnapshot()
+                    val snapshot = AlexaBackendApi.phoneQueueSnapshot(
+                        phoneQueueCheckVersion.takeIf { phoneQueueCheckToken == claim })
                     if (claim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token || state != _uiState.value) continue
                     val output = `in`.synthora.musicbox.services.sharedPlaybackOutput(snapshot)
                     if (!output.belongsToPhone(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId,
@@ -437,8 +439,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         if (output.mode == "alexa") adoptRemoteAlexa(output, claim)
                         continue
                     }
-                    val serverIds = snapshot.array("queue").map { it.objectOrEmpty().text("video_id") }
-                    if (serverIds != state.queue.map { it.ytVideoId }) {
+                    val differs = if (snapshot.containsKey("queue")) withContext(Dispatchers.Default) {
+                        snapshot.array("queue").map { it.objectOrEmpty().text("video_id") } != state.queue.map { it.ytVideoId }
+                    } else false // A matching queue_version omits the unchanged queue, rather than clearing it.
+                    if (claim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token || state != _uiState.value) continue
+                    phoneQueueCheckToken = claim
+                    phoneQueueCheckVersion = if (differs) -1 else snapshot["queue_version"]?.toString()?.toLongOrNull() ?: -1
+                    if (differs) {
                         synchronizePhoneQueue()
                         continue
                     }
@@ -741,7 +748,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         val now = android.os.SystemClock.elapsedRealtime()
         val initial = remoteTransportPreview.value?.takeIf { it.owner == target.owner }
-            ?.present(uiState.value, now) ?: uiState.value
+            ?.present(uiState.value.copy(position = currentPlaybackProgress().positionMs), now)
+            ?: uiState.value.copy(position = currentPlaybackProgress().positionMs)
         val preview = `in`.synthora.musicbox.services.remoteTransportPreview(target.owner, action, initial, now,
             payload["position_ms"]?.toString()?.toLongOrNull()).copy(baselineRevision = echo.state.value.playbackRevision, baselineEpoch = echo.state.value.sharedOutput.epoch)
         val sequence = ++remoteTransportSequence
@@ -953,6 +961,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var remotePhoneRefreshJob: Job? = null
+    private val remoteStateRefresh = `in`.synthora.musicbox.services.RemoteStateRefresh()
     private suspend fun onMobileOutput(output: `in`.synthora.musicbox.services.SharedPlaybackOutput) {
         if (!signedIn || `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff) return
         val ownId = `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId
@@ -983,9 +992,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _remoteMobileOutput.value = output
             setOutputPreference(PlaybackOutput.REMOTE_PHONE)
             echo.phoneDisconnected(output)
-            if (remotePhoneRefreshJob?.isActive != true) remotePhoneRefreshJob = viewModelScope.launch {
-                runEcho { echo.refreshSharedPhone() }
-            }
+            if (remotePhoneRefreshJob?.isActive != true && remoteStateRefresh.needed(output, android.os.SystemClock.elapsedRealtime()))
+                remotePhoneRefreshJob = viewModelScope.launch {
+                    runEcho {
+                        echo.refreshSharedPhone()
+                        remoteStateRefresh.completed(output, android.os.SystemClock.elapsedRealtime())
+                    }
+                }
             updatePolling()
         } else if (output.mode == "alexa" && !isAlexa && echo.serial.value.isNotBlank()) adoptRemoteAlexa(output)
     }
@@ -2075,23 +2088,32 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(position = positionMs) }
     }
 
-    fun updateProgress() {
+    /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
+    private fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
+        val state = uiState.value
         if (isAlexa || isRemotePhone) {
-            _tick.value++
-            return
+            val echoState = echo.state.value
+            if (state.currentTrack?.ytVideoId != echoState.track?.ytVideoId)
+                return `in`.synthora.musicbox.services.PlaybackProgress(state.position, state.duration)
+            val now = android.os.SystemClock.elapsedRealtime()
+            val live = state.copy(position = echoState.livePosition(now))
+            val shown = remoteTransportPreview.value?.takeIf { isRemotePhone && it.owner == _remoteMobileOutput.value.owner }
+                ?.present(live, now) ?: live
+            return `in`.synthora.musicbox.services.PlaybackProgress(shown.position, shown.duration)
         }
-        // The destination's previous Media3 item is not the transferred song's clock.
-        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff ||
-            playbackManager.snapshot.value.currentId != _uiState.value.currentTrack?.uuid) return
-        val currentPos = playbackManager.getCurrentPosition()
-        val durationMs = playbackManager.getDuration()
-        _uiState.update { state ->
-            state.copy(
-                position = currentPos,
-                duration = if (durationMs > 0) durationMs else state.duration
-            )
-        }
+        val matches = !`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff &&
+            playbackManager.snapshot.value.currentId == state.currentTrack?.uuid && !idlePhoneSelection
+        return `in`.synthora.musicbox.services.PlaybackProgress(
+            if (matches) playbackManager.getCurrentPosition() else state.position,
+            if (matches) playbackManager.getDuration().takeIf { it > 0 } ?: state.duration else state.duration)
     }
+
+    val playbackProgress = `in`.synthora.musicbox.services.playbackClock(viewModelScope,
+        combine(uiState, _output, playbackManager.cursorRevision) { state, output, revision ->
+            `in`.synthora.musicbox.services.PlaybackClockState(state.currentTrack?.uuid, output.name,
+                state.isPlaying, state.isLoading, state.position, state.duration,
+                if (output == PlaybackOutput.PHONE) revision else 0)
+        }, read = { currentPlaybackProgress() })
 
     /** Echo volume (0–100), shown by the player's volume slider. */
     val echoVolume: StateFlow<Int?> = echo.state.map { it.volume }

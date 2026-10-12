@@ -57,6 +57,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -79,6 +82,8 @@ import `in`.synthora.musicbox.ui.screens.parseSyncedLyrics
 import `in`.synthora.musicbox.utils.LyricsRomanizer
 import `in`.synthora.musicbox.utils.rememberJukeHaptics
 import `in`.synthora.musicbox.viewmodels.MusicViewModel
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
 
 /** Returns true if the lyric line contains only musical notation symbols / whitespace.
@@ -113,7 +118,7 @@ private fun computeAdaptiveLyricsGapThreshold(lyrics: List<LyricLine>): Long {
     return (median * 2.2).toLong().coerceIn(1_800L, 12_000L)
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun MiniPlayer(
     musicViewModel: MusicViewModel,
@@ -126,7 +131,6 @@ fun MiniPlayer(
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoName = echoDevices.firstOrNull { it.serial == echoSerial }?.name
     val currentTrack = uiState.currentTrack
-    val currentPosition = uiState.position
     val isPlaying = uiState.isPlaying
     val isRomanizedLyricsEnabled by musicViewModel.isRomanizedLyricsEnabled.collectAsStateWithLifecycle()
     val isMiniPlayerLyricsEnabled by musicViewModel.isMiniPlayerLyricsEnabled.collectAsStateWithLifecycle()
@@ -136,16 +140,6 @@ fun MiniPlayer(
     // Power tools → Gestures: optional double-tap and long-press shortcuts on the mini player.
     val gesturePrefs = remember { context.getSharedPreferences("power_prefs", android.content.Context.MODE_PRIVATE) }
 
-    // Poll for progress updates when playing
-    val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(lifecycleOwner, uiState.isPlaying) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (uiState.isPlaying) {
-                musicViewModel.updateProgress()
-                delay(300)
-            }
-        }
-    }
 
     if (currentTrack != null) {
         // Live drag offset of the card; animates off-screen on a committed swipe and back on a cancel.
@@ -169,9 +163,9 @@ fun MiniPlayer(
             currentTrack.uuid,
             currentTrack.syncedLyrics,
             currentTrack.romanizedSyncedLyrics,
-            isRomanizedLyricsEnabled
+            isRomanizedLyricsEnabled, isMiniPlayerLyricsEnabled
         ) {
-            if (!isRomanizedLyricsEnabled) {
+            if (!isRomanizedLyricsEnabled || !isMiniPlayerLyricsEnabled) {
                 romanizedSyncedLyrics = null
                 return@LaunchedEffect
             }
@@ -202,14 +196,12 @@ fun MiniPlayer(
         }
 
         // Parse synced lyrics once per source/offset change for smooth real-time updates.
-        val parsedLyrics = remember(
-            currentTrack.uuid,
-            syncedLyricsForMini,
-            currentTrack.lyricsOffsetMs
-        ) {
-            syncedLyricsForMini?.let {
-                parseSyncedLyrics(it, currentTrack.lyricsOffsetMs)
-            } ?: emptyList()
+        val parsedLyrics by androidx.compose.runtime.produceState<List<LyricLine>>(emptyList(),
+            currentTrack.uuid, syncedLyricsForMini, currentTrack.lyricsOffsetMs, isMiniPlayerLyricsEnabled) {
+            value = emptyList()
+            if (isMiniPlayerLyricsEnabled) value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
+                syncedLyricsForMini?.let { parseSyncedLyrics(it, currentTrack.lyricsOffsetMs) } ?: emptyList()
+            }
         }
 
         // Compute the adaptive gap threshold once per lyric set so it adapts to
@@ -218,45 +210,45 @@ fun MiniPlayer(
             computeAdaptiveLyricsGapThreshold(parsedLyrics)
         }
 
-        val activeLyric = remember(
-            currentPosition,
-            parsedLyrics,
-            isPlaying,
-            isMiniPlayerLyricsEnabled
-        ) {
-            if (!isMiniPlayerLyricsEnabled || !isPlaying || parsedLyrics.isEmpty()) {
-                null
-            } else {
-                val activeIndex = parsedLyrics.indexOfLast { it.timeMs <= currentPosition }
-                if (activeIndex == -1) {
+        val lyricFlow = remember(musicViewModel, parsedLyrics, gapThreshold, isPlaying, isMiniPlayerLyricsEnabled) {
+            musicViewModel.playbackProgress.map { progress ->
+                val currentPosition = progress.positionMs
+                if (!isMiniPlayerLyricsEnabled || !isPlaying || parsedLyrics.isEmpty()) {
                     null
                 } else {
-                    val currentLine = parsedLyrics[activeIndex]
-                    val nextLine = parsedLyrics.getOrNull(activeIndex + 1)
-
-                    // --- Condition 1: music-symbol-only lines are instrumentation markers ---
-                    // Lines like "♪", "(♫)", etc. indicate a musical interlude; treat as blank.
-                    if (isMusicOnlyLine(currentLine.text)) return@remember null
-
-                    val shouldShowLine = if (nextLine != null) {
-                        val msUntilNext = nextLine.timeMs - currentPosition
-                        // --- Condition 2: adaptive gap detection ---
-                        // `gapThreshold` is derived from the song's own median inter-line gap
-                        // (× 2.2), so it naturally tolerates long sung phrases while still
-                        // falling back during genuine instrumental silences.
-                        msUntilNext > 0 && (currentPosition - currentLine.timeMs) < gapThreshold
+                    val activeIndex = `in`.synthora.musicbox.utils.lyricIndexAt(parsedLyrics.size, currentPosition) { parsedLyrics[it].timeMs }
+                    if (activeIndex == -1) {
+                        null
                     } else {
-                        // Avoid pinning the final lyric line during long instrumental outros.
-                        (currentPosition - currentLine.timeMs) <= 4500L
-                    }
+                        val currentLine = parsedLyrics[activeIndex]
+                        val nextLine = parsedLyrics.getOrNull(activeIndex + 1)
 
-                    if (shouldShowLine) currentLine.text.takeIf { it.isNotBlank() } else null
+                        // --- Condition 1: music-symbol-only lines are instrumentation markers ---
+                        // Lines like "♪", "(♫)", etc. indicate a musical interlude; treat as blank.
+                        if (isMusicOnlyLine(currentLine.text)) return@map null
+
+                        val shouldShowLine = if (nextLine != null) {
+                            val msUntilNext = nextLine.timeMs - currentPosition
+                            // --- Condition 2: adaptive gap detection ---
+                            // `gapThreshold` is derived from the song's own median inter-line gap
+                            // (× 2.2), so it naturally tolerates long sung phrases while still
+                            // falling back during genuine instrumental silences.
+                            msUntilNext > 0 && (currentPosition - currentLine.timeMs) < gapThreshold
+                        } else {
+                            // Avoid pinning the final lyric line during long instrumental outros.
+                            (currentPosition - currentLine.timeMs) <= 4500L
+                        }
+
+                        if (shouldShowLine) currentLine.text.takeIf { it.isNotBlank() } else null
+                    }
                 }
-            }
+            }.distinctUntilChanged()
         }
+        val activeLyric by lyricFlow.collectAsStateWithLifecycle(initialValue = null)
 
         Box(
             modifier = modifier
+                .semantics { testTagsAsResourceId = true }.testTag("mini_player")
                 .fillMaxWidth()
                 .glassFloat(GlassShapes.Bar, GlassLevel.Regular)
                 .clipToBounds()
@@ -439,12 +431,7 @@ fun MiniPlayer(
                     }
             }
             // Keep the line fixed to both dock edges, including during a track swipe.
-            val progress = if (uiState.duration > 0)
-                (uiState.position.toFloat() / uiState.duration).coerceIn(0f, 1f) else 0f
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(1.dp)
-                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f))) {
-                Box(Modifier.fillMaxWidth(progress).height(1.dp).background(MaterialTheme.colorScheme.primary))
-            }
+            MiniPlayerProgress(musicViewModel, Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(1.dp))
 
         }
     }
@@ -487,5 +474,17 @@ private fun MiniPlayerGlideCard(track: Track, modifier: Modifier = Modifier) {
             )
         }
 
+    }
+}
+
+/** Read the clock in the draw phase: only the thin line redraws on progress ticks. */
+@Composable
+private fun MiniPlayerProgress(music: MusicViewModel, modifier: Modifier) {
+    val progress = music.playbackProgress.collectAsStateWithLifecycle()
+    val background = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+    val foreground = MaterialTheme.colorScheme.primary
+    androidx.compose.foundation.Canvas(modifier) {
+        drawRect(background)
+        drawRect(foreground, size = androidx.compose.ui.geometry.Size(size.width * progress.value.fraction, size.height))
     }
 }

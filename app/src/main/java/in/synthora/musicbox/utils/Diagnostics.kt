@@ -33,6 +33,7 @@ object Diagnostics {
         buildString {
             appendLine("Music Box diagnostics")
             appendLine("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Build: ${BuildConfig.BUILD_TYPE}, debuggable=${BuildConfig.DEBUG}")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine()
             appendLine("Last saved crash:")

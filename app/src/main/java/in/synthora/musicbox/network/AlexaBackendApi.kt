@@ -159,9 +159,11 @@ object AlexaBackendApi {
         reply["queue_version"]?.let { phoneQueueVersion.set(reply.number("queue_version")) }
     }
 
-    suspend fun phoneQueueSnapshot(): kotlinx.serialization.json.JsonObject {
+    suspend fun phoneQueueSnapshot(queueVersion: Long? = null): kotlinx.serialization.json.JsonObject {
         requireConfigured()
-        return Backend.get("/alexa/now_playing/", mapOf("serial" to "phone")).jsonObject
+        val params = mapOf("serial" to "phone") +
+            (queueVersion?.takeIf { it >= 0 }?.let { mapOf("queue_version" to it.toString()) } ?: emptyMap())
+        return Backend.get("/alexa/now_playing/", params).jsonObject
     }
 
     suspend fun phoneOutputStatus(): `in`.synthora.musicbox.services.SharedPlaybackOutput {
