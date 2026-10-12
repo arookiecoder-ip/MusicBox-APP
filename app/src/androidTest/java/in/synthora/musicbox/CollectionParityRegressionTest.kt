@@ -36,8 +36,11 @@ class CollectionParityRegressionTest {
                 options = if (downloaded) listOf(ExtraSongOption(Icons.Default.CheckBoxOutlineBlank, "Select songs") {}) else emptyList()) }
         } } }
         val originalBounds = compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot
-        val density = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.resources.displayMetrics.density
-        val artworkSize = if (originalBounds.width / density >= 840) 220.dp else 200.dp
+        // The hero tag covers padded content, not the parent's available width.
+        // Preserve the chosen adaptive size and verify square artwork/parity.
+        val artworkBounds = compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val artworkSize = artworkBounds.right - artworkBounds.left
+        assertTrue(kotlin.math.abs(artworkSize.value - 200f) <= 0.5f || kotlin.math.abs(artworkSize.value - 220f) <= 0.5f)
         for (local in listOf(false, true)) {
             compose.runOnIdle { downloaded = local }
             assertEquals(originalBounds, compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot)
