@@ -6,7 +6,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-purple.svg)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-UI-blue.svg)](https://developer.android.com/jetpack/compose)
 [![Min SDK](https://img.shields.io/badge/Min%20SDK-26-orange.svg)](https://developer.android.com/about/versions/oreo)
-[![Version](https://img.shields.io/badge/Version-2.4.30-green.svg)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
+[![Version](https://img.shields.io/badge/Version-2.4.40-green.svg)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 **A modern Android music player with smart recommendations, offline playback, and shared phone + Alexa output**
@@ -19,7 +19,7 @@
 
 ## 📦 Latest Release
 
-**The current source version is 2.4.30.** See GitHub Releases for published APKs. 🚀
+**The current source version is 2.4.40.** See GitHub Releases for published APKs. 🚀
 
 Update-compatible signed build: installs over previous releases without uninstalling, with optimized/shrunk packaging and release-only logging.
 

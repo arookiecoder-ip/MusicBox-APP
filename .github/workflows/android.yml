@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [beta, main]
+    branches: [beta, main, feat/alexa-backend]
   pull_request:
   workflow_dispatch:
 

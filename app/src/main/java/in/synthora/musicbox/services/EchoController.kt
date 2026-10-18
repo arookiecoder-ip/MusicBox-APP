@@ -551,8 +551,6 @@ class EchoController(
     fun clear() {
         mutationEpoch++
         refreshedAt = 0L
-        transportIntent++
-        transportConfirmationJob?.cancel()
         stopPolling()
         pendingSeek = null
         seekIntent++
