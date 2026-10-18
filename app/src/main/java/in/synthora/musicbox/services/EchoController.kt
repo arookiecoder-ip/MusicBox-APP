@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
@@ -46,7 +47,9 @@ class EchoController(
     private val scope: CoroutineScope,
     private val prefs: SharedPreferences,
     private val onError: (String) -> Unit,
-    private val onSignedOut: () -> Unit
+    private val onSignedOut: () -> Unit,
+    private val read: suspend (String, Map<String, String>) -> JsonElement = Backend::get,
+    private val write: suspend (String, JsonObject) -> JsonElement = Backend::post
 ) {
     private val _devices = MutableStateFlow<List<EchoDevice>>(emptyList())
     val devices: StateFlow<List<EchoDevice>> = _devices.asStateFlow()
@@ -98,8 +101,10 @@ class EchoController(
 
     /** Load the Echo list and the current now-playing in one request. */
     suspend fun loadDevices(): Boolean {
+        val epoch = mutationEpoch
         val saved = _serial.value
-        val init = Backend.get("/alexa/init/", if (saved.isNotBlank()) mapOf("serial" to saved) else emptyMap()).objectOrEmpty()
+        val init = read("/alexa/init/", if (saved.isNotBlank()) mapOf("serial" to saved) else emptyMap()).objectOrEmpty()
+        if (epoch != mutationEpoch) return false
         val loggedIn = init["status"].objectOrEmpty().flag("logged_in")
         _amazonConnected.value = loggedIn
         val list = init.array("devices").map { it.objectOrEmpty() }.map {
@@ -114,7 +119,9 @@ class EchoController(
 
     /** Refresh presence without changing playback, artwork or the selected output. */
     suspend fun refreshDeviceStatus() {
-        val response = Backend.get("/alexa/devices/").objectOrEmpty()
+        val epoch = mutationEpoch
+        val response = read("/alexa/devices/", emptyMap()).objectOrEmpty()
+        if (epoch != mutationEpoch) return
         _devices.value = response.array("devices").map { it.objectOrEmpty() }.map {
             EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
         }.filter { it.serial.isNotBlank() }
@@ -185,7 +192,7 @@ class EchoController(
         if (!force && SystemClock.elapsedRealtime() - refreshedAt < 200) return
         val np = pollLock.withLock {
             val epoch = mutationEpoch
-            val response = Backend.get("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
+            val response = read("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
             if (serial != _serial.value || epoch != mutationEpoch) null
             else response.also {
                 apply(it)
@@ -205,12 +212,13 @@ class EchoController(
         val now = SystemClock.elapsedRealtime()
         if (force || now - lastVolumeRefresh > (if (_state.value.playing && pollingForeground) 15_000 else 60_000)) {
             lastVolumeRefresh = now
+            val epoch = mutationEpoch
             // Volume/account refresh must never hold up playback confirmation.
             val readSequence = volumeSeq
             scope.launch { safely {
-                val volume = Backend.get("/alexa/volume/", mapOf("serial" to serial)).objectOrEmpty()
+                val volume = read("/alexa/volume/", mapOf("serial" to serial)).objectOrEmpty()
                 val value = (volume["volume"] as? JsonPrimitive)?.intOrNull
-                if (serial == _serial.value && readSequence == volumeSeq && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
+                if (epoch == mutationEpoch && serial == _serial.value && readSequence == volumeSeq && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
                     _state.update { it.copy(volume = value.coerceIn(0, 100)) }
                 }
             } }
@@ -239,7 +247,7 @@ class EchoController(
 
     suspend fun refreshSharedPhone() {
         val epoch = mutationEpoch
-        val np = Backend.get("/alexa/now_playing/", mapOf("serial" to "phone",
+        val np = read("/alexa/now_playing/", mapOf("serial" to "phone",
             "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
         if (epoch == mutationEpoch) apply(np)
     }
@@ -255,7 +263,7 @@ class EchoController(
     private suspend fun send(path: String, body: JsonObject) {
         mutationEpoch++
         refreshedAt = 0
-        try { Backend.post(path, body) }
+        try { write(path, body) }
         finally { mutationEpoch++; refreshedAt = 0 }
     }
 
