@@ -42,6 +42,15 @@ data class EchoState(
     }
 }
 
+/** Playback revisions reset across output generations and server restarts. */
+internal fun EchoState.supersedes(previous: EchoState): Boolean {
+    val output = sharedOutput
+    val old = previous.sharedOutput
+    if (output.epoch.isBlank() || output.epoch != old.epoch) return true
+    if (output.revision != old.revision) return output.revision > old.revision
+    return playbackRevision < 0 || previous.playbackRevision < 0 || playbackRevision >= previous.playbackRevision
+}
+
 /** Decode the shared web-remote snapshot without turning unknown fields into real values. */
 internal fun parseEchoSnapshot(np: JsonObject, now: Long, previousVolume: Int?, preserveVolume: Boolean, previousQueue: List<Track> = emptyList(), previous: EchoState? = null): EchoState {
     val decodedQueue = if (np["queue"] == null) previousQueue else np.array("queue").mapIndexedNotNull { i, raw ->

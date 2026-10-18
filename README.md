@@ -6,7 +6,7 @@
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-purple.svg)](https://kotlinlang.org/)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-UI-blue.svg)](https://developer.android.com/jetpack/compose)
 [![Min SDK](https://img.shields.io/badge/Min%20SDK-26-orange.svg)](https://developer.android.com/about/versions/oreo)
-[![Version](https://img.shields.io/badge/Version-2.4.0-green.svg)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
+[![Version](https://img.shields.io/badge/Version-2.4.30-green.svg)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
 
 **A modern Android music player with smart recommendations, offline playback, and shared phone + Alexa output**
@@ -19,7 +19,7 @@
 
 ## 📦 Latest Release
 
-**Music Box v2.4.0** is the current stable release. 🚀
+**The current source version is 2.4.30.** See GitHub Releases for published APKs. 🚀
 
 Update-compatible signed build: installs over previous releases without uninstalling, with optimized/shrunk packaging and release-only logging.
 
@@ -99,14 +99,13 @@ git clone https://github.com/arookiecoder-ip/MusicBox-APP.git
 cd MusicBox-APP
 ```
 
-Create `local.properties` in the project root with your keys:
+Create `local.properties` in the project root with your backend and analytics configuration:
 
 ```properties
 POSTHOG_API_KEY=your_key_here
 POSTHOG_HOST=https://your-posthog-host
 ALEXA_SESSION_BASE_URL=https://your-session-server
 ALEXA_BASE_URL=https://your-audio-server
-ALEXA_API_KEY=your_key_here
 ```
 
 Then build and install the debug variant:
@@ -125,10 +124,24 @@ Release (signed, optimized) builds are produced by CI: dispatch the **Android Fe
 | UI       | Jetpack Compose (Material 3), Coil image loading                        |
 | Playback | Media3 ExoPlayer, MediaSession                                         |
 | Data     | Room database, Kotlin Coroutines + StateFlow                            |
-| Network  | Ktor client, Spotify / YouTube Music / LRCLib APIs                     |
+| Network  | Ktor client, authenticated Music Box backend / lyrics APIs                     |
 | Language | Kotlin 2.0.21, Java 11 bytecode                                         |
 
 Project layout: `app/src/main/java/in/synthora/musicbox/` — `network/`, `services/` (playback, queue, updates), `ui/screens/` + `ui/components/`, `viewmodels/`, `database/`, `models/`, `utils/`.
+
+## Playback architecture and validation
+
+The Android client uses native Media3 playback and Room-backed downloads. Account,
+Home, library and device controls use the authenticated self-hosted backend.
+Audio-only credentials are issued by the backend; new APKs embed no global server key.
+See [the playback contract](docs/PLAYBACK_ARCHITECTURE.md) for ownership, queue
+revisions, restart behavior, polling and deployment order.
+
+Every pull request runs all debug JVM tests and compiles a debug APK in **Android CI**.
+The run uploads `android-unit-tests` and `music-box-review-apk` artifacts. The review
+APK uses the runner's debug identity; use the existing signed Feature Build workflow
+for an APK that updates an installed release. CI does not contact the production
+server or require account credentials.
 
 ## 🤝 Contributing
 

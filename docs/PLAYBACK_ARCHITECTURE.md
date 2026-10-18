@@ -31,3 +31,16 @@ Deploy the matching backend change **before installing the new APK**: new builds
 A disconnected server cannot enforce exclusivity between an offline phone and an Echo. Completed local downloads retain the existing offline playback policy; online streaming stops at lease expiry. Reconnection reconciles ownership before online playback resumes. This distributed limitation cannot be solved by polling alone.
 
 Actions runs focused JVM tests and signs the APK with the existing certificate. Backend tests exercise real Flask middleware/token issuance/range serving against temporary storage, plus queue and ownership handlers with physical Echo calls stubbed. UI/emulator tests are disabled. Physical device/Alexa behavior is not claimed as tested by these checks.
+
+## Snapshot ordering and review builds
+
+Playback snapshots are accepted in output-epoch/output-revision order. Within one
+output generation, both Echo and phone snapshots reject lower playback revisions.
+A new output generation or server restart may reset the playback revision. Rejected
+commands restore their previous content with a **newer** backend revision, so the
+rollback is observable. Deploy the matching backend before the Android change.
+Requests crossing device selection, a command, or sign-out are discarded.
+
+`Android CI` runs the entire debug JVM suite and `assembleDebug` for all pull
+requests, including feature branches. XML results and a review APK are uploaded.
+The existing stable signing workflow remains the path for update-compatible APKs.

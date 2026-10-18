@@ -125,6 +125,8 @@ class EchoController(
     }
 
     private fun setSerial(serial: String) {
+        mutationEpoch++
+        refreshedAt = 0L
         volumeJob?.cancel()
         volumeSeq++
         volumeGraceUntil = 0L
@@ -176,13 +178,13 @@ class EchoController(
         if (!force && SystemClock.elapsedRealtime() - refreshedAt < 200) return
         val np = pollLock.withLock {
             val epoch = mutationEpoch
-            Backend.get("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty().also {
-                if (serial == _serial.value && epoch == mutationEpoch) {
-                    apply(it)
-                    refreshedAt = SystemClock.elapsedRealtime()
-                }
+            val response = Backend.get("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
+            if (serial != _serial.value || epoch != mutationEpoch) null
+            else response.also {
+                apply(it)
+                refreshedAt = SystemClock.elapsedRealtime()
             }
-        }
+        } ?: return
         if (serial != _serial.value) return
         np["playback_error"].objectOrEmpty().text("message").takeIf { it.isNotBlank() }?.let(onError)
         if (stateOnly) return
@@ -208,16 +210,16 @@ class EchoController(
     }
 
     private suspend fun apply(np: JsonObject) {
+        val epoch = mutationEpoch
         val now = SystemClock.elapsedRealtime()
         val previous = _state.value
         val preserveVolume = now < volumeGraceUntil
         val parsed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             parseEchoSnapshot(np, now, previous.volume, preserveVolume, previous.queue, previous)
         }
+        if (epoch != mutationEpoch) return
         if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return
-        if (parsed.sharedOutput.mode == "phone" && parsed.sharedOutput.epoch.isNotBlank() &&
-            parsed.sharedOutput.epoch == previous.sharedOutput.epoch && parsed.sharedOutput.owner == previous.sharedOutput.owner &&
-            parsed.playbackRevision >= 0 && parsed.playbackRevision < previous.playbackRevision) return
+        if (!parsed.supersedes(previous)) return
         // A pause, close or volume preview during decoding wins over this response.
         _state.compareAndSet(previous, parsed)
     }
@@ -225,9 +227,10 @@ class EchoController(
     suspend fun applySharedSnapshot(snapshot: JsonObject) { apply(snapshot) }
 
     suspend fun refreshSharedPhone() {
+        val epoch = mutationEpoch
         val np = Backend.get("/alexa/now_playing/", mapOf("serial" to "phone",
             "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
-        apply(np)
+        if (epoch == mutationEpoch) apply(np)
     }
 
     fun phoneDisconnected(output: SharedPlaybackOutput) {
@@ -494,6 +497,10 @@ class EchoController(
     }
 
     fun clear() {
+        mutationEpoch++
+        refreshedAt = 0L
+        transportIntent++
+        transportConfirmationJob?.cancel()
         stopPolling()
         volumeJob?.cancel()
         volumeSeq++
