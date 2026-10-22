@@ -978,7 +978,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (_isSwitchingOutput.value) return
         if (output.mode == "phone" && output.owner == ownId && !output.handoffPending) {
             if (claim != output.token) {
-                if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.dismissed(output)) return
+                if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.dismissed(output)) {
+                    // Renew control of the idle output, without treating a closed
+                    // task's old lease as an instruction to start its saved queue.
+                    `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(output)
+                    idlePhoneSelection = true
+                    setOutputPreference(PlaybackOutput.PHONE)
+                    return
+                }
                 _isSwitchingOutput.value = true
                 viewModelScope.launch {
                     try { startTransferredPhone(output) }
