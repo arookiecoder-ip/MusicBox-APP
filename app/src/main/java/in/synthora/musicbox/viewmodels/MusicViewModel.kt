@@ -1842,17 +1842,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             serverPlaybackChecked = true
                         } else `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
                         startupClaim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
-                        if (synchronizeQueue && tracks.size == 1 && startupClaim.isNotBlank()) {
-                            // Mirror immediately while stream preparation runs in parallel.
-                            // This state is settled/paused; only real Media3 buffering is loading.
-                            try {
-                                withTimeoutOrNull(1_500) {
-                                    AlexaBackendApi.updateQueue("start", requireNotNull(tracks[0].ytVideoId), tracks.map(AlexaBackendApi::backendTrack),
-                                        playing = false, positionMs = positionMs, queueIndex = 0, expectedToken = startupClaim)
-                                }
-                            } catch (e: CancellationException) { throw e }
-                            catch (_: Exception) { /* Normal publication retries after local playback starts. */ }
-                        }
+                        // Ownership is required before sound. Queue mirroring is not:
+                        // DeviceQueueStartup publishes after installing the player.
+                        // An extra awaited paused report added up to 1.5s even for
+                        // a fully cached song and duplicated the final queue write.
                         playable.await()
                     }
                 },

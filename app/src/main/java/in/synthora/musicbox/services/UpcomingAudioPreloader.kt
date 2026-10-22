@@ -18,7 +18,8 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
     private val nowMs: () -> Long = { android.os.SystemClock.elapsedRealtime() },
     private val demandFactory: DataSource.Factory = factory,
     private val guardFactory: (() -> AudioDownloadGuard)? = null,
-    private val powerState: () -> PreloadPowerState = { preloadPowerState(context) }) {
+    private val powerState: () -> PreloadPowerState = { preloadPowerState(context) },
+    private val onCacheCompleted: () -> Unit = {}) {
     private data class Work(val writer: CacheWriter, val source: CacheDataSource, val job: Job, val demand: Boolean)
     private val work = mutableMapOf<String, Work>()
     private val completed = mutableMapOf<String, Long>()
@@ -74,6 +75,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
             }
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 var changedRepresentation = false
+                var finished = false
                 try {
                     slots.withPermit {
                         try {
@@ -90,6 +92,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
                         if (fullyCached(url)) withContext(Dispatchers.IO) { checkCompletedAudioCache(cache, url) }
                         completed[url] = targetLength
                         retries.remove(url)
+                        finished = true
                     }
                 } catch (e: CancellationException) { throw e }
                 catch (error: Exception) {
@@ -114,6 +117,9 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
                         }
                     }
                     if (work[url]?.writer === writer) work.remove(url)
+                    // Start the lazy tail immediately after the demand file lands,
+                    // rather than waiting for the five-second maintenance tick.
+                    if (finished) onCacheCompleted()
                 }
             }
             work[url] = Work(writer, source, job, demand = url == current); job.start()

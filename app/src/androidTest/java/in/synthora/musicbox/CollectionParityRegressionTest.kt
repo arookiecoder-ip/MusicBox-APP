@@ -1,11 +1,14 @@
 package `in`.synthora.musicbox
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -24,6 +27,43 @@ import org.junit.Test
 
 class CollectionParityRegressionTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun playlistPlayFloatsOnlyAfterDetailsScrollAway() {
+        var played = 0
+        compose.setContent { JUKETheme {
+            val portrait = android.content.res.Configuration(LocalConfiguration.current).apply {
+                orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+                smallestScreenWidthDp = 390
+            }
+            CompositionLocalProvider(LocalConfiguration provides portrait) {
+                AdaptiveDetailLayout(bottomPadding = 0.dp, onFloatingPlay = { played++ },
+                    hero = { Text("Playlist details", Modifier.height(260.dp)) }) {
+                    items(50) { Text("Track $it", Modifier.fillMaxWidth().height(56.dp)) }
+                }
+            }
+        } }
+        compose.onNodeWithText("▶ Play").assertDoesNotExist()
+        compose.onNodeWithTag("Collection tracks").performScrollToIndex(10)
+        compose.onNodeWithText("▶ Play").assertIsDisplayed().performClick()
+        assertEquals(1, played)
+        compose.onNodeWithTag("Collection tracks").performScrollToIndex(0)
+        compose.onNodeWithText("▶ Play").assertDoesNotExist()
+    }
+
+    @Test fun longPlaylistDescriptionCanExpandAndCollapse() {
+        val item = BrowseParser.item(buildJsonObject { put("playlistId", "PLfixture"); put("title", "Playlist") })
+        compose.setContent { JUKETheme {
+            CompositionLocalProvider(LocalMediaMenu provides MediaMenuController()) {
+                Box(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {
+                    CollectionDetailHero(item, "Playlist", "", "Artist", "50 tracks",
+                        description = "A long description with links and useful playlist information. ".repeat(20),
+                        onPlay = {}, onShuffle = {}, onQueue = {})
+                }
+            }
+        } }
+        compose.onNodeWithText("Read more").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Show less").performScrollTo().performClick()
+        compose.onNodeWithText("Read more").performScrollTo().assertIsDisplayed()
+    }
     @Test fun downloadedAndAccountCollectionsKeepSameHeroAndActions() {
         val menu = MediaMenuController()
         val online = BrowseParser.item(buildJsonObject { put("kind", "album"); put("browseId", "MPREfixture"); put("title", "Album") })

@@ -1348,8 +1348,8 @@ class PlaybackService : MediaLibraryService() {
             .setBufferDurationsMs(
                 30_000,  // minBufferMs
                 120_000, // maxBufferMs
-                1_500,   // bufferForPlaybackMs
-                3_000    // bufferForPlaybackAfterRebufferMs
+                250,     // Short startup buffer; the disk warmer saves the full song.
+                750      // Keep a larger cushion after a network rebuffer.
             )
             .setBackBuffer(
                 30_000, // backBufferDurationMs: 30s back-buffer for smooth seeking
@@ -1390,7 +1390,8 @@ class PlaybackService : MediaLibraryService() {
 
         upcomingPreloader = UpcomingAudioPreloader(playbackDataSources(applicationContext,
             StreamCacheManager.getCache(applicationContext), prefetch = true, cacheWarm = true), serviceScope, applicationContext,
-            demandFactory = playbackDataSources(applicationContext, StreamCacheManager.getCache(applicationContext), prefetch = false, cacheWarm = true))
+            demandFactory = playbackDataSources(applicationContext, StreamCacheManager.getCache(applicationContext), prefetch = false, cacheWarm = true),
+            onCacheCompleted = { updatePreloader() })
         getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(preloadNetworkCallback)
         preloadConnectivityJob = serviceScope.launch {
             `in`.synthora.musicbox.network.NetworkFeedback.online.collect { online ->

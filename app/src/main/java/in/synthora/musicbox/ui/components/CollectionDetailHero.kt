@@ -6,7 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,7 +36,16 @@ fun CollectionDetailHero(item: BrowseItem, title: String, image: String, credit:
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.clickable(enabled = onCreditClick != null) { onCreditClick?.invoke() })
                 Text(metadata, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                if (description.isNotBlank()) Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+                if (description.isNotBlank()) {
+                    var expanded by remember(item.id, description) { mutableStateOf(false) }
+                    var overflowed by remember(item.id, description) { mutableStateOf(false) }
+                    Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+                        maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { if (!expanded) overflowed = it.hasVisualOverflow })
+                    if (expanded || overflowed) TextButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "Show less" else "Read more")
+                    }
+                }
             }
             if (wide) Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(28.dp)) {

@@ -27,8 +27,20 @@ class SearchRankingTest {
     @Test fun missingSongArrayStillShowsMixedTracksWithoutDroppingVideos() {
         val video = item("video", "Song", "video")
         val audio = item("audio", "Song", "song")
-        assertEquals(listOf(audio, video), searchSongItems(listOf(video, audio), emptyList()))
+        assertEquals(listOf(video, audio), searchSongItems(listOf(video, audio), emptyList()))
         assertEquals(listOf(video), searchSongItems(listOf(video), emptyList()))
         assertEquals(listOf(audio, video), searchSongItems(listOf(video, audio), listOf(audio)))
+    }
+    @Test fun regionalVideoReleaseBeatsUnrelatedAudio() {
+        val video = item("video", "Go (Official Video)", "video")
+        val other = item("other", "Another Song", "song")
+        assertEquals(video, audioSearchHero(listOf(video), listOf(other)))
+    }
+    @Test fun sameTitleByDifferentSingerCannotReplaceVideo() {
+        val video = item("video", "Go (Official Video)", "video")
+        val other = BrowseParser.item(buildJsonObject {
+            put("videoId", "other"); put("title", "Go"); put("artist", "Different Artist"); put("resultType", "song")
+        })
+        assertEquals(video, audioSearchHero(listOf(video), listOf(other)))
     }
 }

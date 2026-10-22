@@ -21,6 +21,29 @@ import java.util.concurrent.atomic.AtomicBoolean
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class UpcomingAudioPreloaderTest {
+    @Test fun demandCompletionStartsLazyTailWithoutMaintenanceTick() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "completion-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val current = "https://audio.example/current"
+        val next = "https://audio.example/next"
+        lateinit var preloader: UpcomingAudioPreloader
+        preloader = UpcomingAudioPreloader(CacheDataSource.Factory().setCache(cache)
+            .setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }, childScope,
+            policyOverride = { PreloadPolicy(1, -1) }, onCacheCompleted = {
+                preloader.update(listOf(next), currentUrl = current)
+            })
+        try {
+            preloader.update(listOf(next), currentUrl = current)
+            withTimeout(5_000) {
+                while (!cache.isCached(next, 0, 8_192)) delay(10)
+            }
+            assertTrue(cache.isCached(current, 0, 8_192))
+        } finally {
+            preloader.clearAndAwait(); childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
     @Test fun powerConstraintsPreserveCurrentCacheAndResumeAllFiveLazySongsAfterRecovery() = runBlocking {
         val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "power-${System.nanoTime()}")
         val cache = SimpleCache(directory, NoOpCacheEvictor())
