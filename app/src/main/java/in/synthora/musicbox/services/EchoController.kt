@@ -49,7 +49,8 @@ class EchoController(
     private val onError: (String) -> Unit,
     private val onSignedOut: () -> Unit,
     private val read: suspend (String, Map<String, String>) -> JsonElement = Backend::get,
-    private val write: suspend (String, JsonObject) -> JsonElement = Backend::post
+    private val write: suspend (String, JsonObject) -> JsonElement = Backend::post,
+    private val snapshotDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) {
     private val _devices = MutableStateFlow<List<EchoDevice>>(emptyList())
     val devices: StateFlow<List<EchoDevice>> = _devices.asStateFlow()
@@ -194,9 +195,12 @@ class EchoController(
             val epoch = mutationEpoch
             val response = read("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
             if (serial != _serial.value || epoch != mutationEpoch) null
-            else response.also {
-                apply(it)
-                refreshedAt = SystemClock.elapsedRealtime()
+            else {
+                val accepted = apply(response)
+                // Decoding suspends. A command or sign-out can invalidate the
+                // poll while apply() is off-thread, including its side effects.
+                if (!accepted || serial != _serial.value || epoch != mutationEpoch) null
+                else response.also { refreshedAt = SystemClock.elapsedRealtime() }
             }
         } ?: return
         if (serial != _serial.value) return
@@ -225,22 +229,24 @@ class EchoController(
         }
     }
 
-    private suspend fun apply(np: JsonObject) {
+    private suspend fun apply(np: JsonObject): Boolean {
         val epoch = mutationEpoch
         val now = SystemClock.elapsedRealtime()
         val previous = _state.value
         val preserveVolume = now < volumeGraceUntil
-        val parsed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val parsed = kotlinx.coroutines.withContext(snapshotDispatcher) {
             parseEchoSnapshot(np, now, previous.volume, preserveVolume, previous.queue, previous)
         }
-        if (epoch != mutationEpoch) return
-        if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return
-        if (!parsed.supersedes(previous)) return
+        if (epoch != mutationEpoch) return false
+        if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return false
+        if (!parsed.supersedes(previous)) return false
         // A pause, close or volume preview during decoding wins over this response.
         val preview = pendingSeek
         val reconciled = preview?.reconcile(parsed, now) ?: parsed
-        if (_state.compareAndSet(previous, reconciled) && preview != null && reconciled === parsed && pendingSeek === preview)
+        val accepted = _state.compareAndSet(previous, reconciled)
+        if (accepted && preview != null && reconciled === parsed && pendingSeek === preview)
             pendingSeek = null
+        return accepted
     }
 
     suspend fun applySharedSnapshot(snapshot: JsonObject) { apply(snapshot) }
