@@ -91,4 +91,11 @@ class SharedPlaybackOutputTest {
         assertFalse(latest.copy(revision = 4).olderThan(latest))
         assertFalse(SharedPlaybackOutput("alexa", revision = 1, epoch = "restarted-server").olderThan(latest))
     }
+    @org.junit.Test fun dismissedTaskCannotResumeItsOldOwnershipButCanReceiveANewTransfer() {
+        val old = SharedPlaybackOutput(mode = "phone", owner = "this-phone", token = "closed-token")
+        org.junit.Assert.assertTrue(dismissedPhoneOutput(old, "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(token = "new-transfer"), "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(owner = "other-phone"), "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(mode = "alexa"), "this-phone", "closed-token"))
+    }
 }

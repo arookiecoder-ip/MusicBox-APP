@@ -17,7 +17,8 @@ fun audioSearchHero(all: List<BrowseItem>, songs: List<BrowseItem>): BrowseItem?
         .replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
     val audio = (songs + all).filter(::isAudioSearchItem).distinctBy { it.videoId }
     return audio.firstOrNull { normalize(it.title) == normalize(top.title) &&
-        (top.subtitle.isBlank() || it.subtitle.isBlank() || normalize(it.subtitle) == normalize(top.subtitle)) }
+        (top.subtitle.isBlank() || it.subtitle.isBlank() || normalize(it.subtitle) == normalize(top.subtitle) ||
+            (normalize(it.subtitle).isNotBlank() && (normalize(top.subtitle).contains(normalize(it.subtitle)) || normalize(it.subtitle).contains(normalize(top.subtitle))))) }
         ?: top
 }
 

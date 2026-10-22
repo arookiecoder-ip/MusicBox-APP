@@ -6,6 +6,19 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.background
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.rememberScrollState
@@ -18,7 +31,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 @Composable
-fun AdaptiveDetailLayout(bottomPadding: Dp, spacing: Dp = 0.dp, onFloatingPlay: (() -> Unit)? = null,
+fun AdaptiveDetailLayout(bottomPadding: Dp, spacing: Dp = 0.dp, onFloatingPlay: (() -> Unit)? = null, title: String = "",
     hero: @Composable () -> Unit, content: LazyListScope.() -> Unit) {
     val config = LocalConfiguration.current
     val landscape = config.smallestScreenWidthDp >= 600 && config.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
@@ -40,9 +53,17 @@ fun AdaptiveDetailLayout(bottomPadding: Dp, spacing: Dp = 0.dp, onFloatingPlay: 
             item(key = "hero") { hero() }
             content()
         }
-        if (showPlay && onFloatingPlay != null) FloatingActionButton(onClick = onFloatingPlay,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = bottomPadding + 16.dp)) {
-            Text("▶ Play", Modifier.padding(horizontal = 16.dp))
+        AnimatedVisibility(showPlay && onFloatingPlay != null,
+            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = bottomPadding + 16.dp),
+            enter = fadeIn(tween(220)) + scaleIn(tween(260), initialScale = .92f),
+            exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = .92f)) {
+            FloatingActionButton(onClick = { onFloatingPlay?.invoke() }, shape = CircleShape, modifier = Modifier.size(68.dp).testTag("Floating collection play")) {
+                Icon(Icons.Rounded.PlayArrow, "Play collection", Modifier.size(36.dp))
+            }
         }
+        if (showPlay && title.isNotBlank()) Text(title,
+            Modifier.align(Alignment.TopStart).fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+                .stableStatusBarsPadding().padding(start = 64.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
+            style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
 }

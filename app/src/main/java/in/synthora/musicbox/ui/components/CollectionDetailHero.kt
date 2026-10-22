@@ -3,6 +3,8 @@ package `in`.synthora.musicbox.ui.components
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -40,11 +42,15 @@ fun CollectionDetailHero(item: BrowseItem, title: String, image: String, credit:
                     var expanded by remember(item.id, description) { mutableStateOf(false) }
                     var overflowed by remember(item.id, description) { mutableStateOf(false) }
                     Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
-                        maxLines = if (expanded) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
                         onTextLayout = { if (!expanded) overflowed = it.hasVisualOverflow })
-                    if (expanded || overflowed) TextButton(onClick = { expanded = !expanded }) {
-                        Text(if (expanded) "Show less" else "Read more")
+                    if (overflowed) OutlinedButton(onClick = { expanded = true }, shape = RoundedCornerShape(0.dp)) {
+                        Text("Read more")
                     }
+                    if (expanded) AlertDialog(onDismissRequest = { expanded = false },
+                        shape = RoundedCornerShape(0.dp), title = { Text(title) },
+                        text = { Text(description, Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) },
+                        confirmButton = { TextButton(onClick = { expanded = false }) { Text("Back") } })
                 }
             }
             if (wide) Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 16.dp),

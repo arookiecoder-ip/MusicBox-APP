@@ -552,7 +552,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (!online) `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
             setOutputPreference(PlaybackOutput.PHONE)
             updatePolling()
-            phoneSetQueue(available.tracks, available.index, synchronizeQueue = online, reuseOwnership = true)
+            phoneSetQueue(available.tracks, available.index, synchronizeQueue = online)
         }
     }
 
@@ -935,7 +935,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 try {
-                    phoneSetQueue(queue, index, state.positionMs, play = playOverride ?: state.playing, synchronizeQueue = false, reuseOwnership = true)
+                    phoneSetQueue(queue, index, state.positionMs, play = playOverride ?: state.playing, synchronizeQueue = false)
                     // phoneSetQueue waits for this exact selected item to be READY;
                     // retain the foreground/ownership guards until it returns.
                 } finally { renewal.cancel() }
@@ -978,6 +978,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (_isSwitchingOutput.value) return
         if (output.mode == "phone" && output.owner == ownId && !output.handoffPending) {
             if (claim != output.token) {
+                if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.dismissed(output)) return
                 _isSwitchingOutput.value = true
                 viewModelScope.launch {
                     try { startTransferredPhone(output) }
@@ -1821,7 +1822,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * safely append without racing the initial install.
      */
     private suspend fun phoneSetQueue(tracks: List<Track>, startIndex: Int, positionMs: Long = 0, play: Boolean = true, throwOnFailure: Boolean = true, synchronizeQueue: Boolean = true,
-        deferRadioSeed: Boolean = false, reuseOwnership: Boolean = false, onPublished: (suspend () -> Unit)? = null) {
+        deferRadioSeed: Boolean = false, onPublished: (suspend () -> Unit)? = null) {
         idlePhoneSelection = false
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.beginSongPreparation()
         _uiState.update { it.copy(isLoading = true, error = null) }
@@ -1837,7 +1838,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     coroutineScope {
                         val playable = async(Dispatchers.IO) { resolveForPhone(tracks, startIndex) }
                         if (`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
-                            if (!reuseOwnership || !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback())
+                            if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.token.isBlank() ||
+                                !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback())
                                 `in`.synthora.musicbox.services.PhonePlaybackOwnership.claim(echo.serial.value)
                             serverPlaybackChecked = true
                         } else `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)

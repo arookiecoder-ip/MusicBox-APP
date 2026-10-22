@@ -27,3 +27,7 @@ internal fun canRetryPhoneCommand(previous: SharedPlaybackOutput, current: Share
     action: String, hasExplicitTracks: Boolean = false): Boolean = current.mode == "phone" &&
     current.owner.isNotBlank() && current.owner == previous.owner && !current.handoffPending &&
     (action in setOf("play", "pause", "volume", "song") || (action == "queue" && hasExplicitTracks))
+
+/** Closing a task must not interpret its still-live server token as a new transfer. */
+internal fun dismissedPhoneOutput(output: SharedPlaybackOutput, ownerId: String, dismissedToken: String): Boolean =
+    output.mode == "phone" && output.owner == ownerId && output.token.isNotBlank() && output.token == dismissedToken

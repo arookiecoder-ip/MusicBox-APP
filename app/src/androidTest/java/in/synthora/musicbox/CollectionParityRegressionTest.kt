@@ -35,18 +35,20 @@ class CollectionParityRegressionTest {
                 smallestScreenWidthDp = 390
             }
             CompositionLocalProvider(LocalConfiguration provides portrait) {
-                AdaptiveDetailLayout(bottomPadding = 0.dp, onFloatingPlay = { played++ },
+                AdaptiveDetailLayout(bottomPadding = 0.dp, title = "Playlist title", onFloatingPlay = { played++ },
                     hero = { Text("Playlist details", Modifier.height(260.dp)) }) {
                     items(50) { Text("Track $it", Modifier.fillMaxWidth().height(56.dp)) }
                 }
             }
         } }
-        compose.onNodeWithText("▶ Play").assertDoesNotExist()
+        compose.onNodeWithTag("Floating collection play").assertDoesNotExist()
         compose.onNodeWithTag("Collection tracks").performScrollToIndex(10)
-        compose.onNodeWithText("▶ Play").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("Floating collection play").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Playlist title").assertIsDisplayed()
+        compose.onNodeWithTag("Floating collection play").assertWidthIsEqualTo(68.dp).assertHeightIsEqualTo(68.dp)
         assertEquals(1, played)
         compose.onNodeWithTag("Collection tracks").performScrollToIndex(0)
-        compose.onNodeWithText("▶ Play").assertDoesNotExist()
+        compose.onNodeWithTag("Floating collection play").assertDoesNotExist()
     }
 
     @Test fun longPlaylistDescriptionCanExpandAndCollapse() {
@@ -61,8 +63,31 @@ class CollectionParityRegressionTest {
             }
         } }
         compose.onNodeWithText("Read more").assertIsDisplayed().performClick()
-        compose.onNodeWithText("Show less").performScrollTo().performClick()
+        compose.onNodeWithText("Back").performClick()
         compose.onNodeWithText("Read more").performScrollTo().assertIsDisplayed()
+    }
+    @Test fun closingTaskPreventsOldLeaseFromBeingRestoredButAllowsNewTransfer() {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val ownership = `in`.synthora.musicbox.services.PhonePlaybackOwnership
+        ownership.init(context)
+        val prefs = context.getSharedPreferences("shared_playback_output", android.content.Context.MODE_PRIVATE)
+        val saved = listOf("last_token", "dismissed_token").associateWith { prefs.getString(it, null) }
+        val output = `in`.synthora.musicbox.services.SharedPlaybackOutput(mode = "phone", owner = ownership.ownerId,
+            token = "dismissed-fixture", leaseMs = 12000, epoch = java.util.UUID.randomUUID().toString(), revision = 1)
+        try {
+            ownership.accept(output)
+            ownership.taskDismissed()
+            ownership.forget()
+            assertTrue(ownership.dismissed(output))
+            assertFalse(ownership.restoreIfCurrent(output))
+            val transferred = output.copy(token = "explicit-new-transfer", revision = 2)
+            assertFalse(ownership.dismissed(transferred))
+            ownership.accept(transferred)
+            assertTrue(ownership.permitsPlayback())
+        } finally {
+            ownership.forget(allowOffline = true)
+            prefs.edit().apply { saved.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
+        }
     }
     @Test fun downloadedAndAccountCollectionsKeepSameHeroAndActions() {
         val menu = MediaMenuController()

@@ -35,7 +35,7 @@ fun AlbumDetailScreen(albumDetailViewModel: AlbumDetailViewModel = viewModel(), 
             }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
         } else if (album == null || (state.isLoading && state.tracks.isEmpty())) {
             MediaDetailSkeleton(modifier = Modifier.stableStatusBarsPadding(), contentPadding = PaddingValues(20.dp), bottomPadding = bottomPadding)
-        } else AdaptiveDetailLayout(bottomPadding = bottomPadding, hero = {
+        } else AdaptiveDetailLayout(bottomPadding = bottomPadding, title = state.title, onFloatingPlay = { musicViewModel.playCollection(album) }, hero = {
                 CollectionDetailHero(album, state.title, state.imageUrl, state.artist,
                     listOf("Album", state.year, "${state.tracks.size} tracks").filter { it.isNotBlank() }.joinToString(" · "),
                     onCreditClick = if (state.artistId.isNotBlank()) ({ onNavigateToArtist(state.artistId) }) else null,

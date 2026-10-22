@@ -43,4 +43,11 @@ class SearchRankingTest {
         })
         assertEquals(video, audioSearchHero(listOf(video), listOf(other)))
     }
+    @Test fun audioHeroAcceptsSharedArtistCredits() {
+        val video = item("video", "Go (Official Video)", "video")
+        val song = BrowseParser.item(buildJsonObject {
+            put("videoId", "audio"); put("title", "Go"); put("artist", "Singer and Collaborator"); put("resultType", "song")
+        })
+        assertEquals(song, audioSearchHero(listOf(video), listOf(song)))
+    }
 }

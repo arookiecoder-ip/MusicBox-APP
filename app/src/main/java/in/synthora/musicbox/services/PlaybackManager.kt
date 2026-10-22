@@ -1163,8 +1163,9 @@ class PlaybackManager private constructor(private val context: Context) {
                         restoredIndex,
                         restoredPosition
                     )
+                    playWhenReady = false
                     prepare()
-                    // Don't auto-play, just prepare to paused state
+                    // Restoring the queue never carries an old playWhenReady intent.
                 }
 
                 restoredTracks.getOrNull(restoredIndex)?.let { track ->

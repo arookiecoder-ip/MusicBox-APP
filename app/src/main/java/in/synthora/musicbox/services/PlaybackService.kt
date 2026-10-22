@@ -1535,6 +1535,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        PhonePlaybackOwnership.taskDismissed()
         saveResumptionState()
         cancelSessionResume()
         remoteForegroundBridge = false

@@ -74,8 +74,15 @@ object PhonePlaybackOwnership {
         remote.value = null
     }
 
+    fun taskDismissed() {
+        if (token.isNotBlank()) prefs.edit().putString("dismissed_token", token).remove("last_token").commit()
+    }
+
+    fun dismissed(output: SharedPlaybackOutput): Boolean =
+        dismissedPhoneOutput(output, ownerId, prefs.getString("dismissed_token", "").orEmpty())
+
     fun restoreIfCurrent(output: SharedPlaybackOutput): Boolean {
-        if (output.mode != "phone" || output.owner != ownerId || output.token != prefs.getString("last_token", "") || output.leaseMs <= 0 || output.handoffPending) return false
+        if (dismissed(output) || output.mode != "phone" || output.owner != ownerId || output.token != prefs.getString("last_token", "") || output.leaseMs <= 0 || output.handoffPending) return false
         val latest = MobileDeviceConnection.rememberOutput(output)
         if (latest.token != output.token || output.olderThan(latest)) return false
         accept(output)

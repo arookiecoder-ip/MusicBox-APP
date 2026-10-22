@@ -34,7 +34,7 @@ fun PlaylistDetailScreen(playlistDetailViewModel: PlaylistDetailViewModel = view
             }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
         } else if (playlist == null || (state.isLoading && state.tracks.isEmpty())) {
             MediaDetailSkeleton(modifier = Modifier.stableStatusBarsPadding(), contentPadding = PaddingValues(20.dp), bottomPadding = bottomPadding)
-        } else AdaptiveDetailLayout(bottomPadding = bottomPadding,
+        } else AdaptiveDetailLayout(bottomPadding = bottomPadding, title = state.title,
             onFloatingPlay = { musicViewModel.playCollection(playlist) }, hero = {
                 CollectionDetailHero(playlist, state.title, state.imageUrl, state.author.takeIf { it.isNotBlank() }?.let { "By $it" }.orEmpty(),
                     "${state.trackCount} tracks", state.description,
