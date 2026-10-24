@@ -191,8 +191,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
 
-    private val pendingPlayback = MutableStateFlow<Track?>(null)
-    private val pendingQueueIndex = MutableStateFlow<Int?>(null)
+    private data class PendingSelection(val track: Track, val index: Int?, val requestId: Long)
+    private val pendingPlayback = MutableStateFlow<PendingSelection?>(null)
+    private val presentedPlaybackRequest = MutableStateFlow(0L)
     private var pendingPlaybackJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
     private var playlistBackfillJob: Job? = null
@@ -208,8 +209,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var remoteTransportSequence = 0L
     private val remoteTransportMutex = kotlinx.coroutines.sync.Mutex()
 
-    val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview, pendingQueueIndex) { state, busy, pending, preview, selectedIndex ->
-        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending, selectedIndex)
+    val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview) { state, busy, pending, preview ->
+        // Clearing the optimistic selection must wait for this projector to
+        // consume the new underlying track, not only for Media3 to be ready.
+        presentedPlaybackRequest.value = pending?.takeIf {
+            selectionPresented(state, it.track.uuid, it.index) || (it.index == null &&
+                !it.track.ytVideoId.isNullOrBlank() && state.currentTrack?.ytVideoId == it.track.ytVideoId)
+        }?.requestId ?: 0L
+        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending?.track, pending?.index)
         val presented = if (isRemotePhone && pending == null && preview != null && preview.owner == _remoteMobileOutput.value.owner)
             preview.present(base, android.os.SystemClock.elapsedRealtime()) else base
         presented.copy(phase = `in`.synthora.musicbox.services.playbackPhase(presented.currentTrack != null,
@@ -1363,9 +1370,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // A new song supersedes any in-flight playlist backfill: its chunks
         // belong to the previous song's queue and must not be appended.
         playlistBackfillJob?.cancel()
-        pendingQueueIndex.value = queueIndex
-        pendingPlayback.value = track
+        pendingPlayback.value = PendingSelection(track, queueIndex, requestId)
         pendingPlaybackJob = viewModelScope.launch {
+            var readyForPresentation = false
             try {
                 if (isRemotePhone && !localOnly) {
                     block()
@@ -1373,12 +1380,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         echo.state.first { it.track?.ytVideoId == track.ytVideoId && it.confirmed && it.playing && !it.processing }
                         true
                     }
+                    readyForPresentation = confirmed == true
                     if (confirmed != true && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The other device hasn't confirmed playback yet")
                 } else if (isAlexa && !localOnly) {
                     runEcho {
                         block()
                         val videoId = requireNotNull(track.ytVideoId)
-                        if (!echo.awaitPlaying(videoId) && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The Echo hasn't confirmed playback yet")
+                        readyForPresentation = echo.awaitPlaying(videoId)
+                        if (!readyForPresentation && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The Echo hasn't confirmed playback yet")
                     }
                 } else {
                     block()
@@ -1388,6 +1397,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         playbackManager.isBufferingFlow.first { !it }
                         true
                     }
+                    readyForPresentation = ready == true
                     if (ready != true && requestId == playbackRequestId &&
                         playbackManager.isBufferingFlow.value && !playbackManager.isPlayingFlow.value)
                         `in`.synthora.musicbox.network.NetworkFeedback.notify("Playback hasn't started yet. Check the connection or tap play to retry.")
@@ -1397,7 +1407,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't play this song") }
             finally {
                 // A cancelled earlier request must not clear the next song's loading state.
-                if (requestId == playbackRequestId) pendingPlayback.value = null
+                if (requestId == playbackRequestId) {
+                    if (readyForPresentation) withTimeoutOrNull(1_500) {
+                        presentedPlaybackRequest.first { it == requestId }
+                    }
+                    if (requestId == playbackRequestId) pendingPlayback.value = null
+                }
             }
         }
     }
@@ -2543,4 +2558,13 @@ internal fun reconcilePhonePlayback(state: MusicUiState, queue: List<Track>, cur
     val changed = state.currentTrack?.uuid != currentId
     return state.copy(queue = queue, queueIndex = index, currentTrack = track,
         position = if (changed) 0 else state.position, duration = track.durationSec * 1000L)
+}
+
+/** Selection and queue position must agree before an optimistic song can be released. */
+internal fun selectionPresented(state: MusicUiState, trackId: String, index: Int?): Boolean {
+    if (state.currentTrack?.uuid != trackId) return false
+    if (index == null) return true
+    val expected = index.takeIf { state.queue.getOrNull(it)?.uuid == trackId }
+        ?: state.queue.indexOfFirst { it.uuid == trackId }
+    return expected >= 0 && state.queueIndex == expected
 }
