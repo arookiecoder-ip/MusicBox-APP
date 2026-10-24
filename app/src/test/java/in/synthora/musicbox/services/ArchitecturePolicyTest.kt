@@ -7,8 +7,9 @@ class ArchitecturePolicyTest {
     @Test fun `background paused reads slow down while transitions stay responsive`() {
         assertEquals(30_000L, remotePollDelayMs(false, false, false, 0))
         assertEquals(10_000L, remotePollDelayMs(false, true, false, 0))
-        assertEquals(3_000L, remotePollDelayMs(true, true, false, 0))
-        assertEquals(3_000L, remotePollDelayMs(false, false, true, 0))
+        assertEquals(500L, remotePollDelayMs(true, true, false, 0))
+        assertEquals(500L, remotePollDelayMs(true, false, false, 0))
+        assertEquals(1_000L, remotePollDelayMs(false, false, true, 0))
         assertEquals(60_000L, remotePollDelayMs(false, false, false, 10))
     }
     @Test fun `preloading never competes with buffering or consumes mobile data by default`() {

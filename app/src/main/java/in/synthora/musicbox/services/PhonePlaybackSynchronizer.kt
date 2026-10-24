@@ -25,6 +25,16 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
     private val outputPrefs = applicationContext.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE)
     private val TAG = "PhonePlaybackSync"
     fun start() {
+        val publications = CursorPublicationSignal()
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                        Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_POSITION_DISCONTINUITY,
+                        Player.EVENT_MEDIA_ITEM_TRANSITION)) publications.changed()
+            }
+        }
+        player.addListener(listener)
+        serviceScope.coroutineContext[Job]?.invokeOnCompletion { player.removeListener(listener) }
         serviceScope.launch {
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val leaseRemaining = PhonePlaybackOwnership.leaseUntilMs - android.os.SystemClock.elapsedRealtime()
@@ -114,7 +124,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
         serviceScope.launch {
             var published: PublishedCursor? = null
             while (currentCoroutineContext().isActive) {
-                delay(3_000)
+                val event = publications.awaitChange()
                 val claim = PhonePlaybackOwnership.token
                 if (claim.isBlank() || PhonePlaybackOwnership.localHandoff || !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                 try {
@@ -123,7 +133,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                     val cursor = PublishedCursor(claim, mediaId, player.isPlaying,
                         player.playbackState == Player.STATE_BUFFERING, player.currentPosition.coerceAtLeast(0),
                         android.os.SystemClock.elapsedRealtime())
-                    if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || !cursor.needsPublication(published)) continue
+                    if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || (!event && !cursor.needsPublication(published))) continue
                     val current = trackById(mediaId) ?: continue
                     if (player.currentMediaItem?.mediaId != mediaId ||
                         !canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff) ||
@@ -131,7 +141,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                     current.ytVideoId?.takeIf { it.isNotBlank() }?.let { video ->
                         val completed = withTimeoutOrNull(4_000) {
                             `in`.synthora.musicbox.network.AlexaBackendApi.updateQueue("current", video, emptyList(),
-                                player.isPlaying, player.currentPosition.coerceAtLeast(0), player.currentMediaItemIndex,
+                                cursor.playing, cursor.position, player.currentMediaItemIndex,
                                 buffering = cursor.buffering, expectedToken = claim, currentEntryId = current.uuid)
                             true
                         }

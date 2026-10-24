@@ -767,7 +767,7 @@ private fun OutputPickerContent(
             OutputRow(icon = Icons.Outlined.PhoneAndroid, title = device.name, detail = "Online",
                 selected = selectedMobileId == device.id, enabled = !busy, onClick = { onSelectMobile(device.id) })
         }
-        if (devices.isEmpty()) {
+        if (devices.none { it.online }) {
             Text(
                 "No Echo found. Connect Amazon in Settings to play on an Echo.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -775,7 +775,7 @@ private fun OutputPickerContent(
                 modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
             )
         }
-        devices.forEach { device ->
+        devices.filter { it.online }.forEach { device ->
             OutputRow(
                 icon = Icons.Outlined.Speaker, title = device.name,
                 detail = if (device.online) null else "Offline",

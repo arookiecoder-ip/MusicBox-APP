@@ -43,3 +43,11 @@ internal data class PublishedCursor(val token: String, val mediaId: String, val 
         return kotlin.math.abs(position - expected) > 1_500 || (playing && elapsed >= 10_000)
     }
 }
+
+/** Player events interrupt the fallback timer; rapid seeks keep only the newest cursor. */
+internal class CursorPublicationSignal {
+    private val changes = Channel<Unit>(Channel.CONFLATED)
+    fun changed() { changes.trySend(Unit) }
+    suspend fun awaitChange(timeoutMs: Long = 3_000): Boolean =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { changes.receive(); true } ?: false
+}

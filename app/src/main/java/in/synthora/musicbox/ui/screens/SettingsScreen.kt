@@ -149,8 +149,8 @@ fun SettingsScreen(
                     Text("Alexa", fontWeight = FontWeight.SemiBold)
                     if (amazonConnected == null && echoDevices.isEmpty()) `in`.synthora.musicbox.ui.components.StatusSkeleton(Modifier.padding(top = 12.dp))
                     else if (amazonConnected == false) Text("Connect your Amazon account")
-                    else if (echoDevices.isEmpty()) Text("No Echo devices found")
-                    echoDevices.forEach { device ->
+                    else if (echoDevices.none { it.online }) Text("No Echo devices found")
+                    echoDevices.filter { it.online }.forEach { device ->
                         Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                             Text(device.name, Modifier.weight(1f))
                             Text(if (device.online) "Online" else "Offline", color = if (device.online) androidx.compose.ui.graphics.Color(0xFF66BB6A) else MaterialTheme.colorScheme.error)

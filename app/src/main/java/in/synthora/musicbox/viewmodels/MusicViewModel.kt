@@ -924,14 +924,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // Stream resolution may outlive the initial transfer lease before a service exists.
                 val renewal = launch {
                     while (isActive) {
-                        delay(3_000)
+                        // Renew immediately while media is preparing: the transfer
+                        // response may already have spent part of its lease in flight.
                         try {
-                            val current = withTimeout(4_000) { AlexaBackendApi.phoneOutputRequest("heartbeat", `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token) }
+                            val current = withTimeout(3_000) { AlexaBackendApi.phoneOutputRequest("heartbeat", `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token) }
                             if (!current.belongsToPhone(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token)) break
                             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(current)
                         } catch (_: kotlinx.coroutines.TimeoutCancellationException) { /* Retry while preparing. */ }
                         catch (e: CancellationException) { throw e }
                         catch (_: Exception) { /* The bounded lease still prevents two outputs. */ }
+                        delay(2_000)
                     }
                 }
                 try {
@@ -949,7 +951,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     withTimeoutOrNull(1_500) {
                         AlexaBackendApi.updateQueue("current", requireNotNull(current.ytVideoId), emptyList(),
-                            playing = playbackManager.isPlayingFlow.value, positionMs = playbackManager.getCurrentPosition(),
+                            playing = playbackManager.shouldResumeAfterTrackChange(), positionMs = playbackManager.getCurrentPosition(),
                             queueIndex = _uiState.value.queueIndex, buffering = playbackManager.isBufferingFlow.value,
                             expectedToken = output.token, currentEntryId = current.uuid)
                     }
