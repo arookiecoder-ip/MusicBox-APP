@@ -2215,7 +2215,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         current?.invokeOnCompletion { if (skipLoadingJob === current) transportLoading.value = false }
     }
 
+    private fun clearSelectionForNavigation() {
+        if (pendingPlayback.value == null) return
+        ++playbackRequestId
+        pendingPlaybackJob?.cancel()
+        youtubeLinkJob?.cancel()
+        radioJob?.cancel()
+        pendingPlayback.value = null
+    }
+
     fun skipToNext() {
+        clearSelectionForNavigation()
         cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("next"); return }
         if (isAlexa) {
@@ -2226,6 +2236,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        clearSelectionForNavigation()
         cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("previous"); return }
         if (isAlexa) {
@@ -2236,6 +2247,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seekTo(positionMs: Long) {
+        // A failed/new target must never seek the superseded song still in the renderer.
+        pendingPlayback.value?.let { if (playbackManager.snapshot.value.currentId != it.track.uuid) return }
         if (isRemotePhone) { remoteControl("seek", buildJsonObject { put("position_ms", positionMs) }); return }
         if (isAlexa) {
             launchEcho { echo.seek(positionMs) }
