@@ -8,7 +8,15 @@ import org.junit.Test
 
 class ArtistPortraitRepositoryTest {
     private fun portrait(url: String = "https://images.example/artist.png") = buildJsonObject {
-        put("artist", buildJsonObject { put("thumbnails", buildJsonArray { add(buildJsonObject { put("url", url); put("width", 256); put("height", 256) }) })
+        put("artist", buildJsonObject {
+            put("thumbnails", buildJsonArray {
+                add(buildJsonObject {
+                    put("url", url)
+                    put("width", 256)
+                    put("height", 256)
+                })
+            })
+        })
     }
     @Test fun knownArtistLoadsOnlyItsDetailsAndReopeningUsesTheBoundedCache() = runBlocking {
         val paths = mutableListOf<String>()
