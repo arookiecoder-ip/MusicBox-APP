@@ -17,6 +17,7 @@ internal class CallPlaybackGuard(
         private set
     var manualDuringCall = false
         private set
+    val needsModePolling get() = resumePending || manualDuringCall || focusLossAt?.let { nowMs()-it in 0..10_000 } == true
     val blocksAutomaticPlayback get() = isInCall() && !manualDuringCall
 
     fun explicitPlay() {

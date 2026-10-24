@@ -73,4 +73,9 @@ class SearchRankingTest {
         assertEquals(listOf(artist),searchKindItems(listOf(artist,artist),emptyList(),"artist"))
     }
 
+    @Test fun indicVowelMarksMustNotCollapseDifferentSongNames() {
+        val wrong=item("wrong","কটা","song");val right=item("right","কাটা","song")
+        assertEquals(right,relevantSearchHero(listOf(wrong,right),emptyList(),"কাটা"))
+    }
+
 }

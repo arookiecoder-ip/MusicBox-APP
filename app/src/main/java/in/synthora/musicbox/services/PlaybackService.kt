@@ -562,7 +562,7 @@ class PlaybackService : MediaLibraryService() {
     private val callModePoll = object : Runnable {
         override fun run() {
             observeCallMode()
-            mainHandler.postDelayed(this, 500)
+            mainHandler.postDelayed(this, if (::player.isInitialized && (player.playWhenReady || callGuard.needsModePolling)) 500 else 5_000)
         }
     }
     private val callModeListener = if (android.os.Build.VERSION.SDK_INT >= 31)

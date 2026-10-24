@@ -33,8 +33,8 @@ fun searchSongItems(all: List<BrowseItem>, songs: List<BrowseItem>, query: Strin
 
 /** Locale-independent, Unicode-safe comparison; retain remix/live/version qualifiers. */
 private fun searchText(value: String): String = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFKD)
-    .lowercase(java.util.Locale.ROOT).replace(Regex("\\p{M}+"), "")
-    .replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim().replace(Regex("\\s+"), " ")
+    .lowercase(java.util.Locale.ROOT).replace(Regex("(?<=\\p{IsLatin})\\p{M}+"), "")
+    .replace(Regex("[^\\p{L}\\p{M}\\p{N}]+"), " ").trim().replace(Regex("\\s+"), " ")
 
 private fun searchMatch(item: BrowseItem, query: String): Int {
     val q=searchText(query)

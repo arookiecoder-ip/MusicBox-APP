@@ -247,7 +247,7 @@ class KeyboardArtistPresentationTest {
             else Button({ trigger++;entered=true }) { Text("Search tab") }
         } }
         compose.onNodeWithText("Search tab").performClick()
-        compose.waitUntil(7000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        compose.waitUntil(7000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().firstOrNull()?.config?.get(SemanticsProperties.Focused) == true }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.waitUntil(7000) { keyboardVisible(view) }
         compose.onNodeWithContentDescription("Close search").performClick()
