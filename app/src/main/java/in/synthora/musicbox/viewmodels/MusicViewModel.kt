@@ -675,7 +675,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true
         try {
             val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault(
-                echo.state.value.sharedOutput.takeIf { it.mode == "alexa" && echo.devices.value.any { d -> d.serial == it.serial && !d.online } }?.serial) } ?: return
+                echo.state.value.sharedOutput.takeIf { it.mode == "alexa" }?.let {
+                    unavailableEchoSerial(echo.devices.value, it.serial)
+                }) } ?: return
             if (request != playbackRequestId || !isForeground) return
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(selected)
             // Restore only metadata. Audio preparation waits for an explicit play action.
@@ -2607,3 +2609,8 @@ internal fun selectionPresented(state: MusicUiState, trackId: String, index: Int
         ?: state.queue.indexOfFirst { it.uuid == trackId }
     return expected >= 0 && state.queueIndex == expected
 }
+
+/** An empty server serial after restart must not strand a saved queue on an offline Echo. */
+internal fun unavailableEchoSerial(devices: List<`in`.synthora.musicbox.services.EchoDevice>, selected: String): String? =
+    if (selected.isNotBlank()) devices.firstOrNull { it.serial == selected && !it.online }?.serial
+    else devices.takeIf { it.isNotEmpty() && it.none { device -> device.online } }?.first()?.serial

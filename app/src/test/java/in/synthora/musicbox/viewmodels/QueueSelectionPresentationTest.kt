@@ -24,4 +24,14 @@ class QueueSelectionPresentationTest {
         assertFalse(selectionPresented(first.copy(queue = emptyList()), "b", 1))
         assertTrue(selectionPresented(first.copy(queue = listOf(b, a, duplicate), queueIndex = 0), "b", 1))
     }
+    @Test fun offlineEchoFallbackHandlesSavedSelectionsAndRestartedServerSerials() {
+        val offline=`in`.synthora.musicbox.services.EchoDevice("offline","Echo",false)
+        val online=`in`.synthora.musicbox.services.EchoDevice("online","Other Echo",true)
+        assertEquals("offline",unavailableEchoSerial(listOf(offline),""))
+        assertEquals("offline",unavailableEchoSerial(listOf(offline,online),"offline"))
+        assertNull(unavailableEchoSerial(listOf(offline,online),""))
+        assertNull(unavailableEchoSerial(listOf(online),"online"))
+        assertNull(unavailableEchoSerial(emptyList(),"offline"))
+    }
+
 }
