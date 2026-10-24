@@ -339,10 +339,10 @@ fun PlayerScreen(
     val stableQueueTrack = remember(currentTrack) { currentTrack }
     val queueContent: @Composable () -> Unit = {
         val queuePresentation = remember(musicViewModel) {
-            musicViewModel.uiState.map { it.queue to it.queueIndex }.distinctUntilChanged()
+            musicViewModel.uiState.map { Triple(it.queue, it.queueIndex, it.currentTrack) }.distinctUntilChanged()
         }
         val queueState by queuePresentation.collectAsStateWithLifecycle(
-            initialValue = musicViewModel.uiState.value.let { it.queue to it.queueIndex })
+            initialValue = musicViewModel.uiState.value.let { Triple(it.queue, it.queueIndex, it.currentTrack) })
         val prepared by musicViewModel.queueRows.collectAsStateWithLifecycle()
         val preparingRows = queueState.first.isNotEmpty() && prepared.tracks != queueState.first
         val rec by musicViewModel.recStatus.collectAsStateWithLifecycle()
@@ -358,7 +358,7 @@ fun PlayerScreen(
                     else -> null
                 },
                 error = queueError, onRetry = musicViewModel::refreshQueue,
-                currentTrack = stableQueueTrack,
+                currentTrack = queueState.third ?: stableQueueTrack,
                 queue = queueState.first,
                 queueIndex = queueState.second,
                 uiState = queueUiState,
@@ -740,7 +740,7 @@ private fun EchoVolumeRow(volume: Int?, enabled: Boolean = true, onVolumeChange:
 }
 
 @Composable
-private fun OutputPickerContent(
+internal fun OutputPickerContent(
     isAlexa: Boolean,
     devices: List<`in`.synthora.musicbox.services.EchoDevice>,
     mobileDevices: List<`in`.synthora.musicbox.services.MobileAudioDevice>,
@@ -767,7 +767,7 @@ private fun OutputPickerContent(
             OutputRow(icon = Icons.Outlined.PhoneAndroid, title = device.name, detail = "Online",
                 selected = selectedMobileId == device.id, enabled = !busy, onClick = { onSelectMobile(device.id) })
         }
-        if (devices.none { it.online }) {
+        if (devices.isEmpty()) {
             Text(
                 "No Echo found. Connect Amazon in Settings to play on an Echo.",
                 style = MaterialTheme.typography.bodyMedium,

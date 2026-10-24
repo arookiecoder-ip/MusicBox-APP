@@ -15,6 +15,9 @@ import androidx.compose.foundation.background
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.tween
@@ -61,9 +64,13 @@ fun AdaptiveDetailLayout(bottomPadding: Dp, spacing: Dp = 0.dp, onFloatingPlay: 
                 Icon(Icons.Rounded.PlayArrow, "Play collection", Modifier.size(36.dp))
             }
         }
-        if (showPlay && title.isNotBlank()) Text(title,
-            Modifier.align(Alignment.TopStart).fillMaxWidth().background(MaterialTheme.colorScheme.surface)
-                .stableStatusBarsPadding().padding(start = 64.dp, end = 20.dp, top = 16.dp, bottom = 16.dp),
-            style = MaterialTheme.typography.titleMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        AnimatedVisibility(showPlay && title.isNotBlank(), modifier = Modifier.align(Alignment.TopStart),
+            enter = fadeIn(tween(160, easing = FastOutSlowInEasing)) + slideInVertically(tween(160, easing = FastOutSlowInEasing)) { -it / 6 },
+            exit = fadeOut(tween(140, easing = FastOutSlowInEasing)) + slideOutVertically(tween(140, easing = FastOutSlowInEasing)) { -it / 6 }) {
+            Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).stableStatusBarsPadding().height(56.dp)
+                .padding(start = 64.dp, end = 20.dp), contentAlignment = Alignment.CenterStart) {
+                Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }

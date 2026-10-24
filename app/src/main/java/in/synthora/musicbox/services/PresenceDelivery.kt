@@ -51,3 +51,12 @@ internal class CursorPublicationSignal {
     suspend fun awaitChange(timeoutMs: Long = 3_000): Boolean =
         kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { changes.receive(); true } ?: false
 }
+
+/** Ownership must not wait behind slow command preparation or a metadata request. */
+internal class PlaybackPresenceDelivery<S, C>(scope: CoroutineScope,
+    onFailure: (Exception) -> Unit = {}, onState: suspend (S) -> Unit,
+    onCommands: suspend (S, C) -> Unit) {
+    private val states = PresenceDelivery<S>(scope, onFailure, onState)
+    private val commands = PresenceDelivery<Pair<S, C>>(scope, onFailure) { (state, queued) -> onCommands(state, queued) }
+    fun offer(state: S, queued: C) { states.offer(state); commands.offer(state to queued) }
+}

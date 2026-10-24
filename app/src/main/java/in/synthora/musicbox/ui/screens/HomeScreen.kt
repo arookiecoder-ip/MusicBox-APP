@@ -100,6 +100,7 @@ import `in`.synthora.musicbox.ui.theme.glassPane
 import `in`.synthora.musicbox.utils.rememberJukeHaptics
 import `in`.synthora.musicbox.viewmodels.HomeViewModel
 import `in`.synthora.musicbox.viewmodels.MusicViewModel
+import `in`.synthora.musicbox.network.toTrack
 import `in`.synthora.musicbox.network.BrowseItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -180,7 +181,7 @@ internal fun HomeContent(
                         val track = uiState.recentTracks.firstOrNull { it.ytVideoId == item.videoId }
                             ?: uiState.shelves.asSequence().flatMap { it.tracks.asSequence() }
                                 .firstOrNull { it.ytVideoId == item.videoId }
-                        if (track != null) onPlayTracks(listOf(track), 0)
+                        onPlayTracks(listOf(track ?: item.toTrack()), 0)
                     }
                 }
             }
@@ -222,13 +223,12 @@ internal fun HomeContent(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlaySomething: () -> Unit,
-    onOpen: (BrowseItem) -> Unit,
-    onPlayTrack: (BrowseItem) -> Unit) {
+    onOpen: (BrowseItem) -> Unit, onPlayTrack: (BrowseItem) -> Unit) {
+    val menu = LocalMediaMenu.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Speed dial", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-            Button(onClick = onPlaySomething, enabled = canPlaySomething, shape = androidx.compose.ui.graphics.RectangleShape,
+            Text("Speed dial", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Button(onClick = onPlaySomething, enabled = canPlaySomething, shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
                 Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
                 Text("Play something", Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelLarge)
@@ -243,24 +243,17 @@ private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlay
                 rows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { item ->
-                            val click = Modifier.combinedClickable(role = Role.Button,
-                                onClick = { onPlayTrack(item) }, onLongClick = { onOpen(item) },
-                                onLongClickLabel = "Open ${item.title}")
-                            if (tablet) {
-                                Row(Modifier.weight(1f).height(68.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    .then(click), verticalAlignment = Alignment.CenterVertically) {
-                                    `in`.synthora.musicbox.ui.components.ListArtwork(item.image, 56.dp,
-                                        Modifier.padding(start = 6.dp).size(56.dp))
-                                    Text(item.title, Modifier.weight(1f).padding(horizontal = 8.dp),
-                                        style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            } else {
-                                Column(Modifier.weight(1f).then(click)) {
-                                    `in`.synthora.musicbox.ui.components.ListArtwork(item.image, artworkSize,
-                                        Modifier.size(artworkSize))
-                                    Text(item.title, Modifier.fillMaxWidth().padding(top = 3.dp),
-                                        style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
+                            Box(Modifier.weight(1f).height(if (tablet) 96.dp else artworkSize)
+                                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .testTag("Speed dial ${item.videoId}")
+                                .combinedClickable(role = Role.Button, onClick = { onPlayTrack(item) },
+                                    onLongClick = { if (menu != null) menu.show(item) else onOpen(item) }, onLongClickLabel = "Song options")) {
+                                `in`.synthora.musicbox.ui.components.ListArtwork(item.image, artworkSize, Modifier.fillMaxSize())
+                                Box(Modifier.fillMaxWidth().height(56.dp).align(Alignment.BottomCenter)
+                                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f)))))
+                                Text(item.title, Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp),
+                                    color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }

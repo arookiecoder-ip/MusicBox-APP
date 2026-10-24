@@ -63,6 +63,6 @@ fun PlaylistDetailScreen(playlistDetailViewModel: PlaylistDetailViewModel = view
                 if (state.isLoadingMore) item { TrackRowsSkeleton(3) }
             }
         }
-        DetailBackButton(onNavigateBack, Modifier.align(Alignment.TopStart))
+        DetailBackButton(onNavigateBack, Modifier.align(Alignment.TopStart), transparent = true)
     }
 }

@@ -969,7 +969,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var remotePhoneRefreshJob: Job? = null
     private val remoteStateRefresh = `in`.synthora.musicbox.services.RemoteStateRefresh()
     private suspend fun onMobileOutput(output: `in`.synthora.musicbox.services.SharedPlaybackOutput) {
-        if (!signedIn || `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff) return
+        if (!signedIn) return
         val ownId = `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId
         val claim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
         if (claim.isNotBlank() && (output.mode != "phone" || output.owner != ownId)) {
@@ -977,7 +977,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val stopped = `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff()
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.releaseTo(output, stopped.second, stopped.first)
         }
-        if (_isSwitchingOutput.value) return
+        // A superseded preparation must release ownership immediately, while a
+        // current local preparation still keeps its queue protected.
+        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff || _isSwitchingOutput.value) return
         if (output.mode == "phone" && output.owner == ownId && !output.handoffPending) {
             if (claim != output.token) {
                 if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.dismissed(output)) {

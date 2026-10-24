@@ -131,19 +131,6 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                 val editable = queue.isNotEmpty() && !uiState.isQueueOperationInProgress
                 val dragging = draggedKey == key
                 var hidden by remember(key) { mutableStateOf(false) }
-                val dismiss = rememberSwipeToDismissBoxState(confirmValueChange = { value ->
-                    if (editable && !active && !dragging && value == SwipeToDismissBoxValue.EndToStart) {
-                        true
-                    } else false
-                })
-                LaunchedEffect(dismiss.currentValue) {
-                    if (dismiss.currentValue == SwipeToDismissBoxValue.EndToStart && !hidden) {
-                        hidden = true
-                        onRemoveTrack(track.uuid) { success ->
-                            if (!success) scope.launch { dismiss.snapTo(SwipeToDismissBoxValue.Settled); hidden = false }
-                        }
-                    }
-                }
                 val grip = Modifier.size(width = 36.dp, height = 56.dp).pointerInput(key, editable) {
                     if (editable) detectDragGestures(onDragStart = {
                         haptics.gestureStart(); origin = index; draggedKey = key; dragDelta = 0f
@@ -167,14 +154,15 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                         .zIndex(if (dragging) 2f else 0f).graphicsLayer { translationY = if (dragging) initialTop + dragDelta - (list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.offset ?: initialTop.toInt()) else 0f },
                     enter = androidx.compose.animation.expandVertically(expandFrom = Alignment.Top),
                     exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(250), shrinkTowards = Alignment.Top)) {
-                SwipeToDismissBox(dismiss, enableDismissFromStartToEnd = false,
-                    enableDismissFromEndToStart = editable && !active && !dragging,
-                    modifier = Modifier.testTag("Queue row ${track.uuid}").semantics { selected = active }.shadow(if (dragging) 8.dp else 0.dp),
-                    backgroundContent = {
-                        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(end = 20.dp), contentAlignment = Alignment.CenterEnd) {
-                            Icon(Icons.Default.Delete, "Remove from queue", tint = MaterialTheme.colorScheme.onErrorContainer)
+                `in`.synthora.musicbox.ui.components.SwipeToRemoveQueueRow(
+                    enabled = editable && !active && !dragging,
+                    onRemove = {
+                        if (!hidden) {
+                            hidden = true
+                            onRemoveTrack(track.uuid) { success -> if (!success) hidden = false }
                         }
-                    }) {
+                    },
+                    modifier = Modifier.testTag("Queue row ${track.uuid}").semantics { selected = active }.shadow(if (dragging) 8.dp else 0.dp)) {
                     fun songOptions() {
                         menu?.show(track, QueueSongActions(
                             play = { if (onPlayEntry != null) onPlayEntry(track, index) else onPlayTrack(track) },

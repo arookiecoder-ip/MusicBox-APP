@@ -46,11 +46,15 @@ object MobileDeviceConnection {
         val activeGeneration = ++generation
         val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
         job = scope.launch {
-            val delivery = PresenceDelivery<Pair<SharedPlaybackOutput, JsonArray>>(this,
-                onFailure = { `in`.synthora.musicbox.utils.SafeLog.w("MobilePresence", "Playback delivery failed: ${it.javaClass.simpleName}") }) { (output, commands) ->
-                if (activeGeneration != generation) return@PresenceDelivery
-                PhonePlaybackOwnership.retryPauseAcknowledgment(latestOutput)
-                if (!output.olderThan(latestOutput)) onState(output)
+            val delivery = PlaybackPresenceDelivery<SharedPlaybackOutput, JsonArray>(this,
+                onFailure = { `in`.synthora.musicbox.utils.SafeLog.w("MobilePresence", "Playback delivery failed: ${it.javaClass.simpleName}") },
+                onState = { output ->
+                    if (activeGeneration == generation) {
+                        PhonePlaybackOwnership.retryPauseAcknowledgment(latestOutput)
+                        if (!output.olderThan(latestOutput)) onState(output)
+                    }
+                }) { _, commands ->
+                if (activeGeneration != generation) return@PlaybackPresenceDelivery
                 for (raw in commands) {
                     val command = raw.objectOrEmpty()
                     val id = command.text("id")
@@ -105,7 +109,7 @@ object MobileDeviceConnection {
                     outputToken = output.token
                     // Playback preparation/acknowledgment may wait on slow audio or
                     // the server. Presence must keep renewing while that work runs.
-                    delivery.offer(output to reply.array("commands"))
+                    delivery.offer(output, reply.array("commands"))
                 } catch (_: TimeoutCancellationException) { failures++; retryAfterMs = 0L }
                 catch (e: CancellationException) { throw e }
                 catch (error: Exception) {
