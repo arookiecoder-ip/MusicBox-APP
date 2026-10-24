@@ -471,10 +471,12 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     private var videosJob: Job? = null
+    private var videosRequest=0L
     fun loadAllArtistVideos() {
         val state=_artistDetailState.value
         val artist=state.artist ?: return
         if(state.videosLoading || state.allVideosLoaded || state.videosBrowseId.isBlank()) return
+        val request=++videosRequest
         videosJob?.cancel()
         _artistDetailState.update { it.copy(videosLoading=true,error=null) }
         videosJob=viewModelScope.launch {
@@ -482,14 +484,14 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 val data=Backend.get("/api/library/playlists/${state.videosBrowseId}",mapOf("offset" to state.videosNextOffset.toString(),"limit" to "30")).objectOrEmpty()
                 val rows=data.array("tracks").mapNotNull { it as? JsonObject }.map(BrowseParser::item)
                     .filter { it.videoId.isNotBlank() }.map { it.copy(id=it.videoId,kind="track").toTrack(AccountRepository.liked.value) }
-                if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(
+                if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(
                     videos=(it.videos+rows).distinctBy { row->row.ytVideoId },
                     videosNextOffset=data.number("next_offset").takeIf { n->n>state.videosNextOffset } ?: state.videosNextOffset+rows.size,
                     allVideosLoaded=!data.flag("has_more") || rows.isEmpty()) }
             } catch(e:CancellationException) { throw e }
             catch(e:BackendAuthException) { _signedOut.tryEmit(Unit) }
-            catch(e:Exception) { if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(error=e.message ?: "Could not load artist videos") } }
-            finally { if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(videosLoading=false) } }
+            catch(e:Exception) { if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(error=e.message ?: "Could not load artist videos") } }
+            finally { if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(videosLoading=false) } }
         }
     }
 

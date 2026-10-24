@@ -325,4 +325,29 @@ class KeyboardArtistPresentationTest {
         compose.runOnIdle { assertFalse("Submitted search reopened the keyboard",keyboardVisible(view)) }
     }
 
+    @Test fun artistVideoPreviewShowsFiveAndOpensAllVideoSongsInASeparatePage() {
+        val tracks=(1..8).map { n -> `in`.synthora.musicbox.models.Track("video-$n","Music video $n","Artist",durationSec=180,ytVideoId="video00000$n") }
+        val artist=BrowseParser.item(buildJsonObject { put("browseId","UCfixture");put("title","Video artist") })
+        var all by mutableStateOf(false)
+        compose.setContent { JUKETheme {
+            val search: `in`.synthora.musicbox.viewmodels.SearchViewModel=androidx.lifecycle.viewmodel.compose.viewModel()
+            val music: `in`.synthora.musicbox.viewmodels.MusicViewModel=androidx.lifecycle.viewmodel.compose.viewModel()
+            LaunchedEffect(Unit) {
+                val field=search.javaClass.getDeclaredField("_artistDetailState").apply { isAccessible=true }
+                @Suppress("UNCHECKED_CAST")
+                val state=field.get(search) as kotlinx.coroutines.flow.MutableStateFlow<`in`.synthora.musicbox.viewmodels.ArtistDetailUiState>
+                state.value=`in`.synthora.musicbox.viewmodels.ArtistDetailUiState(artist=artist,videos=tracks)
+            }
+            if(all) `in`.synthora.musicbox.ui.screens.ArtistSongsScreen("UCfixture",search,music,{all=false},videos=true)
+            else `in`.synthora.musicbox.ui.screens.ArtistDetailScreen(search,music,{},onShowAllVideos={all=true})
+        } }
+        compose.waitUntil { compose.onAllNodesWithTag("Collection tracks").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("Collection tracks").performScrollToIndex(7)
+        compose.onNodeWithText("Music video 6").assertDoesNotExist()
+        compose.onNodeWithText("Show all video songs").performClick()
+        compose.runOnIdle { assertTrue(all) }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(8)
+        compose.onNodeWithText("Music video 8").assertIsDisplayed()
+    }
+
 }
