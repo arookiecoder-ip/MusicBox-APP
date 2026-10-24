@@ -195,6 +195,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val pendingPlayback = MutableStateFlow<PendingSelection?>(null)
     private val presentedPlaybackRequest = MutableStateFlow(0L)
     private var pendingPlaybackJob: Job? = null
+    private var youtubeLinkJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
     private var playlistBackfillJob: Job? = null
     private val phoneQueueMutex = kotlinx.coroutines.sync.Mutex()
@@ -1419,17 +1420,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Play one song; the queue continues with its radio. */
     fun playYoutubeLink(link: `in`.synthora.musicbox.network.YoutubeLink) {
-        viewModelScope.launch {
+        val requestId = ++playbackRequestId
+        youtubeLinkJob?.cancel()
+        pendingPlaybackJob?.cancel()
+        link.videoId?.let { video ->
+            pendingPlayback.value = PendingSelection(Track("youtube-link:$video", "Loading…", "", durationSec = 0, ytVideoId = video), null, requestId)
+        }
+        youtubeLinkJob = viewModelScope.launch {
             try {
                 if (link.videoId != null) {
                     val metadata = Backend.get("/api/track/${link.videoId}/metadata").objectOrEmpty()
+                    if (requestId != playbackRequestId) return@launch
                     playTrack(BrowseParser.item(JsonObject(metadata + mapOf("video_id" to JsonPrimitive(link.videoId)))).toTrack(AccountRepository.liked.value))
-                } else if (link.playlistId != null) {
+                } else if (link.playlistId != null && requestId == playbackRequestId) {
                     playCollection(BrowseParser.item(buildJsonObject { put("playlistId", link.playlistId); put("title", "YouTube playlist") }))
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
             catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: "Couldn't play this YouTube link") }
+            finally { if (requestId == playbackRequestId) pendingPlayback.value = null }
         }
     }
 
@@ -1947,6 +1956,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
     fun togglePlayPause() {
+        if (youtubeLinkJob?.isActive == true) {
+            ++playbackRequestId
+            youtubeLinkJob?.cancel()
+            pendingPlayback.value = null
+            return
+        }
         if (isRemotePhone) { remoteControl(if (remoteTransportPreview.value?.takeIf { it.owner == _remoteMobileOutput.value.owner && it.error == null }?.playing ?: uiState.value.isPlaying) "pause" else "play"); return }
         if (isAlexa) {
             val playing = echo.state.value.playing
@@ -2174,7 +2189,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun removeFromQueue(trackId: String, onComplete: ((Boolean) -> Unit)? = null) {
         if (isRemotePhone) {
             viewModelScope.launch {
-                try { `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "remove", buildJsonObject { put("id", trackId) }); onComplete?.invoke(true) }
+                try {
+                    val state = uiState.value
+                    val index = state.queue.indexOfFirst { it.uuid == trackId }
+                    if (index < 0) { onComplete?.invoke(true); return@launch }
+                    if (index == state.queueIndex) { onComplete?.invoke(false); return@launch }
+                    `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "remove", buildJsonObject {
+                        put("id", trackId); put("index", index)
+                        state.queue[index].ytVideoId?.let { put("video_id", it) }
+                    })
+                    onComplete?.invoke(true)
+                }
                 catch (e: Exception) { onComplete?.invoke(false); _messages.tryEmit(e.message ?: "Couldn't remove song") }
             }
             return

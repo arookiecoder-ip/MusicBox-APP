@@ -43,6 +43,7 @@ class KeyboardArtistPresentationTest {
             SearchHeader("Search", query, { query = it }, opened, { opened = it }, "Find songs", selectAllTrigger = trigger)
         } } }
         compose.onNodeWithText("Open field").performClick()
+        compose.waitUntil(7000) { compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.Focused] }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.waitUntil(7000) { keyboardVisible(view) }
         compose.runOnIdle { trigger++ }
@@ -57,6 +58,18 @@ class KeyboardArtistPresentationTest {
         compose.waitUntil(7000) { keyboardVisible(view) }
         compose.onNodeWithContentDescription("Close search").performClick()
         compose.waitUntil(7000) { !keyboardVisible(view) }
+    }
+
+    @Test fun pastingAYouTubeLinkWaitsForTheSearchImeAction() {
+        var query by mutableStateOf("")
+        var submissions = 0
+        compose.setContent { JUKETheme { SearchHeader("Search", query, { query = it }, true, {}, "Find songs",
+            onSearch = { submissions++ }) } }
+        compose.waitUntil(7000) { compose.onNode(hasSetTextAction()).fetchSemanticsNode().config[SemanticsProperties.Focused] }
+        compose.onNode(hasSetTextAction()).performTextReplacement("https://youtu.be/dQw4w9WgXcQ")
+        compose.runOnIdle { assertEquals(0, submissions); assertEquals("https://youtu.be/dQw4w9WgXcQ", query) }
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.runOnIdle { assertEquals(1, submissions) }
     }
 
     @Test fun artistPhotosAreRequestedOnlyWhileOpenAndOutstandingLoadsAreCanceled() {

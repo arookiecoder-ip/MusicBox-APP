@@ -672,7 +672,8 @@ class MainActivity : ComponentActivity() {
                                             .loadAlbumDetails(album)
                                         navController.navigate("album/${album.id}")
                                     },
-                                    bottomPadding = bottomPadding
+                                    bottomPadding = bottomPadding,
+                                    onShowPlayer = { showPlayerModal = true }
                                 )
                             }
                             composable(Screen.Library.route) {
