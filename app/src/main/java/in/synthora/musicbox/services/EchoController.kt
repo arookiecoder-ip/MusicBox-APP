@@ -183,7 +183,7 @@ class EchoController(
                     Log.w(TAG, "Now-playing poll failed")
                 }
                 val interval=remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures,MobileDeviceConnection.hasLivePresence())
-                withTimeoutOrNull(interval) { changes.receive() }
+                if(failures>0) delay(interval) else withTimeoutOrNull(interval) { changes.receive() }
             }
             } finally { presence.cancel();changes.close() }
         }
