@@ -109,7 +109,7 @@ fun SearchHeader(
         run {
             if (open) {
                 var fieldFocused by remember { mutableStateOf(false) }
-                val sessionToken = remember(selectAllTrigger) { Any() }
+                val sessionToken = remember { Any() }
                 var imeWanted by remember(selectAllTrigger) { mutableStateOf(true) }
                 var imeJob by remember { mutableStateOf<Job?>(null) }
                 fun hideIme() {
@@ -120,18 +120,17 @@ fun SearchHeader(
                     SearchImeOwner.claim(view, sessionToken)
                     onDispose {
                         imeJob?.cancel()
-                        if (SearchImeOwner.owns(view, sessionToken)) {
-                            hideIme()
-                            view.post {
-                                if (SearchImeOwner.owns(view, sessionToken)) {
-                                    ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
-                                    SearchImeOwner.finish(view, sessionToken)
-                                }
+                        // Wait one main-loop turn: a replacement field can claim the IME first.
+                        // A re-tap keeps this session and never runs disposal/hide at all.
+                        view.post {
+                            if (SearchImeOwner.owns(view, sessionToken)) {
+                                hideIme()
+                                SearchImeOwner.finish(view, sessionToken)
                             }
                         }
                     }
                 }
-                LaunchedEffect(sessionToken, window.isWindowFocused, imeWanted) {
+                LaunchedEffect(sessionToken, selectAllTrigger, window.isWindowFocused, imeWanted) {
                     if (!imeWanted) return@LaunchedEffect
                     imeJob=currentCoroutineContext()[Job]
                     // Compose focus can be established before Android grants window focus.
