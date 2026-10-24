@@ -45,4 +45,17 @@ class CallPlaybackGuardTest {
         assertFalse(pending)
     }
 
+    @Test fun asynchronousPauseAcknowledgementMustNotCancelTheCallResume() {
+        var pending = false
+        var pauseCommand = false
+        val guard = CallPlaybackGuard({ true }, { pauseCommand = true }, { pending = true }, { pending = false })
+        guard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+        assertTrue(pauseCommand)
+        assertTrue(pending)
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+        assertTrue("The guard's own delayed acknowledgement must preserve resume", pending)
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+        assertFalse("An explicit later pause must cancel resume", pending)
+    }
+
 }

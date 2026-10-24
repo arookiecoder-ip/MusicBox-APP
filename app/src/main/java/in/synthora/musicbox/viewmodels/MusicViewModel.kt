@@ -260,7 +260,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var hasStartedDeferredStartupWork = false
 
     fun saveLyricsOffset(track: Track, offsetMs: Long) {
-        if (isAlexa) {
+        if (isAlexa || isRemotePhone) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update { it + (videoId to (it[videoId] ?: track).copy(lyricsOffsetMs = offsetMs)) }
             return
@@ -301,7 +301,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (romanizedSyncedLyrics.isNullOrBlank() && romanizedPlainLyrics.isNullOrBlank()) {
             return
         }
-        if (isAlexa) {
+        if (isAlexa || isRemotePhone) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update {
                 val base = it[videoId] ?: track
@@ -474,7 +474,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe restored state and update UI with saved queue
         viewModelScope.launch {
-            combine(echo.devices, echo.serial, echo.state.map { it.sharedOutput }.distinctUntilChanged(), _output) { devices, serial, shared, output ->
+            combine(echo.devices, echo.serial, echo.state.map { it.sharedOutput }.distinctUntilChanged(),
+                combine(_output, pendingPlayback, _isSwitchingOutput) { output, pending, switching ->
+                    output.takeIf { pending == null && !switching }
+                }) { devices, serial, shared, output ->
                 if (output == PlaybackOutput.ALEXA) unavailableEchoSerial(devices, shared.serial.ifBlank { serial }) else null
             }.distinctUntilChanged().collect { offline ->
                 if (offline != null && signedIn && isForeground) selectIdleForegroundDevice(offline)
@@ -1613,6 +1616,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         radioJob?.cancel()
+        playlistBackfillJob?.cancel()
         val request = playbackRequestId
         radioJob = viewModelScope.launch {
             try {

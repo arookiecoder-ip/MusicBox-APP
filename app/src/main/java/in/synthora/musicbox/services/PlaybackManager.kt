@@ -627,6 +627,9 @@ class PlaybackManager private constructor(private val context: Context) {
     }
 
     fun pause() {
+        // A controller connection finishing later must not start the superseded song.
+        pendingQueueAction = null
+        _isPlaying.value = false
         controller?.pause()
     }
 
