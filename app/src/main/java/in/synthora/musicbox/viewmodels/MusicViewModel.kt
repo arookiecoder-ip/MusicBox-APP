@@ -198,6 +198,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var youtubeLinkJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
     private var playlistBackfillJob: Job? = null
+    private var radioJob: Job? = null
     private val phoneQueueMutex = kotlinx.coroutines.sync.Mutex()
     private var sharedPhoneQueueReady = false
     private var serverPlaybackChecked = false
@@ -473,10 +474,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe restored state and update UI with saved queue
         viewModelScope.launch {
-            echo.devices.collect { devices ->
-                if (signedIn && isForeground && isAlexa && devices.any { it.serial == echo.state.value.sharedOutput.serial && !it.online }) {
-                    selectIdleForegroundDevice()
-                }
+            combine(echo.devices, echo.serial, echo.state.map { it.sharedOutput }.distinctUntilChanged(), _output) { devices, serial, shared, output ->
+                if (output == PlaybackOutput.ALEXA) unavailableEchoSerial(devices, shared.serial.ifBlank { serial }) else null
+            }.distinctUntilChanged().collect { offline ->
+                if (offline != null && signedIn && isForeground) selectIdleForegroundDevice(offline)
             }
         }
         viewModelScope.launch {
@@ -506,9 +507,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // Lyrics for whatever is playing, on the phone or the Echo.
         viewModelScope.launch {
             uiState.map { it.currentTrack }
-                .distinctUntilChanged { old, new -> old?.uuid == new?.uuid }
+                .distinctUntilChanged { old, new -> old?.uuid == new?.uuid && old?.title == new?.title && old?.artist == new?.artist }
                 .collect { track ->
-                    if (track != null && track.syncedLyrics.isNullOrBlank() && track.plainLyrics.isNullOrBlank()) {
+                    if (track != null && track.title.isNotBlank() && track.title != "Loading…" && track.syncedLyrics.isNullOrBlank()) {
                         refreshLyrics(track)
                     }
                 }
@@ -669,15 +670,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var idlePhoneSelection = false
-    private suspend fun selectIdleForegroundDevice() {
+    private suspend fun selectIdleForegroundDevice(offlineAlexa: String? = null) {
         if (!isForeground || !signedIn || _isSwitchingOutput.value || pendingPlayback.value != null || (_output.value == PlaybackOutput.PHONE && playbackManager.shouldResumeAfterTrackChange())) return
         val request = playbackRequestId
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true
         try {
             val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault(
-                echo.state.value.sharedOutput.takeIf { it.mode == "alexa" }?.let {
-                    unavailableEchoSerial(echo.devices.value, it.serial)
-                }) } ?: return
+                offlineAlexa ?: if (isAlexa || echo.state.value.sharedOutput.mode == "alexa")
+                    unavailableEchoSerial(echo.devices.value, echo.state.value.sharedOutput.serial.ifBlank { echo.serial.value }) else null) } ?: return
             if (request != playbackRequestId || !isForeground) return
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(selected)
             // Restore only metadata. Audio preparation waits for an explicit play action.
@@ -703,6 +703,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun adoptRemoteAlexa(output: `in`.synthora.musicbox.services.SharedPlaybackOutput, expectedClaim: String? = null) {
         if (_isSwitchingOutput.value) return
+        unavailableEchoSerial(echo.devices.value, output.serial.ifBlank { echo.serial.value })?.let { offline ->
+            selectIdleForegroundDevice(offline)
+            return
+        }
+        // Unknown/removed devices are not a valid renderer either. Discovery or the
+        // next foreground reconciliation can restore an online selection.
+        if (echo.devices.value.none { it.online && (output.serial.isBlank() || it.serial == output.serial) }) return
         if (expectedClaim != null && expectedClaim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token) return
         phoneQueueSyncJob?.cancel()
         playlistBackfillJob?.cancel()
@@ -1382,6 +1389,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // A new song supersedes any in-flight playlist backfill: its chunks
         // belong to the previous song's queue and must not be appended.
         playlistBackfillJob?.cancel()
+        radioJob?.cancel()
         pendingPlayback.value = PendingSelection(track, queueIndex, requestId)
         pendingPlaybackJob = viewModelScope.launch {
             var readyForPresentation = false
@@ -1402,6 +1410,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         if (!readyForPresentation && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The Echo hasn't confirmed playback yet")
                     }
                 } else {
+                    `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff()
+                    playbackManager.pause()
+                    _uiState.update { it.copy(isPlaying = false) }
                     block()
                     val ready = withTimeoutOrNull(45_000) {
                         val expectedId = if (localOnly) _uiState.value.currentTrack?.uuid ?: track.uuid else track.uuid
@@ -1601,11 +1612,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             launchEcho { echo.playSong(current, radio = true) }
             return
         }
-        viewModelScope.launch {
-            playbackManager.keepOnlyCurrentTrack()
-            queueManager.initializeQueue(listOf(current), isRadioMode = true)
-            _uiState.update { it.copy(queue = listOf(current), queueIndex = 0) }
-            synchronizePhoneQueue(startRadio = true)
+        radioJob?.cancel()
+        val request = playbackRequestId
+        radioJob = viewModelScope.launch {
+            try {
+                val recommendations = withTimeout(20_000) { AlexaBackendApi.getRadio(requireNotNull(current.ytVideoId)) }
+                coroutineContext.ensureActive()
+                if (request != playbackRequestId || _uiState.value.currentTrack?.uuid != current.uuid || isAlexa || isRemotePhone) return@launch
+                val full = listOf(current) + recommendations.filter { it.videoId != current.ytVideoId }
+                    .distinctBy { it.videoId }.map { it.toAppTrack(AlexaBackendApi.audioUrl(it.videoId)) }
+                check(full.size > 1) { "No radio songs were returned. Try again." }
+                phoneQueueSyncJob?.cancel()
+                queueManager.clearQueue()
+                withContext(Dispatchers.IO) { trackDao.insertTracks(full.map { it.toEntity() }) }
+                coroutineContext.ensureActive()
+                if (request != playbackRequestId || _uiState.value.currentTrack?.uuid != current.uuid) return@launch
+                playbackManager.keepOnlyCurrentTrack()
+                playbackManager.replaceUpcoming(full, 0)
+                _uiState.update { it.copy(queue = full, queueIndex = 0) }
+                synchronizePhoneQueue()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't refresh radio") }
         }
     }
 
@@ -1621,10 +1648,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         launchPlayback(track, queueIndex = index) {
             val currentState = _uiState.value
             val queue = currentState.queue
-            val trackIndex = index.takeIf { queue.getOrNull(it)?.uuid == track.uuid } ?: -1
-            if (trackIndex == -1) return@launchPlayback
-
-            playbackManager.seekToIndex(trackIndex)
+            val trackIndex = queue.indexOfFirst { it.uuid == track.uuid }
+            check(trackIndex >= 0) { "This song is no longer in the queue" }
+            if (idlePhoneSelection || !playbackManager.seekToQueueEntry(track.uuid)) {
+                phoneSetQueue(queue, trackIndex)
+                return@launchPlayback
+            }
             _uiState.update {
                 it.copy(
                     currentTrack = track,
@@ -2339,7 +2368,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshLyrics(track: Track) {
         if (lyricsRefreshJobs[track.uuid]?.isActive == true) return
-        val isEcho = isAlexa
+        val isEcho = isAlexa || isRemotePhone
         lyricsRefreshJobs[track.uuid] = viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -2612,5 +2641,5 @@ internal fun selectionPresented(state: MusicUiState, trackId: String, index: Int
 
 /** An empty server serial after restart must not strand a saved queue on an offline Echo. */
 internal fun unavailableEchoSerial(devices: List<`in`.synthora.musicbox.services.EchoDevice>, selected: String): String? =
-    if (selected.isNotBlank()) devices.firstOrNull { it.serial == selected && !it.online }?.serial
-    else devices.takeIf { it.isNotEmpty() && it.none { device -> device.online } }?.first()?.serial
+    devices.firstOrNull { it.serial == selected && !it.online }?.serial
+        ?: devices.takeIf { it.isNotEmpty() && it.none { device -> device.online } }?.first()?.serial

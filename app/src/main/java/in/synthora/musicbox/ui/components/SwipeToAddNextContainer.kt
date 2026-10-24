@@ -54,7 +54,7 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
     var width by remember { mutableFloatStateOf(0f) }
     var settling by remember { mutableStateOf<Job?>(null) }
     Box(modifier.fillMaxWidth().clipToBounds().onSizeChanged { width = it.width.toFloat() }
-        .pointerInput(onLeft != null, onRight != null) {
+        .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 settling?.cancel(); offset = 0f

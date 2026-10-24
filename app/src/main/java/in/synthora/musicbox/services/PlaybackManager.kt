@@ -277,6 +277,7 @@ class PlaybackManager private constructor(private val context: Context) {
                         }
 
                         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                            if (!playWhenReady) _isPlaying.value = false
                             if (playWhenReady) pausedAtMs = 0L
                             else if (pausedAtMs == 0L) pausedAtMs = android.os.SystemClock.elapsedRealtime()
                         }
@@ -723,9 +724,15 @@ class PlaybackManager private constructor(private val context: Context) {
         Log.d(TAG, "Seeked to $target ms")
     }
 
+    fun seekToQueueEntry(trackId: String): Boolean {
+        val ctrl = controller ?: return false
+        val index = (0 until ctrl.mediaItemCount).firstOrNull { ctrl.getMediaItemAt(it).mediaId == trackId }
+            ?: return false
+        return playQueueEntry(ctrl, index)
+    }
+
     fun seekToIndex(index: Int) {
         controller?.let { playQueueEntry(it, index) }
-        Log.d(TAG, "Seeked to index $index")
     }
 
     fun getResumePosition(trackId: String, fallback: Long): Long {

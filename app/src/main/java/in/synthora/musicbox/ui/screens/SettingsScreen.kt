@@ -68,7 +68,7 @@ fun SettingsScreen(
     val bass by music.bassLevel.collectAsStateWithLifecycle()
     val miniLyrics by music.isMiniPlayerLyricsEnabled.collectAsStateWithLifecycle()
     val settingsPrefs = remember { context.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE) }
-    var mobilePrefetch by remember { mutableStateOf(settingsPrefs.getBoolean("prefetch_mobile_data", false)) }
+    var mobilePrefetch by remember { mutableStateOf(settingsPrefs.getBoolean("prefetch_mobile_data", true)) }
     var cacheMb by remember { mutableIntStateOf(settingsPrefs.getInt("stream_cache_mb", 256)) }
     var hapticsEnabled by remember { mutableStateOf(settingsPrefs.getBoolean("haptics_enabled", true)) }
     val echoDevices by music.echo.devices.collectAsStateWithLifecycle()

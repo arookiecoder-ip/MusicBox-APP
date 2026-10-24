@@ -15,6 +15,8 @@ internal class CallPlaybackGuard(
             holding = true
             try { pause() } finally { holding = false }
             scheduleResume()
+        } else if (!playWhenReady && !holding && isInCall() && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+            scheduleResume()
         } else if (!playWhenReady && !holding && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
             cancelResume()
         }

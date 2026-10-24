@@ -459,4 +459,28 @@ class UpcomingAudioPreloaderTest {
             directory.deleteRecursively()
         }
     }
+    @Test fun rollingWindowDeletesPlayedAudioAndKeepsCurrentPlusFiveEvenWhenPausedOffline() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "rolling-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val factory = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }
+        val urls = (0..7).map { "https://audio.example/song$it" }
+        urls.forEach { url -> withContext(Dispatchers.IO) { CacheWriter(factory.createDataSource(), DataSpec(Uri.parse(url)), null, null).cache() } }
+        val preloader = UpcomingAudioPreloader(factory, childScope, policyOverride = { PreloadPolicy(5, -1) })
+        try {
+            preloader.update(urls.drop(2).take(5), currentUrl=urls[1], active=false)
+            withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } }
+            assertFalse(cache.isCached(urls[0], 0, 8_192))
+            assertFalse(cache.isCached(urls[7], 0, 8_192))
+            urls.subList(1,7).forEach { assertTrue(cache.isCached(it, 0, 8_192)) }
+            preloader.update(urls.drop(3).take(5), currentUrl=urls[2], active=false)
+            withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } }
+            assertFalse(cache.isCached(urls[1],0,8_192))
+            assertTrue(cache.isCached(urls[2],0,8_192))
+        } finally {
+            preloader.clearAndAwait();childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
+
 }

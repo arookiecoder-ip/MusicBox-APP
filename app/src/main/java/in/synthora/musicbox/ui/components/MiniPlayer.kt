@@ -131,7 +131,7 @@ fun MiniPlayer(
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoName = echoDevices.firstOrNull { it.serial == echoSerial }?.name
     val currentTrack = uiState.currentTrack
-    val isPlaying = uiState.isPlaying
+    val isPlaying = uiState.isPlaying && !uiState.isLoading
     val isRomanizedLyricsEnabled by musicViewModel.isRomanizedLyricsEnabled.collectAsStateWithLifecycle()
     val isMiniPlayerLyricsEnabled by musicViewModel.isMiniPlayerLyricsEnabled.collectAsStateWithLifecycle()
     val haptic = rememberJukeHaptics()
@@ -196,13 +196,15 @@ fun MiniPlayer(
         }
 
         // Parse synced lyrics once per source/offset change for smooth real-time updates.
-        val parsedLyrics by androidx.compose.runtime.produceState<List<LyricLine>>(emptyList(),
-            currentTrack.uuid, syncedLyricsForMini, currentTrack.lyricsOffsetMs, isMiniPlayerLyricsEnabled) {
-            value = emptyList()
-            if (isMiniPlayerLyricsEnabled) value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
+        val lyricKey = Triple(currentTrack.uuid, syncedLyricsForMini, currentTrack.lyricsOffsetMs)
+        val parsedResult by androidx.compose.runtime.produceState<Pair<Triple<String, String?, Long>, List<LyricLine>>?>(null,
+            lyricKey, isMiniPlayerLyricsEnabled) {
+            value = null
+            if (isMiniPlayerLyricsEnabled) value = lyricKey to kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
                 syncedLyricsForMini?.let { parseSyncedLyrics(it, currentTrack.lyricsOffsetMs) } ?: emptyList()
             }
         }
+        val parsedLyrics = parsedResult?.takeIf { it.first == lyricKey && isMiniPlayerLyricsEnabled }?.second.orEmpty()
 
         // Compute the adaptive gap threshold once per lyric set so it adapts to
         // each song's own pacing without any manual tuning.

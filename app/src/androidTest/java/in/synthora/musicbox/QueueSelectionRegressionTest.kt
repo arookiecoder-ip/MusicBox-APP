@@ -185,4 +185,21 @@ class QueueSelectionRegressionTest {
         compose.mainClock.autoAdvance=true
     }
 
+    @Test fun queueTapSurvivesPlaybackAndEditingFlagsChangingWhileFingerIsDown() {
+        var selected by mutableIntStateOf(0)
+        var busy by mutableStateOf(false)
+        var clicks=0
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(480.dp)) {
+            QueueBottomSheetContent(songs[selected],songs,selected,MusicUiState(isQueueOperationInProgress=busy),{}, {_,_->}, {_,_->}, {},
+                onPlayEntry={_,index->selected=index;clicks++})
+        } } }
+        repeat(6) { attempt ->
+            val row=compose.onNodeWithTag("Queue row song1")
+            row.performTouchInput { down(center) }
+            compose.runOnIdle { busy=!busy;selected=if(attempt%2==0) 1 else 0 }
+            row.performTouchInput { moveBy(Offset(1f,1f));up() }
+            compose.runOnIdle { assertEquals(attempt+1,clicks); assertEquals(1,selected) }
+        }
+    }
+
 }

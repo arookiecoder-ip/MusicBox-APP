@@ -116,6 +116,7 @@ class PlaybackService : MediaLibraryService() {
             val snapshot = (service.player.playWhenReady || service.leaseInterruption.matches(
                 service.player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token) || service.recoveryShouldResume) to service.player.currentPosition
             service.cancelSessionResume()
+            service.mainHandler.removeCallbacks(service.resumeAfterCall)
             service.leaseInterruption.clear()
             service.networkInterruption.clear()
             service.recoveryShouldResume = false
@@ -334,7 +335,7 @@ class PlaybackService : MediaLibraryService() {
 
     private fun recoverAfterLeaseRenewal() {
         if (!leaseInterruption.canResume(player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token,
-                PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline(), PhonePlaybackOwnership.localHandoff, inCall()) ||
+                PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, inCall()) ||
             outputPrefs.getString("playback_output", "PHONE") != "PHONE") return
         leaseInterruption.clear()
         recoveryShouldResume = true
@@ -346,7 +347,7 @@ class PlaybackService : MediaLibraryService() {
     private fun recoverAfterNetworkReconnect() {
         if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value ||
             !networkInterruption.canResume(player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token,
-                PhonePlaybackOwnership.permitsPlayback(), PhonePlaybackOwnership.localHandoff, inCall()) ||
+                PhonePlaybackOwnership.permitsPlayback(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, inCall()) ||
             outputPrefs.getString("playback_output", "PHONE") != "PHONE") return
         // Reopen the broken socket now, rather than waiting for the 180-second audio read timeout.
         // Cached spans and the current cursor survive the source rebuild.
@@ -439,9 +440,9 @@ class PlaybackService : MediaLibraryService() {
         val connected = getSystemService(android.net.ConnectivityManager::class.java).activeNetwork != null &&
             `in`.synthora.musicbox.network.NetworkFeedback.online.value
         val warming = connected && player.playbackState in setOf(Player.STATE_READY, Player.STATE_BUFFERING) && player.playWhenReady && !PhonePlaybackOwnership.localHandoff
-        upcomingPreloader?.update(if (warming) upcomingAudioUrls(player) else emptyList(),
+        upcomingPreloader?.update(upcomingAudioUrls(player),
             player.playbackState == Player.STATE_BUFFERING,
-            if (warming) player.currentMediaItem?.localConfiguration?.uri?.toString() else null)
+            player.currentMediaItem?.localConfiguration?.uri?.toString(), active = warming)
     }
 
     private lateinit var audioManager: AudioManager
@@ -496,7 +497,8 @@ class PlaybackService : MediaLibraryService() {
     private val resumeAfterCall = object : Runnable {
         override fun run() {
             if (inCall()) mainHandler.postDelayed(this, 1_500)
-            else if (outputPrefs.getString("playback_output", "PHONE") == "PHONE" &&
+            else if (!PhonePlaybackOwnership.preparingSong && !PhonePlaybackOwnership.localHandoff &&
+                outputPrefs.getString("playback_output", "PHONE") == "PHONE" &&
                 (PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline())) {
                 player.play()
                 Log.d(TAG, "Call ended - resumed")
@@ -513,6 +515,12 @@ class PlaybackService : MediaLibraryService() {
         },
         cancelResume = { mainHandler.removeCallbacks(resumeAfterCall) }
     )
+
+    private val callModeListener = if (android.os.Build.VERSION.SDK_INT >= 31)
+        AudioManager.OnModeChangedListener {
+            if (::player.isInitialized && inCall() && player.playWhenReady)
+                callGuard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        } else null
 
     private val outputPrefs by lazy { getSharedPreferences("music_settings_prefs", MODE_PRIVATE) }
     private val outputListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -1299,6 +1307,9 @@ class PlaybackService : MediaLibraryService() {
 
         database = MusicDatabase.getDatabase(applicationContext)
         audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        if (android.os.Build.VERSION.SDK_INT >= 31) callModeListener?.let { listener ->
+            audioManager.addOnModeChangedListener(java.util.concurrent.Executor { mainHandler.post(it) }, listener)
+        }
 
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -1429,7 +1440,7 @@ class PlaybackService : MediaLibraryService() {
                     }
                     if (recoveryShouldResume && player.playerError != null &&
                         `in`.synthora.musicbox.network.NetworkFeedback.online.value &&
-                        PhonePlaybackOwnership.permitsPlayback() && !PhonePlaybackOwnership.localHandoff && !inCall()) {
+                        PhonePlaybackOwnership.permitsPlayback() && !PhonePlaybackOwnership.localHandoff && !PhonePlaybackOwnership.preparingSong && !inCall()) {
                         recoverCurrentStream()
                     }
                 } catch (e: CancellationException) { throw e }
@@ -1658,6 +1669,7 @@ class PlaybackService : MediaLibraryService() {
         audioEffectController.release()
 
 
+        if (android.os.Build.VERSION.SDK_INT >= 31) callModeListener?.let { audioManager.removeOnModeChangedListener(it) }
         preloadConnectivityJob?.cancel()
         upcomingPreloader?.clear()
         // The process owns the stream cache; rebuilt services reuse its valid spans.

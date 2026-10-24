@@ -247,7 +247,7 @@ private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlay
                                 .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                 .testTag("Speed dial ${item.videoId}")
                                 .combinedClickable(role = Role.Button, onClick = { onPlayTrack(item) },
-                                    onLongClick = { if (menu != null) menu.show(item) else onOpen(item) }, onLongClickLabel = "Song options")) {
+                                    onLongClick = { if (menu != null) menu.show(item.toTrack(`in`.synthora.musicbox.services.AccountRepository.liked.value)) else onOpen(item) }, onLongClickLabel = "Song options")) {
                                 `in`.synthora.musicbox.ui.components.ListArtwork(item.image, artworkSize, Modifier.fillMaxSize())
                                 Box(Modifier.fillMaxWidth().height(56.dp).align(Alignment.BottomCenter)
                                     .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f)))))

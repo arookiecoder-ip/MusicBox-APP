@@ -32,6 +32,7 @@ class QueueSelectionPresentationTest {
         assertNull(unavailableEchoSerial(listOf(offline,online),""))
         assertNull(unavailableEchoSerial(listOf(online),"online"))
         assertNull(unavailableEchoSerial(emptyList(),"offline"))
+        assertEquals("offline",unavailableEchoSerial(listOf(offline),"removed-serial"))
     }
 
 }

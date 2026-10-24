@@ -32,4 +32,17 @@ class CallPlaybackGuardTest {
         assertEquals(1, pauses)
         assertEquals(1, schedules)
     }
+    @Test fun focusLossWhileCallingSchedulesRecoveryButExplicitPauseCancelsIt() {
+        var calling = true
+        var pending = false
+        val guard = CallPlaybackGuard({ calling }, {}, { pending = true }, { pending = false })
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertTrue(pending)
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+        assertFalse(pending)
+        calling = false
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(pending)
+    }
+
 }

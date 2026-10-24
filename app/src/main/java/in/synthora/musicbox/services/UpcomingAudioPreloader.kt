@@ -23,6 +23,8 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
     private data class Work(val writer: CacheWriter, val source: CacheDataSource, val job: Job, val demand: Boolean)
     private val work = mutableMapOf<String, Work>()
     private val completed = mutableMapOf<String, Long>()
+    @Volatile private var retainedKeys: Set<String> = emptySet()
+    private var cleanupJob: Job? = null
     private val slots = Semaphore(1)
     private val cache by lazy { (demandFactory.createDataSource() as CacheDataSource).cache }
     private fun fullyCached(url: String): Boolean {
@@ -33,13 +35,16 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
     private val retries = mutableMapOf<String, RetryWork>()
     /** Connectivity recovery retries missing bytes immediately, but honors server rate limits. */
     fun networkRestored() { retries.values.filterNot { it.rateLimited }.forEach { it.backoff.reset() } }
-    fun update(urls: List<String>, buffering: Boolean = false, currentUrl: String? = null) {
+    fun update(urls: List<String>, buffering: Boolean = false, currentUrl: String? = null, active: Boolean = true) {
         val connectivity = context?.getSystemService(android.net.ConnectivityManager::class.java)
         val policy = policyOverride?.invoke(buffering) ?: preloadPolicy(`in`.synthora.musicbox.network.NetworkFeedback.online.value,
             connectivity?.isActiveNetworkMetered ?: true,
-            context?.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)?.getBoolean("prefetch_mobile_data", false) ?: false, buffering, powerState())
+            context?.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)?.getBoolean("prefetch_mobile_data", true) ?: true, buffering, powerState())
         val current = currentUrl?.takeIf { Uri.parse(it).scheme in listOf("https", "http") }
         val currentComplete = current != null && fullyCached(current)
+        // Retention follows queue order even while paused/offline or warming is constrained.
+        // Never remove explicit Library downloads: this cache contains temporary streams only.
+        retainedKeys = (urls.distinct().filter { it != current }.take(5) + listOfNotNull(current)).toSet()
         // A failed speculative download cannot delay a newly selected song.
         // Keep explicit server rate-limit backoff even when priority changes.
         if (current != null && retries[current]?.let { !it.demand && !it.rateLimited } == true) retries.remove(current)
@@ -47,18 +52,35 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
             ?.getInt("stream_cache_mb", 256)?.coerceIn(128, 1024)?.toLong()?.times(1024 * 1024) ?: Long.MAX_VALUE
         val currentLength = current?.let { androidx.media3.datasource.cache.ContentMetadata.getContentLength(cache.getContentMetadata(it)) }?.coerceAtLeast(0) ?: 0
         var remaining = (budget - currentLength).coerceAtLeast(0)
-        val upcoming = urls.distinct().filter { it != current && Uri.parse(it).scheme in listOf("https", "http") }
+        val upcoming = (if (active) urls else emptyList()).distinct().filter { it != current && Uri.parse(it).scheme in listOf("https", "http") }
             .take(policy.tracks).filter { url ->
                 val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(cache.getContentMetadata(url))
                 if (length > remaining) false else { if (length > 0) remaining -= length; true }
             }.toSet()
-        val wanted = if (current != null && (!currentComplete || buffering)) setOf(current) else upcoming + listOfNotNull(current)
+        val wanted = if (!active) emptySet() else if (current != null && (!currentComplete || buffering)) setOf(current) else upcoming + listOfNotNull(current)
         // A lazy next-song writer must become a demand writer when that song starts.
         val promoted = work.filter { (url, item) -> url == current && !currentComplete && !item.demand }.keys
+        val retired = mutableListOf<Job>()
         ((work.keys - wanted) + promoted).forEach { key -> work.remove(key)?.let { obsolete ->
+            retired += obsolete.job
             obsolete.writer.cancel(); obsolete.job.cancel()
             scope.launch(Dispatchers.IO + NonCancellable) { runCatching { obsolete.source.close() } }
         } }
+        if (current != null) {
+            cleanupJob?.cancel()
+            cleanupJob = scope.launch {
+                retired.forEach { it.join() }
+                withContext(Dispatchers.IO) {
+                    cache.keys.toList().forEach { key ->
+                        ensureActive()
+                        if (key !in retainedKeys) {
+                            cache.removeResource(key)
+                            clearAudioRepresentation(cache, key)
+                        }
+                    }
+                }
+            }
+        }
         completed.keys.retainAll(wanted)
         completed.entries.removeAll { (url, length) ->
             if (length < 0) !fullyCached(url) else !cache.isCached(url, 0, length)
@@ -127,7 +149,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
     }
     fun clear() { update(emptyList()); completed.clear() }
     suspend fun clearAndAwait() {
-        val writers = work.values.map { it.job }
+        val writers = work.values.map { it.job } + listOfNotNull(cleanupJob)
         clear()
         writers.forEach { it.join() }
     }
