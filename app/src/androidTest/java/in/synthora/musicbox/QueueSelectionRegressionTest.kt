@@ -99,4 +99,28 @@ class QueueSelectionRegressionTest {
         val playlist=BrowseParser.item(buildJsonObject { put("playlistId","PLfixture");put("title","Playlist") })
         compose.runOnIdle { menu.show(playlist);assertNotNull(menu.item);assertNull(menu.track) }
     }
+    @Test fun updatedCardCallbacksAndNavigationSurviveStateChangesBetweenDownAndUp() {
+        var revision by mutableIntStateOf(0)
+        var selected by mutableIntStateOf(0)
+        var cardResult=-1
+        var tabClicks=0
+        compose.setContent { JUKETheme { Column {
+            val currentRevision=revision
+            CompactTrackCard(songs[0],onClick={cardResult=currentRevision})
+            GlassNavBar((0..2).map { index -> GlassNavItem("Tab $index",selected==index,
+                {selected=index;tabClicks++},icon={}) })
+        } } }
+        compose.runOnIdle { revision=7 }
+        compose.onNodeWithText("Song 0").performTouchInput { click() }
+        compose.runOnIdle { assertEquals(7,cardResult) }
+        repeat(6) { attempt ->
+            val index=1+attempt%2
+            compose.onNodeWithText("Tab $index").performTouchInput { down(center) }
+            compose.runOnIdle { revision++ }
+            compose.onNodeWithText("Tab $index").performTouchInput { up() }
+            compose.runOnIdle { assertEquals(index,selected) }
+        }
+        compose.runOnIdle { assertEquals(6,tabClicks) }
+    }
+
 }
