@@ -551,9 +551,23 @@ class PlaybackService : MediaLibraryService() {
         },
         nowMs = { android.os.SystemClock.elapsedRealtime() }
     )
+    private var observedCallMode: Int? = null
+    private fun observeCallMode() {
+        val mode=audioManager.mode
+        if (::player.isInitialized && observedCallMode != mode) {
+            observedCallMode=mode
+            callGuard.modeChanged(player.playWhenReady)
+        }
+    }
+    private val callModePoll = object : Runnable {
+        override fun run() {
+            observeCallMode()
+            mainHandler.postDelayed(this, 500)
+        }
+    }
     private val callModeListener = if (android.os.Build.VERSION.SDK_INT >= 31)
         AudioManager.OnModeChangedListener {
-            if (::player.isInitialized) callGuard.modeChanged(player.playWhenReady)
+            observeCallMode()
         } else null
 
     private val outputPrefs by lazy { getSharedPreferences("music_settings_prefs", MODE_PRIVATE) }
@@ -1515,6 +1529,7 @@ class PlaybackService : MediaLibraryService() {
         applyOffloadPreference(prefs)
 
         player.addListener(callGuard)
+        mainHandler.post(callModePoll)
 
         // Listen for audio session ID changes to attach audio effects
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -1716,6 +1731,7 @@ class PlaybackService : MediaLibraryService() {
         streamRecoveryJob?.cancel()
         backgroundMaintenance?.cancel()
         getSharedPreferences("audio_effects_prefs", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(audioSettingsListener)
+        mainHandler.removeCallbacks(callModePoll)
         progressHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
         Log.d(TAG, "PlaybackService destroyed")

@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.ui.Alignment
+import `in`.synthora.musicbox.ui.components.artworkBottomFade
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -171,19 +172,13 @@ private fun ArtworkCardContent(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .clickable {
                 haptic.click()
                 onToggleLyrics()
             },
         contentAlignment = Alignment.Center
     ) {
-        `in`.synthora.musicbox.ui.components.TrackArtwork(track, Modifier.fillMaxSize(), large = true)
-
-        run {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxSize().background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.colorScheme.background))))
-        }
+        `in`.synthora.musicbox.ui.components.TrackArtwork(track, Modifier.fillMaxSize().artworkBottomFade(), large = true)
 
         Box(Modifier.align(Alignment.TopCenter).fillMaxSize().background(
             androidx.compose.ui.graphics.Brush.verticalGradient(

@@ -50,4 +50,27 @@ class SearchRankingTest {
         })
         assertEquals(song, audioSearchHero(listOf(video), listOf(song)))
     }
+    @Test fun exactSongAndArtistQueryBeatsUnrelatedProviderHit() {
+        val unrelated=item("wrong","Unrelated","song")
+        val song=item("right","My Song","song")
+        assertEquals(song, relevantSearchHero(listOf(unrelated,song),listOf(song),"my song singer"))
+        assertEquals(listOf(song,unrelated),searchSongItems(listOf(unrelated,song),emptyList(),"my song"))
+    }
+    @Test fun relevanceHandlesUnicodeAccentsAndBlankPunctuationWithoutLosingResults() {
+        val wrong=item("wrong","Other","song");val song=item("right","Café","song")
+        assertEquals(song,relevantSearchHero(listOf(wrong,song),emptyList(),"cafe"))
+        assertEquals(listOf(wrong,song),searchSongItems(listOf(wrong,song),emptyList(),"!!!"))
+        val native=item("native","আমার গান","song")
+        assertEquals(native,relevantSearchHero(listOf(wrong,native),emptyList(),"আমার গান"))
+    }
+    @Test fun liveAndRemixVersionsCannotSilentlyReplaceAnOfficialVideo() {
+        val video=item("video","Go (Official Video)","video")
+        val remix=item("remix","Go (Remix)","song")
+        assertEquals(video,audioSearchHero(listOf(video),listOf(remix)))
+    }
+    @Test fun mixedEntityShelvesAreRecoveredAndDeduplicated() {
+        val artist=BrowseParser.item(buildJsonObject { put("browseId","UCtest");put("title","Singer") })
+        assertEquals(listOf(artist),searchKindItems(listOf(artist,artist),emptyList(),"artist"))
+    }
+
 }

@@ -92,6 +92,16 @@ fun ArtistDetailScreen(
                         }
                     }
                 }
+                if (state.videos.isNotEmpty()) {
+                    item(key = "videos-heading") { Text("Music videos", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge) }
+                    items(state.videos, key = { "video-${it.ytVideoId}" }) { track ->
+                        SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
+                            FlatTrackRow(track.thumbnailUri, track.title, track.artist,
+                                if (track.durationSec > 0) "%d:%02d".format(track.durationSec / 60, track.durationSec % 60) else "",
+                                onClick = { musicViewModel.startRadio(track) }, modifier = Modifier.padding(horizontal = 20.dp), track = track)
+                        }
+                    }
+                }
                 fun releases(title: String, releases: List<BrowseItem>, kind: String, hasMore: Boolean) {
                     if (releases.isEmpty()) return
                     item(key = title) {

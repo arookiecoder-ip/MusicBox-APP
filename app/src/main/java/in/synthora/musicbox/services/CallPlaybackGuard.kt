@@ -37,7 +37,7 @@ internal class CallPlaybackGuard(
         if(!isInCall()) manualFocus(false)
     }
     fun resumeConsumed() { resumePending=false;cancelResume() }
-    private fun remember() { resumePending=true;scheduleResume() }
+    private fun remember() { if (!resumePending) { resumePending=true;scheduleResume() } }
     private fun hold() {
         remember() // Notification/foreground retention sees the intent before Pause events.
         ownPauseAck=true
@@ -47,19 +47,21 @@ internal class CallPlaybackGuard(
         if(isInCall()) {
             if(!manualDuringCall) {
                 if(wantsPlayback) hold()
-                else if(focusLossAt?.let { nowMs()-it in 0..2500 } == true) remember()
+                else if(focusLossAt?.let { nowMs()-it in 0..10_000 } == true) remember()
             }
             focusLossAt=null
         } else {
             manualDuringCall=false
-            focusLossAt=null
             manualFocus(false)
             if(resumePending) scheduleResume()
         }
     }
     override fun onPlaybackSuppressionReasonChanged(reason:Int) {
-        if(reason==Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS && isInCall() && !manualDuringCall)
-            hold()
+        if(reason==Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
+            // Focus suppression may precede the modem's mode change (especially outgoing calls).
+            focusLossAt=nowMs()
+            if (blocksAutomaticPlayback) hold()
+        }
     }
     override fun onPlayWhenReadyChanged(playWhenReady:Boolean, reason:Int) {
         when {

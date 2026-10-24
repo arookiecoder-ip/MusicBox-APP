@@ -236,4 +236,66 @@ class KeyboardArtistPresentationTest {
         assertEquals(reference,nav)
     }
 
+    @Test fun firstSearchNavigationWithAnExistingRequestOpensKeyboardWithoutASecondTap() {
+        var entered by mutableStateOf(false)
+        var trigger by mutableIntStateOf(0)
+        lateinit var view: View
+        compose.setContent { JUKETheme {
+            view=LocalView.current
+            if (entered) `in`.synthora.musicbox.ui.screens.SearchScreen(
+                musicViewModel=androidx.lifecycle.viewmodel.compose.viewModel(), searchFocusTrigger=trigger)
+            else Button({ trigger++;entered=true }) { Text("Search tab") }
+        } }
+        compose.onNodeWithText("Search tab").performClick()
+        compose.waitUntil(7000) { compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.waitUntil(7000) { keyboardVisible(view) }
+        compose.onNodeWithContentDescription("Close search").performClick()
+        compose.waitUntil(7000) { !keyboardVisible(view) }
+        compose.runOnIdle { trigger++ }
+        compose.waitUntil(7000) { keyboardVisible(view) }
+    }
+
+    @Test fun artworkFadeRevealsColoredParentInsteadOfAnOpaqueBottomStrip() {
+        compose.setContent { JUKETheme { Box(Modifier.size(240.dp).background(Color.Blue).testTag("Fade fixture")) {
+            Box(Modifier.fillMaxSize().artworkBottomFade().background(Color.Red))
+        } } }
+        val pixels=compose.onNodeWithTag("Fade fixture").captureToImage().toPixelMap()
+        val top=pixels[pixels.width/2,2]
+        val middle=pixels[pixels.width/2,(pixels.height*.75f).toInt()]
+        val bottom=pixels[pixels.width/2,pixels.height-2]
+        assertTrue(top.red>.9f && top.blue<.1f)
+        assertTrue(middle.red>.2f && middle.blue>.2f)
+        assertTrue(bottom.blue>.95f && bottom.red<.05f)
+    }
+
+    @Test fun scrollingPaintsTheStatusAreaBlackWithoutEatingClicksAndResetsForANewPage() {
+        var page by mutableIntStateOf(0)
+        var taps=0
+        compose.setContent { JUKETheme {
+            Box(Modifier.fillMaxSize().blackStatusBarOnScroll(page).background(Color.Red).testTag("Scroll status fixture")) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                    repeat(80) { n -> TextButton({ taps++ }) { Text("Entry $n") } }
+                }
+            }
+        } }
+        compose.onNodeWithTag("Scroll status fixture").performTouchInput { swipeUp() }
+        compose.waitForIdle()
+        val pixels=compose.onNodeWithTag("Scroll status fixture").captureToImage().toPixelMap()
+        assertEquals(Color.Black,pixels[2,2])
+        compose.onNodeWithText("Entry 40").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(1,taps);page++ }
+        val reset=compose.onNodeWithTag("Scroll status fixture").captureToImage().toPixelMap()
+        assertEquals(Color.Red,reset[2,2])
+    }
+
+    @Test fun expandedArtistHeroAlwaysKeepsItsImageAndBlendAsTallAsTheContent() {
+        compose.setContent { JUKETheme { Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            DetailHero(null, artist=true) { Spacer(Modifier.height(620.dp).testTag("Tall artist content")) }
+        } } }
+        val image=compose.onNodeWithTag("Artist banner",useUnmergedTree=true).fetchSemanticsNode().boundsInRoot
+        val content=compose.onNodeWithTag("Tall artist content").fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(image.height-content.height)<2f)
+    }
+
 }

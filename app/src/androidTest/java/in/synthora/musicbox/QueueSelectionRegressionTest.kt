@@ -308,10 +308,19 @@ class QueueSelectionRegressionTest {
                         }
                         assertTrue(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry(songs[0].uuid) })
                         waitFor(songs[0].uuid,true)
-                        mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
-                        waitFor(songs[0].uuid,false)
-                        mode(android.media.AudioManager.MODE_NORMAL)
-                        waitFor(songs[0].uuid,true)
+                        val focusRequest=android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                            .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION).build())
+                            .setOnAudioFocusChangeListener({},android.os.Handler(android.os.Looper.getMainLooper())).build()
+                        try {
+                            instrumentation.runOnMainSync { assertEquals(android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED,audioManager.requestAudioFocus(focusRequest)) }
+                            waitFor(songs[0].uuid,false) // Focus is lost before the modem reports call mode.
+                            mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
+                            instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(focusRequest) }
+                            android.os.SystemClock.sleep(700)
+                            instrumentation.runOnMainSync { assertFalse("Focus gain while call is active must not resume",controller.isPlaying) }
+                            mode(android.media.AudioManager.MODE_NORMAL)
+                            waitFor(songs[0].uuid,true)
+                        } finally { instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(focusRequest) } }
                         mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
                         waitFor(songs[0].uuid,false)
                         assertTrue(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry(songs[0].uuid) })

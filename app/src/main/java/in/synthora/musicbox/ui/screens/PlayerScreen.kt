@@ -1,5 +1,7 @@
 package `in`.synthora.musicbox.ui.screens
 
+import `in`.synthora.musicbox.ui.components.blackStatusBarOnScroll
+
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
@@ -369,7 +371,7 @@ fun PlayerScreen(
         dragHandle = null
     ) {
         JUKETheme(darkTheme = true) {
-        Box(modifier = Modifier.fillMaxSize().graphicsLayer {
+        Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll().graphicsLayer {
             alpha = entrance.value
             translationY = (1f - entrance.value) * 48.dp.toPx()
         }) {

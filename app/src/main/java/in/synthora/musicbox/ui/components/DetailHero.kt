@@ -31,14 +31,14 @@ fun DetailHero(image: String?, artist: Boolean = false, content: @Composable Col
     val paneHeight = LocalDetailPaneHeight.current
     Box(Modifier.fillMaxWidth().clip(androidx.compose.ui.graphics.RectangleShape)) {
         AsyncImage(coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
-            .data(image).size(if (artist) 960 else 256).crossfade(false).build(), null,  (if (artist) Modifier.fillMaxWidth().height(paneHeight ?: 380.dp) else Modifier.matchParentSize()).then(
+            .data(image).size(if (artist) 960 else 256).crossfade(false).build(), null,  Modifier.matchParentSize().then(
             if (artist) Modifier.testTag("Artist banner") else Modifier.blur(22.dp).alpha(0.55f)), contentScale = ContentScale.Crop, alignment = Alignment.Center)
-        Box((if (artist) Modifier.fillMaxWidth().height(paneHeight ?: 380.dp) else Modifier.matchParentSize()).background(Brush.verticalGradient(listOf(
+        Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(
             surface.copy(alpha = if (artist) 0.05f else 0.18f),
             surface.copy(alpha = 0.45f), surface))))
         if (paneHeight != null) Box(Modifier.matchParentSize().background(Brush.horizontalGradient(
             0f to Color.Transparent, 0.72f to Color.Transparent, 1f to surface)))
-        Column(Modifier.fillMaxWidth().then(paneHeight?.let { Modifier.heightIn(min = it) } ?: Modifier), content = content)
+        Column(Modifier.fillMaxWidth().heightIn(min = paneHeight ?: if (artist) 380.dp else 0.dp), content = content)
     }
 }
 

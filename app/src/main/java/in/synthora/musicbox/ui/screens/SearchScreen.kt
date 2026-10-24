@@ -133,7 +133,7 @@ fun SearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val haptic = rememberJukeHaptics()
 
-    var previousFocusTrigger by rememberSaveable { mutableIntStateOf(searchFocusTrigger) }
+    var previousFocusTrigger by rememberSaveable { mutableIntStateOf(0) }
     var previousResetTrigger by rememberSaveable { mutableIntStateOf(searchResetTrigger) }
     var selectedFilter by rememberSaveable { mutableStateOf("All") }
     var active by rememberSaveable { mutableStateOf(false) }
@@ -149,7 +149,7 @@ fun SearchScreen(
     LaunchedEffect(searchFocusTrigger) {
         if (searchFocusTrigger != previousFocusTrigger && searchFocusTrigger > 0) {
             previousFocusTrigger = searchFocusTrigger
-            if (discovery != null) { leaveDiscovery(); active = false } else active = true
+            leaveDiscovery(); active = true
         }
     }
 

@@ -2,6 +2,8 @@
 
 package `in`.synthora.musicbox
 
+import `in`.synthora.musicbox.ui.components.blackStatusBarOnScroll
+
 import androidx.activity.viewModels
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
@@ -534,6 +536,7 @@ class MainActivity : ComponentActivity() {
                         route.startsWith("artist-releases/") || route.startsWith("artist-songs/") || route.startsWith("downloads/"))
 
                 val onNavigate: (Screen) -> Unit = { screen ->
+                    if (screen == Screen.Search) searchFocusTrigger++
                     val wasDetail = isDetailRoute(currentRoute)
                     if (wasDetail) {
                         if (screen == Screen.Search) { searchResetTrigger++; searchFocusTrigger++ }
@@ -609,7 +612,7 @@ class MainActivity : ComponentActivity() {
                         bottom = 0.dp
                     )
 
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll(currentRoute)) {
                     // Surfaces are opaque; do not capture a full-screen blur source on each frame.
                     Box(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())))

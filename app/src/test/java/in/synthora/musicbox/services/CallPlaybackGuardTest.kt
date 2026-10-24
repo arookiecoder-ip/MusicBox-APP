@@ -65,7 +65,32 @@ class CallPlaybackGuardTest {
         assertTrue(guard.resumePending)
         guard.explicitPause();calling=false
         guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
-        calling=true;now+=3000;guard.modeChanged(false)
+        calling=true;now+=10_001;guard.modeChanged(false)
+        assertFalse(guard.resumePending)
+    }
+
+    @Test fun outgoingCallFocusSuppressionBeforeDelayedModeAndNormalCallbackRetainsIntent() {
+        var calling=false;var now=1000L;var pauses=0;var schedules=0
+        val guard=CallPlaybackGuard({calling},{pauses++},{schedules++},{},nowMs={now})
+        guard.onPlaybackSuppressionReasonChanged(Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS)
+        guard.modeChanged(false) // An OEM can still report NORMAL while dialing.
+        now+=5000;calling=true;guard.modeChanged(false)
+        assertTrue(guard.resumePending);assertEquals(1,schedules)
+        calling=false;guard.modeChanged(false)
+        assertTrue(guard.resumePending);assertEquals(2,schedules)
+    }
+    @Test fun repeatedCallStatesDoNotReplaceTheOriginalResumeSnapshot() {
+        var schedules=0
+        val guard=CallPlaybackGuard({true},{},{schedules++},{})
+        guard.modeChanged(true);guard.modeChanged(false)
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertEquals(1,schedules);assertTrue(guard.resumePending)
+    }
+    @Test fun explicitPauseBetweenFocusLossAndCallModeCannotResurrectPlayback() {
+        var calling=false
+        val guard=CallPlaybackGuard({calling},{fail("Do not pause")},{fail("Do not resume")},{})
+        guard.onPlaybackSuppressionReasonChanged(Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS)
+        guard.explicitPause();calling=true;guard.modeChanged(false)
         assertFalse(guard.resumePending)
     }
 

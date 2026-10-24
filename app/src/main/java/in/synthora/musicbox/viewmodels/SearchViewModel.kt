@@ -64,6 +64,7 @@ data class ArtistDetailUiState(
     val description: String = "",
     val topTracks: List<Track> = emptyList(),
     val allTracks: List<Track> = emptyList(),
+    val videos: List<Track> = emptyList(),
     val topSongsBrowseId: String = "",
     val albums: List<BrowseItem> = emptyList(),
     val singles: List<BrowseItem> = emptyList(),
@@ -236,7 +237,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             val region = locale.country.ifBlank { "US" }
             val payload = """
                 {
-                    "input": "${query.replace("\"", "\\\"")}",
+                    "input": ${JSONObject.quote(query)},
                     "context": {
                         "client": {
                             "clientName": "$YT_CLIENT_NAME",
@@ -300,7 +301,9 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(
                 suggestions = results
             )
+        } catch (e: CancellationException) { throw e
         } catch (e: Exception) {
+            if (requestNonce != suggestionRequestNonce.get() || _uiState.value.query != query) return
             Log.e("SearchViewModel", "Failed to fetch suggestions", e)
             _uiState.value = _uiState.value.copy(
                 suggestions = emptyList()
@@ -318,6 +321,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun search(query: String) {
         val trimmedQuery = query.trim()
+        suggestionRequestNonce.incrementAndGet()
         searchJob?.cancel() // Cancel any pending suggestion fetch
         // Flip out of suggestion mode immediately so results can render
         _uiState.value = _uiState.value.copy(
@@ -345,17 +349,17 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 val liked = AccountRepository.liked.value
                 fun rows(key: String) = result.array(key).mapNotNull { (it as? JsonObject)?.let { raw -> BrowseParser.item(raw, key) } }
                 val all = rows("all")
-                val songs = `in`.synthora.musicbox.network.searchSongItems(all, rows("songs"))
-                val hero = `in`.synthora.musicbox.network.audioSearchHero(all, songs)
+                val songs = `in`.synthora.musicbox.network.searchSongItems(all, rows("songs"), trimmedQuery)
+                val hero = `in`.synthora.musicbox.network.relevantSearchHero(all, songs, trimmedQuery)
                 val heroIndex = all.indexOf(hero)
                 val preview = if (hero?.kind == "artist") all.drop(heroIndex + 1).takeWhile { it.kind == "track" }
                     .filter { `in`.synthora.musicbox.network.isAudioSearchItem(it) }.take(3).map { it.toTrack(liked) } else emptyList()
                 _uiState.value = _uiState.value.copy(
                     tracks = songs.filter { it.videoId.isNotBlank() }.map { it.toTrack(liked) },
                     topResult = hero, topArtistTracks = preview,
-                    artists = rows("artists").filter { it.id.isNotBlank() },
-                    albums = rows("albums").filter { it.id.isNotBlank() },
-                    playlists = rows("playlists").filter { it.playlistId.isNotBlank() || it.id.isNotBlank() },
+                    artists = `in`.synthora.musicbox.network.searchKindItems(all, rows("artists"), "artist"),
+                    albums = `in`.synthora.musicbox.network.searchKindItems(all, rows("albums"), "album"),
+                    playlists = `in`.synthora.musicbox.network.searchKindItems(all, rows("playlists"), "playlist"),
                     isSearching = false
                 )
                 if (hero?.kind == "artist") {
@@ -434,6 +438,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                     description = info.text("description"),
                     topTracks = data.array("topSongs").mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                         .filter { it.videoId.isNotBlank() }.map { it.toTrack(liked) },
+                    videos = `in`.synthora.musicbox.network.artistVideoItems(data).map { it.toTrack(liked) },
                     topSongsBrowseId = data.text("topSongsBrowseId"),
                     albums = releases("albums"),
                     singles = releases("singles"),
