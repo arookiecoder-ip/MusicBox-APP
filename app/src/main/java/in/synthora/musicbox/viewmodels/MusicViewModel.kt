@@ -525,12 +525,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         // Lyrics for whatever is playing, on the phone or the Echo.
         viewModelScope.launch {
-            combine(uiState.map { it.currentTrack }
-                .distinctUntilChanged { old,new -> old?.uuid==new?.uuid && old?.title==new?.title && old?.artist==new?.artist && old?.durationSec==new?.durationSec },
-                `in`.synthora.musicbox.network.NetworkFeedback.online) { track,online -> track.takeIf { online } }
-                .collect { track ->
+            var lyricsOutput: PlaybackOutput? = null
+            combine(uiState.map { it.currentTrack }.distinctUntilChanged(), _output,
+                `in`.synthora.musicbox.network.NetworkFeedback.online) { track,output,online -> Triple(track,output,online) }
+                .collect { (track,output,online) ->
+                    if(!online || lyricsOutput!=output) lyricsRefreshJobs.values.toList().forEach { it.cancel() }
+                    lyricsOutput=output
                     if(track!=null) lyricsRefreshJobs.filterKeys { it!=track.uuid }.values.toList().forEach { it.cancel() }
-                    if (track != null && track.title.isNotBlank() && track.title != "Loading…" && !`in`.synthora.musicbox.utils.hasTimedLyrics(track.syncedLyrics)) {
+                    if (online && track != null && track.title.isNotBlank() && track.title != "Loading…" && !`in`.synthora.musicbox.utils.hasTimedLyrics(track.syncedLyrics)) {
                         refreshLyrics(track)
                     }
                 }
