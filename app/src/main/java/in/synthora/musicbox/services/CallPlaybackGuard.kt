@@ -8,9 +8,11 @@ internal class CallPlaybackGuard(
     private val pause: () -> Unit,
     private val scheduleResume: () -> Unit,
     private val cancelResume: () -> Unit,
-    private val manualFocus: (Boolean) -> Unit = {}
+    private val manualFocus: (Boolean) -> Unit = {},
+    private val nowMs: () -> Long = { System.nanoTime()/1_000_000 }
 ) : Player.Listener {
     private var ownPauseAck = false
+    private var focusLossAt: Long? = null
     var resumePending = false
         private set
     var manualDuringCall = false
@@ -19,12 +21,14 @@ internal class CallPlaybackGuard(
 
     fun explicitPlay() {
         resumePending=false
+        focusLossAt=null
         cancelResume()
         manualDuringCall=isInCall()
         manualFocus(manualDuringCall)
     }
     fun explicitPause() {
         resumePending=false
+        focusLossAt=null
         manualDuringCall=false
         ownPauseAck=false
         cancelResume()
@@ -41,9 +45,14 @@ internal class CallPlaybackGuard(
     }
     fun modeChanged(wantsPlayback:Boolean) {
         if(isInCall()) {
-            if(wantsPlayback && !manualDuringCall) hold()
+            if(!manualDuringCall) {
+                if(wantsPlayback) hold()
+                else if(focusLossAt?.let { nowMs()-it in 0..2500 } == true) remember()
+            }
+            focusLossAt=null
         } else {
             manualDuringCall=false
+            focusLossAt=null
             manualFocus(false)
             if(resumePending) scheduleResume()
         }
@@ -56,7 +65,10 @@ internal class CallPlaybackGuard(
         when {
             !playWhenReady && ownPauseAck && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> ownPauseAck=false
             playWhenReady && blocksAutomaticPlayback -> hold()
-            !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS && blocksAutomaticPlayback -> remember()
+            !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> {
+                focusLossAt=nowMs()
+                if(blocksAutomaticPlayback) remember()
+            }
             !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> explicitPause()
         }
     }

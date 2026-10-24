@@ -56,4 +56,17 @@ class CallPlaybackGuardTest {
         assertEquals(listOf(true),focuses)
         assertFalse(pending);assertFalse(guard.manualDuringCall)
     }
+    @Test fun focusLossImmediatelyBeforeCallModeStillResumesButUnrelatedOldFocusLossDoesNot() {
+        var calling=false
+        var now=1000L
+        val guard=CallPlaybackGuard({calling},{},{},{},nowMs={now})
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        calling=true;now+=300;guard.modeChanged(false)
+        assertTrue(guard.resumePending)
+        guard.explicitPause();calling=false
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        calling=true;now+=3000;guard.modeChanged(false)
+        assertFalse(guard.resumePending)
+    }
+
 }

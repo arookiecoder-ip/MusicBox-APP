@@ -96,7 +96,7 @@ object LyricsApi {
     ): LRCLibResult? {
         return try {
             // 1. Clean Title to remove (From ...) or (feat ...) metadata
-            val cleanedTitle = cleanSongTitle(title)
+            val cleanedTitle = cleanSongTitle(title,artist)
             Log.d(
                 TAG,
                 "LRCLib Search: $LRCLIB_BASE_URL?track=$cleanedTitle&artist=$artist (Original: $title)"
@@ -520,7 +520,7 @@ object LyricsApi {
      * Cleans song titles by removing parenthesized metadata that hurts fuzzy matching
      * (for example: "From ...", "feat ...", "live", or "remaster").
      */
-    private fun cleanSongTitle(title: String): String {
+    internal fun cleanSongTitle(title: String, artist: String = ""): String {
         // Regex to match content in parentheses starting with specific keywords
         // Matches: (From ...), (Feat ...), (Ft ...), (With ...), (Live ...), (Remaster ...)
         // Case insensitive (?i)
@@ -532,6 +532,9 @@ object LyricsApi {
         // \) matches closing parenthesis
         val regex = Regex("""\s*\((?i)(?:from|feat\.?|ft\.?|with|live|remaster).*?\)""")
 
-        return regex.replace(title, "").trim()
+        val withoutCredits=regex.replace(title, "")
+        val withoutVideoTags=Regex("""(?i)\s*[\[(](?:official.*?|lyrics?|lyric\s+video|audio|music\s+video|visuali[sz]er|hd|hq|4k)[\])]""").replace(withoutCredits, "")
+        return if(artist.isBlank()) withoutVideoTags.trim() else
+            Regex("(?i)^"+Regex.escape(artist)+"""\s*[-–—:]\s*""").replace(withoutVideoTags.trim(), "").trim()
     }
 }

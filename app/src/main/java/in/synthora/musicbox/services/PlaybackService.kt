@@ -518,7 +518,7 @@ class PlaybackService : MediaLibraryService() {
     private var callResumeMediaId: String? = null
     private var callResumeToken = ""
     private fun callBlocksPlayback() = inCall() && !callGuard.manualDuringCall
-    private val resumeAfterCall = object : Runnable {
+    private val resumeAfterCall: Runnable = object : Runnable {
         override fun run() {
             if (!callGuard.resumePending) return
             if (outputPrefs.getString("playback_output", "PHONE") != "PHONE" ||
@@ -536,7 +536,7 @@ class PlaybackService : MediaLibraryService() {
             resumeFromSession(explicit=false)
         }
     }
-    private val callGuard = CallPlaybackGuard(
+    private val callGuard: CallPlaybackGuard = CallPlaybackGuard(
         isInCall = ::inCall,
         pause = { player.pause() },
         scheduleResume = {
@@ -664,7 +664,7 @@ class PlaybackService : MediaLibraryService() {
         resumeFuture?.takeIf { !it.isDone }?.let { return it }
         cancelledMedia3Resume = false
         getSystemService(NotificationManager::class.java).cancel(1004)
-        if(explicit) callGuard.explicitPlay()
+        callGuard.explicitPlay()
         val request = resumeCommands.play()
         val expectedOutput = outputPrefs.getString("playback_output", "PHONE")
         val result = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()

@@ -2498,7 +2498,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh lyrics: ${`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message}", e)
             } finally {
-                lyricsRefreshJobs.remove(track.uuid)
+                if(lyricsRefreshJobs[track.uuid] === coroutineContext[Job]) lyricsRefreshJobs.remove(track.uuid)
             }
         }
     }

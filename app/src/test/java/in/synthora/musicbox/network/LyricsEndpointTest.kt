@@ -11,4 +11,10 @@ class LyricsEndpointTest {
     @Test fun missingOptionalMetadataDoesNotSendEmptyArtistOrAlbumFilters() {
         assertEquals(mapOf("track_name" to "Song"),lrclibSearchParameters("Song",""))
     }
+    @Test fun officialVideoMetadataDoesNotBlockFindingTheSong() {
+        assertEquals("Song",LyricsApi.cleanSongTitle("Artist - Song (Official Music Video)","Artist"))
+        assertEquals("Song",LyricsApi.cleanSongTitle("Song [Lyrics] (HD)"))
+        assertEquals("Song",LyricsApi.cleanSongTitle("Song (feat. Guest)"))
+    }
+
 }
