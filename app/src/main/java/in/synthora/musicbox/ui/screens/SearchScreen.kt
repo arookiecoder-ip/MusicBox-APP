@@ -180,7 +180,7 @@ fun SearchScreen(
                 placeholder = "Songs, artists, albums",
                 selectAllTrigger = searchFocusTrigger,
                 onSearch = {
-                    if (uiState.query.isNotBlank() && !uiState.isSearching) {
+                    if (uiState.query.isNotBlank()) {
                         keyboardController?.hide()
                         val link = `in`.synthora.musicbox.network.youtubeLink(uiState.query)
                         if (link != null) {
@@ -188,7 +188,7 @@ fun SearchScreen(
                             musicViewModel.playYoutubeLink(link)
                             onShowPlayer()
                             searchViewModel.resetToDiscovery()
-                        } else searchViewModel.search(uiState.query)
+                        } else if (!uiState.isSearching) searchViewModel.search(uiState.query)
                     }
                 }
             )

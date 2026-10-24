@@ -1436,8 +1436,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     playCollection(BrowseParser.item(buildJsonObject { put("playlistId", link.playlistId); put("title", "YouTube playlist") }))
                 }
             } catch (e: CancellationException) { throw e }
-            catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
-            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: "Couldn't play this YouTube link") }
+            catch (e: BackendAuthException) { if (requestId == playbackRequestId) _signedOut.tryEmit(Unit) }
+            catch (e: Exception) { if (requestId == playbackRequestId) _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: "Couldn't play this YouTube link") }
             finally { if (requestId == playbackRequestId) pendingPlayback.value = null }
         }
     }
@@ -1955,13 +1955,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else trackDao.insertTracks(resolved.map { it.toEntity() })
         }
 
+    private fun cancelPendingYoutubeLink(): Boolean {
+        if (youtubeLinkJob?.isActive != true) return false
+        ++playbackRequestId
+        youtubeLinkJob?.cancel()
+        pendingPlayback.value = null
+        return true
+    }
+
     fun togglePlayPause() {
-        if (youtubeLinkJob?.isActive == true) {
-            ++playbackRequestId
-            youtubeLinkJob?.cancel()
-            pendingPlayback.value = null
-            return
-        }
+        if (cancelPendingYoutubeLink()) return
         if (isRemotePhone) { remoteControl(if (remoteTransportPreview.value?.takeIf { it.owner == _remoteMobileOutput.value.owner && it.error == null }?.playing ?: uiState.value.isPlaying) "pause" else "play"); return }
         if (isAlexa) {
             val playing = echo.state.value.playing
@@ -2110,6 +2113,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToNext() {
+        cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("next"); return }
         if (isAlexa) {
             launchEcho { echo.command("next") }
@@ -2119,6 +2123,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("previous"); return }
         if (isAlexa) {
             launchEcho { echo.command("previous") }
