@@ -44,6 +44,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
         val currentComplete = current != null && fullyCached(current)
         // Retention follows queue order even while paused/offline or warming is constrained.
         // Never remove explicit Library downloads: this cache contains temporary streams only.
+        val previousRetainedKeys = retainedKeys
         retainedKeys = (urls.distinct().filter { it != current }.take(5) + listOfNotNull(current)).toSet()
         // A failed speculative download cannot delay a newly selected song.
         // Keep explicit server rate-limit backoff even when priority changes.
@@ -66,7 +67,7 @@ class UpcomingAudioPreloader(private val factory: DataSource.Factory, private va
             obsolete.writer.cancel(); obsolete.job.cancel()
             scope.launch(Dispatchers.IO + NonCancellable) { runCatching { obsolete.source.close() } }
         } }
-        if (current != null) {
+        if (current != null && retainedKeys != previousRetainedKeys) {
             cleanupJob?.cancel()
             cleanupJob = scope.launch {
                 retired.forEach { it.join() }

@@ -23,9 +23,14 @@ internal fun Modifier.blackStatusBarOnScroll(page: Any? = Unit): Modifier = comp
         onDispose { if (scrolled && previous != null) controller?.isAppearanceLightStatusBars = previous }
     }
     val height = WindowInsets.statusBars.getTop(LocalDensity.current).toFloat()
+    var depth by remember(page) { mutableFloatStateOf(0f) }
     val connection = remember(page) { object : NestedScrollConnection {
         override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-            if (consumed.y != 0f) scrolled = true
+            if (consumed.y != 0f) {
+                depth=(depth-consumed.y).coerceAtLeast(0f)
+                scrolled=depth>.5f
+            }
+            if (available.y>0f) { depth=0f;scrolled=false }
             return Offset.Zero
         }
     } }

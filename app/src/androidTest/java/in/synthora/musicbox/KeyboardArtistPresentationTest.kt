@@ -284,18 +284,24 @@ class KeyboardArtistPresentationTest {
         val pixels=compose.onNodeWithTag("Scroll status fixture").captureToImage().toPixelMap()
         assertEquals(Color.Black,pixels[2,2])
         compose.onNodeWithText("Entry 40").performScrollTo().performClick()
-        compose.runOnIdle { assertEquals(1,taps);page++ }
+        compose.runOnIdle { assertEquals(1,taps) }
+        repeat(8) { compose.onNodeWithTag("Scroll status fixture").performTouchInput { swipeDown() } }
+        val top=compose.onNodeWithTag("Scroll status fixture").captureToImage().toPixelMap()
+        assertEquals(Color.Red,top[2,2])
+        compose.runOnIdle { page++ }
         val reset=compose.onNodeWithTag("Scroll status fixture").captureToImage().toPixelMap()
         assertEquals(Color.Red,reset[2,2])
     }
 
-    @Test fun expandedArtistHeroAlwaysKeepsItsImageAndBlendAsTallAsTheContent() {
+    @Test fun expandedArtistDescriptionKeepsTheBannerAtItsOriginalHeight() {
         compose.setContent { JUKETheme { Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             DetailHero(null, artist=true) { Spacer(Modifier.fillMaxWidth().height(620.dp).testTag("Tall artist content")) }
         } } }
         val image=compose.onNodeWithTag("Artist banner",useUnmergedTree=true).fetchSemanticsNode().boundsInRoot
         val content=compose.onNodeWithTag("Tall artist content").fetchSemanticsNode().boundsInRoot
-        assertTrue("Artist image $image must cover content $content",kotlin.math.abs(image.height-content.height)<2f)
+        assertTrue("Description should extend below fixed banner: image=$image content=$content",content.height>image.height)
+        val density=compose.density.density
+        assertTrue(kotlin.math.abs(image.height-380*density)<2f)
     }
 
     @Test fun replacingAnOpenSearchFocusRequestCannotLetOldCleanupHideTheNewKeyboard() {

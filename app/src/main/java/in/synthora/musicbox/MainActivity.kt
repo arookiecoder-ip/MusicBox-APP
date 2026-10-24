@@ -533,7 +533,7 @@ class MainActivity : ComponentActivity() {
                 fun isDetailRoute(route: String?) =
                     route != null && (route.startsWith("artist/") ||
                         route.startsWith("album/") || route.startsWith("playlist/") ||
-                        route.startsWith("artist-releases/") || route.startsWith("artist-songs/") || route.startsWith("downloads/"))
+                        route.startsWith("artist-releases/") || route.startsWith("artist-videos/") || route.startsWith("artist-songs/") || route.startsWith("downloads/"))
 
                 val onNavigate: (Screen) -> Unit = { screen ->
                     if (screen == Screen.Search) searchFocusTrigger++
@@ -746,6 +746,7 @@ class MainActivity : ComponentActivity() {
                                         navController.popBackStack()
                                     },
                                     onShowAllSongs = { navController.navigate("artist-songs/$artistId") },
+                                    onShowAllVideos = { navController.navigate("artist-videos/$artistId") },
                                     onShowAllReleases = { kind -> navController.navigate("artist-releases/$artistId/$kind") },
                                     onNavigateToAlbum = { album ->
                                         activityViewModelProvider[AlbumDetailViewModel::class.java]
@@ -769,6 +770,11 @@ class MainActivity : ComponentActivity() {
                                             navController.navigate("album/${item.id}")
                                         }
                                     })
+                            }
+                            composable("artist-videos/{artistId}") { entry ->
+                                ArtistSongsScreen(artistId=entry.arguments?.getString("artistId").orEmpty(),
+                                    searchViewModel=searchViewModel,musicViewModel=musicViewModel,
+                                    onNavigateBack={ navController.popBackStack() },bottomPadding=bottomPadding,videos=true)
                             }
                             composable("artist-songs/{artistId}") { entry ->
                                 ArtistSongsScreen(

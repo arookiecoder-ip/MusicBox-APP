@@ -10,7 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.testTag
@@ -36,20 +36,20 @@ internal fun AnimatedAmbientBackdrop(palette: List<Color>, modifier: Modifier = 
     val second by animateColorAsState(colors[1],tween(1100,easing=FastOutSlowInEasing),label="ambient-second")
     val third by animateColorAsState(colors[2],tween(1100,easing=FastOutSlowInEasing),label="ambient-third")
     BoxWithConstraints(modifier.background(baseColor).testTag("Ambient backdrop")) {
-        Canvas(Modifier.fillMaxWidth().height(maxHeight*extent.coerceIn(0f,1f))
-            .graphicsLayer { compositingStrategy=CompositingStrategy.Offscreen }
-            .drawWithContent {
-                drawContent()
-                drawRect(Brush.verticalGradient(listOf(Color.White,Color.Transparent)),blendMode=BlendMode.DstIn)
-            }) {
-            if(size.width<=0f || size.height<=0f) return@Canvas
+        Box(Modifier.fillMaxWidth().height(maxHeight*extent.coerceIn(0f,1f)).drawWithCache {
             val strength=if(baseColor.luminance()<.5f) .27f else .16f
-            drawRect(Brush.horizontalGradient(listOf(first.copy(alpha=strength),second.copy(alpha=strength),third.copy(alpha=strength))))
-            drawRect(Brush.radialGradient(listOf(second.copy(alpha=strength),Color.Transparent),
-                center=Offset(size.width*.18f,size.height*.08f),radius=maxOf(size.width*.7f,size.height*.8f)))
-            drawRect(Brush.radialGradient(listOf(third.copy(alpha=strength*.8f),Color.Transparent),
-                center=Offset(size.width*.88f,size.height*.1f),radius=maxOf(size.width*.65f,size.height*.7f)))
-        }
+            val horizontal=Brush.horizontalGradient(listOf(first.copy(alpha=strength),second.copy(alpha=strength),third.copy(alpha=strength)))
+            val left=Brush.radialGradient(listOf(second.copy(alpha=strength),Color.Transparent),
+                center=Offset(size.width*.18f,size.height*.08f),radius=maxOf(1f,size.width*.7f,size.height*.8f))
+            val right=Brush.radialGradient(listOf(third.copy(alpha=strength*.8f),Color.Transparent),
+                center=Offset(size.width*.88f,size.height*.1f),radius=maxOf(1f,size.width*.65f,size.height*.7f))
+            val fade=Brush.verticalGradient(listOf(Color.Transparent,baseColor))
+            onDrawBehind {
+                if(size.width>0f && size.height>0f) {
+                    drawRect(horizontal);drawRect(left);drawRect(right);drawRect(fade)
+                }
+            }
+        })
     }
 }
 

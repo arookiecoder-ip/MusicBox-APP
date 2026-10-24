@@ -370,7 +370,7 @@ class EchoController(
         _state.update { it.copy(volume = value) }
         // Do not cancel an HTTP request already dispatched: order it before the next value.
         volumeJob = scope.launch {
-            delay(220)
+            delay(120)
             volumeLock.withLock {
                 if (seq != volumeSeq || _serial.value != serial || prefs.getString("playback_output", "PHONE") != "ALEXA") return@withLock
                 try {

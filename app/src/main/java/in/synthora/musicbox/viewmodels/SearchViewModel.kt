@@ -65,6 +65,10 @@ data class ArtistDetailUiState(
     val topTracks: List<Track> = emptyList(),
     val allTracks: List<Track> = emptyList(),
     val videos: List<Track> = emptyList(),
+    val videosBrowseId: String = "",
+    val videosLoading: Boolean = false,
+    val videosNextOffset: Long = 0,
+    val allVideosLoaded: Boolean = false,
     val topSongsBrowseId: String = "",
     val albums: List<BrowseItem> = emptyList(),
     val singles: List<BrowseItem> = emptyList(),
@@ -420,6 +424,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     fun loadArtistDetails(artist: BrowseItem) {
         songsJob?.cancel()
         durationJob?.cancel()
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState(artist = artist, imageUrl = artist.image, isLoading = true)
         artistJob = viewModelScope.launch {
@@ -439,6 +444,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                     topTracks = data.array("topSongs").mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                         .filter { it.videoId.isNotBlank() }.map { it.toTrack(liked) },
                     videos = `in`.synthora.musicbox.network.artistVideoItems(data).map { it.toTrack(liked) },
+                    videosBrowseId = info["videos"].objectOrEmpty().text("browseId", "playlistId"),
                     topSongsBrowseId = data.text("topSongsBrowseId"),
                     albums = releases("albums"),
                     singles = releases("singles"),
@@ -461,6 +467,29 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: Exception) {
                 _artistDetailState.update { it.copy(isLoading = false, error = `in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Failed to load artist") }
             }
+        }
+    }
+
+    private var videosJob: Job? = null
+    fun loadAllArtistVideos() {
+        val state=_artistDetailState.value
+        val artist=state.artist ?: return
+        if(state.videosLoading || state.allVideosLoaded || state.videosBrowseId.isBlank()) return
+        videosJob?.cancel()
+        _artistDetailState.update { it.copy(videosLoading=true,error=null) }
+        videosJob=viewModelScope.launch {
+            try {
+                val data=Backend.get("/api/library/playlists/${state.videosBrowseId}",mapOf("offset" to state.videosNextOffset.toString(),"limit" to "30")).objectOrEmpty()
+                val rows=data.array("tracks").mapNotNull { it as? JsonObject }.map(BrowseParser::item)
+                    .filter { it.videoId.isNotBlank() }.map { it.copy(id=it.videoId,kind="track").toTrack(AccountRepository.liked.value) }
+                if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(
+                    videos=(it.videos+rows).distinctBy { row->row.ytVideoId },
+                    videosNextOffset=data.number("next_offset").takeIf { n->n>state.videosNextOffset } ?: state.videosNextOffset+rows.size,
+                    allVideosLoaded=!data.flag("has_more") || rows.isEmpty()) }
+            } catch(e:CancellationException) { throw e }
+            catch(e:BackendAuthException) { _signedOut.tryEmit(Unit) }
+            catch(e:Exception) { if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(error=e.message ?: "Could not load artist videos") } }
+            finally { if(_artistDetailState.value.artist?.id==artist.id) _artistDetailState.update { it.copy(videosLoading=false) } }
         }
     }
 
@@ -535,6 +564,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Resolve an artist by name (songs from a radio may carry only the name), then open it. */
     fun loadArtistDetailsByName(name: String) {
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState(isLoading = true)
         artistJob = viewModelScope.launch {
@@ -604,6 +634,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     fun clearArtistDetail() {
         songsJob?.cancel()
         durationJob?.cancel()
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState()
     }
