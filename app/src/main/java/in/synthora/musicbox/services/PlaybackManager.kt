@@ -125,14 +125,7 @@ class PlaybackManager private constructor(private val context: Context) {
     private var pausedAtMs = android.os.SystemClock.elapsedRealtime()
     private fun publishSnapshot(ctrl: MediaController) {
         _cursorRevision.value++
-        _snapshot.value = PhonePlaybackSnapshot((0 until ctrl.mediaItemCount).map { ctrl.getMediaItemAt(it).mediaId },
-            ctrl.currentMediaItem?.mediaId, ctrl.currentMediaItem?.let { item ->
-                val metadata = ctrl.mediaMetadata
-                Track(uuid = item.mediaId, title = metadata.title?.toString().orEmpty(),
-                    artist = metadata.artist?.toString().orEmpty(), thumbnailUri = metadata.artworkUri?.toString(),
-                    durationSec = (ctrl.duration.coerceAtLeast(0) / 1000).toInt(),
-                    localUri = item.localConfiguration?.uri?.toString())
-            })
+        _snapshot.value = phonePlaybackSnapshot(ctrl)
     }
 
     // Flow to emit current track UUID changes
@@ -731,7 +724,7 @@ class PlaybackManager private constructor(private val context: Context) {
     }
 
     fun seekToIndex(index: Int) {
-        runTrackChangePreservingPlayState { it.seekTo(index, 0L) }
+        controller?.let { playQueueEntry(it, index) }
         Log.d(TAG, "Seeked to index $index")
     }
 

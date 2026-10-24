@@ -54,7 +54,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
     val menu = LocalMediaMenu.current
     val scope = rememberCoroutineScope()
     val fallbackRows = remember(queue, currentTrack) { queue.ifEmpty { listOf(currentTrack) } }
-    val prepared = preparedRows ?: remember(fallbackRows) {
+    val prepared = preparedRows?.takeIf { it.tracks == fallbackRows } ?: remember(fallbackRows) {
         `in`.synthora.musicbox.services.PreparedQueueRows.prepare(fallbackRows)
     }
     val rows = prepared.tracks

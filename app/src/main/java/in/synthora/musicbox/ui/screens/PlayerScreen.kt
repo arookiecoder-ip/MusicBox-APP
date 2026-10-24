@@ -350,7 +350,7 @@ fun PlayerScreen(
         // The queue does not display the playback clock. Keep its inputs stable
         // while progress updates so visible rows are not rebuilt every tick.
         val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
-            MusicUiState(isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress || preparingRows)
+            MusicUiState(isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
         }
             QueueBottomSheetContent(
                 statusText = when {

@@ -112,10 +112,11 @@ class EchoController(
             EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
         }.filter { it.serial.isNotBlank() }
         _devices.value = list
-        val chosen = list.firstOrNull { it.serial == saved }?.serial ?: init.text("serial").ifBlank { list.firstOrNull()?.serial.orEmpty() }
+        val online = list.filter { it.online }
+        val chosen = online.firstOrNull { it.serial == saved }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
         if (chosen != _serial.value) setSerial(chosen)
         init["now_playing"]?.let { np -> if (np is JsonObject) apply(np) }
-        return loggedIn && list.isNotEmpty()
+        return loggedIn && list.any { it.online }
     }
 
     /** Refresh presence without changing playback, artwork or the selected output. */

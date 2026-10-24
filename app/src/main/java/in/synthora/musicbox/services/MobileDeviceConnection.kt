@@ -83,6 +83,7 @@ object MobileDeviceConnection {
                 try {
                     val sentAcknowledgments = acknowledgments.snapshot()
                     val reply = withTimeout(12_000) { request("online", buildJsonObject {
+                        put("foreground", androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
                         put("include_handoff_state", true); put("accepted_token", PhonePlaybackOwnership.token)
                         put("wait", true); put("wait_seconds", 8); put("revision", revision); put("output_token", outputToken)
                         put("volume", (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
@@ -150,8 +151,11 @@ object MobileDeviceConnection {
         } } }
     }
 
-    suspend fun selectForegroundDefault(): SharedPlaybackOutput? {
-        val reply = request("foreground", buildJsonObject { put("name", "${Build.MANUFACTURER} ${Build.MODEL}") })
+    suspend fun selectForegroundDefault(offlineAlexa: String? = null): SharedPlaybackOutput? {
+        val reply = request("foreground", buildJsonObject {
+            put("name", "${Build.MANUFACTURER} ${Build.MODEL}")
+            offlineAlexa?.let { put("offline_alexa", it) }
+        })
         return if (reply.flag("default_selected")) rememberOutput(sharedPlaybackOutput(reply)) else null
     }
 

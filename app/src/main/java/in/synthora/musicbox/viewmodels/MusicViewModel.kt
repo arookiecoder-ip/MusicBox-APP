@@ -473,6 +473,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
         // Observe restored state and update UI with saved queue
         viewModelScope.launch {
+            echo.devices.collect { devices ->
+                if (signedIn && isForeground && isAlexa && devices.any { it.serial == echo.state.value.sharedOutput.serial && !it.online }) {
+                    selectIdleForegroundDevice()
+                }
+            }
+        }
+        viewModelScope.launch {
             playbackManager.hasRestoredState.collect { hasState ->
                 if (hasState) loadRestoredQueue()
             }
@@ -608,7 +615,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (!outputChosen) setOutputPreference(if (hasEcho) PlaybackOutput.ALEXA else PlaybackOutput.PHONE)
             val latest = echo.state.value.sharedOutput
-            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null) {
+            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null && echo.devices.value.any { it.online && it.serial == latest.serial }) {
                 adoptRemoteAlexa(latest)
             } else if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "phone") {
                 `in`.synthora.musicbox.services.PhonePlaybackOwnership.restoreIfCurrent(latest)
@@ -666,7 +673,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val request = playbackRequestId
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true
         try {
-            val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault() } ?: return
+            val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault(
+                echo.state.value.sharedOutput.takeIf { it.mode == "alexa" && echo.devices.value.any { d -> d.serial == it.serial && !d.online } }?.serial) } ?: return
             if (request != playbackRequestId || !isForeground) return
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(selected)
             // Restore only metadata. Audio preparation waits for an explicit play action.
