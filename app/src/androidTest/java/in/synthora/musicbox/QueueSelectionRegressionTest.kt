@@ -281,6 +281,44 @@ class QueueSelectionRegressionTest {
                         waitFor(target.uuid,false)
                     }
                     assertFalse(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry("removed-entry") })
+                    val model=(context.applicationContext as JukeApplication).playbackModel()
+                    fun shell(command:String) {
+                        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+                    }
+                    fun waitForState(description:String, condition:()->Boolean) {
+                        val deadline=android.os.SystemClock.elapsedRealtime()+10_000
+                        while(android.os.SystemClock.elapsedRealtime()<deadline) {
+                            if(condition())return
+                            android.os.SystemClock.sleep(25)
+                        }
+                        fail(description)
+                    }
+                    try {
+                        waitForState("Model did not observe A") { model.uiState.value.currentTrack?.uuid==songs[0].uuid }
+                        shell("svc wifi disable")
+                        shell("svc data disable")
+                        waitForState("Emulator network did not disconnect") {
+                            `in`.synthora.musicbox.network.NetworkFeedback.refresh(context)
+                            !`in`.synthora.musicbox.network.NetworkFeedback.online.value
+                        }
+                        val missing=Track("offline-requested-b","Requested B","Artist",durationSec=200,ytVideoId="offline0001")
+                        instrumentation.runOnMainSync { model.playTrack(missing) }
+                        fun failedB() = model.uiState.value.let { it.currentTrack?.uuid==missing.uuid && !it.isLoading && it.error!=null }
+                        waitForState("Failed B reverted to A") { failedB() }
+                        instrumentation.runOnMainSync { assertFalse(controller.isPlaying);manager.seekTo(400) }
+                        android.os.SystemClock.sleep(200)
+                        assertTrue("Late A cursor update replaced the selected B",failedB())
+                        instrumentation.runOnMainSync { model.togglePlayPause() }
+                        waitForState("Retry failed to retain B") { failedB() }
+                        instrumentation.runOnMainSync { assertFalse(controller.isPlaying);model.playTrackFromQueue(songs[0],0) }
+                        waitFor(songs[0].uuid,true)
+                        waitForState("A queue tap remained presented as paused") { model.uiState.value.currentTrack?.uuid==songs[0].uuid && model.uiState.value.isPlaying }
+                    } finally {
+                        instrumentation.runOnMainSync { model.onSignedOut() }
+                        shell("svc wifi enable")
+                        shell("svc data enable")
+                        `in`.synthora.musicbox.network.NetworkFeedback.refresh(context)
+                    }
                 } finally {
                     instrumentation.runOnMainSync { controller.stop();controller.clearMediaItems();controller.release();manager.release() }
                 }

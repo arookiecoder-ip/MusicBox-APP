@@ -118,6 +118,7 @@ class PlaybackService : MediaLibraryService() {
                 service.networkInterruption.clear()
                 service.recoveryShouldResume = false
                 service.streamRecoveryJob?.cancel()
+                resetExplicitStreamRetry()
                 playQueueEntry(service.player, index)
             }
 
