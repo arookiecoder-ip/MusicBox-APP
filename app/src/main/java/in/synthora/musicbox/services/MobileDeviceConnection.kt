@@ -20,6 +20,8 @@ object MobileDeviceConnection {
     val devices = _devices.asStateFlow()
     private var job: Job? = null
     private var generation = 0L
+    private var visibilityRevision = 0L
+    private var foregroundOverride: Boolean? = null
     private val handled = linkedSetOf<String>()
     private val acknowledgments = CommandAcknowledgments()
     private var latestOutput = SharedPlaybackOutput()
@@ -83,7 +85,8 @@ object MobileDeviceConnection {
                 try {
                     val sentAcknowledgments = acknowledgments.snapshot()
                     val reply = withTimeout(12_000) { request("online", buildJsonObject {
-                        put("foreground", androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        put("foreground", foregroundOverride ?: androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        put("visibility_revision", ++visibilityRevision)
                         put("include_handoff_state", true); put("accepted_token", PhonePlaybackOwnership.token)
                         put("wait", true); put("wait_seconds", 8); put("revision", revision); put("output_token", outputToken)
                         put("volume", (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
@@ -137,6 +140,17 @@ object MobileDeviceConnection {
         }
     }
 
+    fun updateForeground(foreground: Boolean) {
+        foregroundOverride = foreground
+        if (job?.isActive != true || session.isBlank()) return
+        val currentSession=session
+        scope.launch {
+            try { withTimeout(2_000) { request("visibility", buildJsonObject { put("foreground",foreground); put("visibility_revision",++visibilityRevision) }, currentSession) } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* The next presence heartbeat repairs visibility. */ }
+        }
+    }
+
     fun stop() {
         appContext?.let(DeviceConnectionService::stop)
         val closingSession = session
@@ -154,6 +168,7 @@ object MobileDeviceConnection {
     suspend fun selectForegroundDefault(offlineAlexa: String? = null): SharedPlaybackOutput? {
         val reply = request("foreground", buildJsonObject {
             put("name", "${Build.MANUFACTURER} ${Build.MODEL}")
+            put("visibility_revision",++visibilityRevision)
             offlineAlexa?.let { put("offline_alexa", it) }
         })
         return if (reply.flag("default_selected")) rememberOutput(sharedPlaybackOutput(reply)) else null

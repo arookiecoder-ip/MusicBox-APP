@@ -652,6 +652,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** The app moved to the foreground or background: poll the Echo every 3 s or 10 s. */
     fun setForeground(foreground: Boolean) {
         isForeground = foreground
+        `in`.synthora.musicbox.services.MobileDeviceConnection.updateForeground(foreground)
         if (foreground && signedIn) `in`.synthora.musicbox.services.DeviceConnectionService.startWhileVisible(getApplication())
         if (foreground) settingsPrefs.edit { putBoolean("remote_controls_dismissed", false) }
         if (foreground && signedIn && serverPlaybackChecked) viewModelScope.launch {
