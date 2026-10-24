@@ -291,11 +291,11 @@ class KeyboardArtistPresentationTest {
 
     @Test fun expandedArtistHeroAlwaysKeepsItsImageAndBlendAsTallAsTheContent() {
         compose.setContent { JUKETheme { Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            DetailHero(null, artist=true) { Spacer(Modifier.height(620.dp).testTag("Tall artist content")) }
+            DetailHero(null, artist=true) { Spacer(Modifier.fillMaxWidth().height(620.dp).testTag("Tall artist content")) }
         } } }
         val image=compose.onNodeWithTag("Artist banner",useUnmergedTree=true).fetchSemanticsNode().boundsInRoot
         val content=compose.onNodeWithTag("Tall artist content").fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(image.height-content.height)<2f)
+        assertTrue("Artist image $image must cover content $content",kotlin.math.abs(image.height-content.height)<2f)
     }
 
 }
