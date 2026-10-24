@@ -883,6 +883,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun moveRemotePhoneToThisPhone() {
+        // Connect the silent local renderer while the source is still playing.
+        playbackManager.initialize()
         val before = AlexaBackendApi.phoneOutputStatus()
         val transferred = `in`.synthora.musicbox.services.MobileDeviceConnection.transfer(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, before, echo.serial.value)
         startTransferredPhone(transferred)
@@ -1164,6 +1166,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun moveEchoToPhone() {
+        // Binding Media3 need not wait for Amazon to finish pausing the Echo.
+        playbackManager.initialize()
         var wasPlaying = echo.state.value.playing
         var claim: `in`.synthora.musicbox.services.SharedPlaybackOutput? = null
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true

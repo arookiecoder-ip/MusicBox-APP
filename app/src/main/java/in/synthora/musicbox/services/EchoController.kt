@@ -416,7 +416,18 @@ class EchoController(
         require(playable.isNotEmpty()) { "Nothing to play" }
         val targetIndex = playable.indexOf(selected).coerceAtLeast(0)
         val videoId = requireNotNull(playable[targetIndex].ytVideoId)
-        startTransferredAlexaQueue(playing,
+        var transferred = false
+        if (expectedPhoneToken != null && reuseSharedQueue) {
+            try {
+                send("/api/app/devices/", pausedEchoHandoff(PhonePlaybackOwnership.ownerId, expectedPhoneToken,
+                    requireSerial(), videoId, playable[targetIndex].uuid, positionMs, playing))
+                transferred = true
+            } catch (error: `in`.synthora.musicbox.network.BackendHttpException) {
+                // Older servers reject the new action before changing ownership.
+                if (error.statusCode != 400 && error.statusCode != 404) throw error
+            }
+        }
+        if (!transferred) startTransferredAlexaQueue(playing,
             installPaused = {
                 check(expectedPhoneToken == null || PhonePlaybackOwnership.permitsPlayback(expectedPhoneToken)) { "A newer phone play superseded this switch." }
                 AlexaBackendApi.updateQueue(if (reuseSharedQueue) "current" else "start", videoId,
