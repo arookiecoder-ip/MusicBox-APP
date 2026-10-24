@@ -48,8 +48,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.first
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -58,6 +56,14 @@ import `in`.synthora.musicbox.ui.theme.GlassLevel
 import `in`.synthora.musicbox.ui.theme.GlassShapes
 import `in`.synthora.musicbox.ui.theme.glassFloat
 import `in`.synthora.musicbox.utils.rememberJukeHaptics
+
+/** A queued hide from an old field must never close a newer field's IME. Main-thread only. */
+private object SearchImeOwner {
+    private val owners = java.util.WeakHashMap<android.view.View, Any>()
+    fun claim(view: android.view.View, token: Any) { owners[view] = token }
+    fun owns(view: android.view.View, token: Any) = owners[view] === token
+    fun finish(view: android.view.View, token: Any) { if (owns(view, token)) owners.remove(view) }
+}
 
 /**
  * One compact header shared by Library and Search: title + actions at rest, and the same
@@ -103,43 +109,59 @@ fun SearchHeader(
         run {
             if (open) {
                 var fieldFocused by remember { mutableStateOf(false) }
+                val sessionToken = remember(selectAllTrigger) { Any() }
+                var imeWanted by remember(selectAllTrigger) { mutableStateOf(true) }
                 var imeJob by remember { mutableStateOf<Job?>(null) }
-                DisposableEffect(Unit) {
+                fun hideIme() {
+                    keyboard?.hide()
+                    ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+                }
+                DisposableEffect(sessionToken) {
+                    SearchImeOwner.claim(view, sessionToken)
                     onDispose {
                         imeJob?.cancel()
-                        keyboard?.hide()
-                        ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
-                        // Compat show can enqueue a native request; this hide follows it.
-                        view.post { ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime()) }
+                        if (SearchImeOwner.owns(view, sessionToken)) {
+                            hideIme()
+                            view.post {
+                                if (SearchImeOwner.owns(view, sessionToken)) {
+                                    ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+                                    SearchImeOwner.finish(view, sessionToken)
+                                }
+                            }
+                        }
                     }
                 }
-                LaunchedEffect(selectAllTrigger) {
+                LaunchedEffect(sessionToken, window.isWindowFocused, imeWanted) {
+                    if (!imeWanted) return@LaunchedEffect
                     imeJob=currentCoroutineContext()[Job]
-                    // Both icon taps and programmatic opens use this attached field.
-                    // The IME request must follow the text-input focus session.
-                    snapshotFlow { window.isWindowFocused }.first { it }
+                    // Compose focus can be established before Android grants window focus.
+                    // A window-focus change restarts this request; never wait indefinitely.
                     androidx.compose.runtime.withFrameNanos { }
+                    if (!view.hasFocus()) view.requestFocus()
                     focus.requestFocus()
                     if (selectAllTrigger != handledSelectAll) {
                         handledSelectAll = selectAllTrigger
                         field = field.copy(selection = TextRange(0, field.text.length))
                     }
-                    // Native input connection creation can trail Compose focus on a real tap.
-                    // Stop once visible; closing the field cancels this effect and every retry.
-                    repeat(15) {
+                    if (!window.isWindowFocused) return@LaunchedEffect
+                    var visibleChecks=0
+                    repeat(20) {
                         androidx.compose.runtime.withFrameNanos { }
                         if (!fieldFocused) focus.requestFocus()
                         keyboard?.show()
                         ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())
                         delay(100)
-                        if (ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true)
-                            return@LaunchedEffect
+                        val visible=fieldFocused && ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true
+                        visibleChecks=if(visible) visibleChecks+1 else 0
+                        // Do not mistake an old input connection's visible IME for this field.
+                        if(visibleChecks>=3) return@LaunchedEffect
                     }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = {
                         haptic.click()
                         focusManager.clearFocus(force = true)
+                        imeWanted=false
                         imeJob?.cancel()
                         keyboard?.hide()
                         ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
@@ -159,10 +181,11 @@ fun SearchHeader(
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = {
+                            imeWanted=false
                             imeJob?.cancel()
                             keyboard?.hide()
                             ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
-                            view.post { ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime()) }
+                            view.post { if(SearchImeOwner.owns(view, sessionToken) && !imeWanted) ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime()) }
                             onSearch()
                         }),
                         modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused },

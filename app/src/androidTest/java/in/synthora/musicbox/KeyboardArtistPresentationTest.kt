@@ -298,4 +298,25 @@ class KeyboardArtistPresentationTest {
         assertTrue("Artist image $image must cover content $content",kotlin.math.abs(image.height-content.height)<2f)
     }
 
+    @Test fun replacingAnOpenSearchFocusRequestCannotLetOldCleanupHideTheNewKeyboard() {
+        var trigger by mutableIntStateOf(0)
+        var open by mutableStateOf(true)
+        lateinit var view: View
+        compose.setContent { JUKETheme { view=LocalView.current
+            SearchHeader("Search","query",{},open,{open=it},"Find songs",selectAllTrigger=trigger)
+        } }
+        compose.waitUntil(7000) { keyboardVisible(view) }
+        repeat(5) {
+            compose.runOnIdle { trigger++ }
+            compose.waitUntil(7000) { keyboardVisible(view) }
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            android.os.SystemClock.sleep(350)
+            compose.runOnIdle { assertTrue("Old focus request hid the current keyboard",keyboardVisible(view)) }
+        }
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.waitUntil(7000) { !keyboardVisible(view) }
+        android.os.SystemClock.sleep(350)
+        compose.runOnIdle { assertFalse("Submitted search reopened the keyboard",keyboardVisible(view)) }
+    }
+
 }
