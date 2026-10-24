@@ -549,7 +549,8 @@ class PlaybackService : MediaLibraryService() {
         manualFocus = { manualOverride ->
             if (::player.isInitialized) player.setAudioAttributes(player.audioAttributes,!manualOverride)
         },
-        nowMs = { android.os.SystemClock.elapsedRealtime() }
+        nowMs = { android.os.SystemClock.elapsedRealtime() },
+        onInterruption = { mainHandler.removeCallbacks(callModePoll); mainHandler.post(callModePoll) }
     )
     private var observedCallMode: Int? = null
     private fun observeCallMode() {
@@ -559,7 +560,7 @@ class PlaybackService : MediaLibraryService() {
             callGuard.modeChanged(player.playWhenReady)
         }
     }
-    private val callModePoll = object : Runnable {
+    private val callModePoll: Runnable = object : Runnable {
         override fun run() {
             observeCallMode()
             mainHandler.postDelayed(this, if (::player.isInitialized && (player.playWhenReady || callGuard.needsModePolling)) 500 else 5_000)

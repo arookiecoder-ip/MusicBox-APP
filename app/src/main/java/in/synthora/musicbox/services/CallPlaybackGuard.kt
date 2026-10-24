@@ -9,7 +9,8 @@ internal class CallPlaybackGuard(
     private val scheduleResume: () -> Unit,
     private val cancelResume: () -> Unit,
     private val manualFocus: (Boolean) -> Unit = {},
-    private val nowMs: () -> Long = { System.nanoTime()/1_000_000 }
+    private val nowMs: () -> Long = { System.nanoTime()/1_000_000 },
+    private val onInterruption: () -> Unit = {}
 ) : Player.Listener {
     private var ownPauseAck = false
     private var focusLossAt: Long? = null
@@ -61,6 +62,7 @@ internal class CallPlaybackGuard(
         if(reason==Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS) {
             // Focus suppression may precede the modem's mode change (especially outgoing calls).
             focusLossAt=nowMs()
+            onInterruption()
             if (blocksAutomaticPlayback) hold()
         }
     }
@@ -70,6 +72,7 @@ internal class CallPlaybackGuard(
             playWhenReady && blocksAutomaticPlayback -> hold()
             !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> {
                 focusLossAt=nowMs()
+                onInterruption()
                 if(blocksAutomaticPlayback) remember()
             }
             !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> explicitPause()

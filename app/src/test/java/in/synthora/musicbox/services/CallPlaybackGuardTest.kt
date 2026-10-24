@@ -94,4 +94,14 @@ class CallPlaybackGuardTest {
         assertFalse(guard.resumePending)
     }
 
+    @Test fun focusInterruptionWakesModeFallbackBeforeTheNextIdlePoll() {
+        var wakes=0
+        val guard=CallPlaybackGuard({false},{},{},{},onInterruption={wakes++})
+        guard.onPlaybackSuppressionReasonChanged(Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS)
+        assertEquals(1,wakes);assertTrue(guard.needsModePolling)
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertEquals(2,wakes)
+        guard.explicitPause();assertFalse(guard.needsModePolling)
+    }
+
 }

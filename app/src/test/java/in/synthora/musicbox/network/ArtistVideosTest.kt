@@ -15,4 +15,10 @@ class ArtistVideosTest {
         assertEquals(listOf("one","two"),artistVideoItems(data).map { it.videoId })
         assertTrue(artistVideoItems(Json.parseToJsonElement("""{"artist":null,"videos":null}""").objectOrEmpty()).isEmpty())
     }
+    @Test fun videoChannelMetadataCannotTurnTheRowIntoAnArtistOrShareItsQueueIdentity() {
+        val data=Json.parseToJsonElement("""{"videos":[{"videoId":"one","channelId":"UCartist"},{"videoId":"two","channelId":"UCartist"}]}""").objectOrEmpty()
+        val rows=artistVideoItems(data)
+        assertEquals(listOf("one","two"),rows.map { it.id });assertTrue(rows.all { it.kind=="track" })
+    }
+
 }

@@ -50,7 +50,7 @@ fun ArtistDetailScreen(
     var expandedDescription by remember(artist?.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         when {
-            state.error != null && (artist == null || state.topTracks.isEmpty()) -> {
+            state.error != null && (artist == null || (state.topTracks.isEmpty() && state.videos.isEmpty() && state.albums.isEmpty() && state.singles.isEmpty() && state.playlists.isEmpty())) -> {
                 ConnectionErrorState(state.error.orEmpty(), {
                     artist?.let { searchViewModel.loadArtistDetails(it) }
                 }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
