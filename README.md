@@ -1,171 +1,92 @@
 # Music Box
 
-<div align="center">
+Native Android music playback, offline downloads, lyrics and shared control of phones, browsers and Alexa Echo devices.
 
-[![Platform](https://img.shields.io/badge/Platform-Android-green.svg)](https://www.android.com/)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0.21-purple.svg)](https://kotlinlang.org/)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-UI-blue.svg)](https://developer.android.com/jetpack/compose)
-[![Min SDK](https://img.shields.io/badge/Min%20SDK-26-orange.svg)](https://developer.android.com/about/versions/oreo)
-[![Version](https://img.shields.io/badge/Version-2.4.40-green.svg)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.html)
+**Source snapshot:** 2.4.50 (102), `feat/alexa-backend`, reviewed 2026-10-25. Source versions and verified debug builds are not the same as published GitHub releases.
 
-**A modern Android music player with smart recommendations, offline playback, and shared phone + Alexa output**
+[Changelog](CHANGELOG.md) · [Architecture](ARCHITECTURE.md) · [Published releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) · [Companion backend](https://github.com/arookiecoder-ip/youtube-music-alexa-skill)
 
-[Latest Release](#-latest-release) • [Features](#-features) • [Installation](#-installation) • [Build from Source](#-build-from-source) • [Tech Stack](#-tech-stack)
+## Features
 
-</div>
+- **Playback:** Media3/ExoPlayer, background MediaSession controls, shuffle/repeat, sleep timer, equalizer, bass/volume processing and playback speed. Phone playback and remote playback use separate owners and controllers.
+- **Shared output:** select an online phone, browser or Echo; transfer the queue, exact occurrence, play intent and cursor using acknowledged, token-fenced handoffs. Offline outputs are hidden/reconciled without silently reviving a saved song.
+- **Queue:** explicit row selection starts playback, including from pause; occurrence-bound metadata and stable gestures avoid old-song artwork flashes and missed taps. Failed requests retain the requested song and Retry instead of silently returning to the old song.
+- **Streaming and offline:** start progressive backend audio without waiting for a complete server download. The phone retains the current stream and can warm the next five locally; explicit downloads and collection manifests remain separate and persistent.
+- **Discovery:** native YouTube Music Home, search/suggestions, Explore, account collections and paginated artist/album/playlist pages. Pasted YouTube links wait for submission and then open Now Playing. Radio can build a fresh queue from the current song on every request.
+- **Artists:** on-demand artist portraits; top songs, releases and music-video songs. Videos show a five-song preview and a separate full-list page. These entries use the music playback path; this is not a video-rendering player.
+- **Lyrics:** LRCLib timed lookup, caption/YouTube Music fallbacks, synchronized Now Playing and mini-player presentation, offsets and optional romanization. Tracks without usable timestamps retain plain lyrics.
+- **Interface:** phone/tablet layouts, speed-dial song menus and labels, compact matching navigation/mini-player surfaces, artwork-derived player blends and a changing Home blend. The status-bar fill clears when scrolling back to the top; expanded artist descriptions keep the banner fixed.
+- **Account and tools:** owner login/TOTP, YouTube account and audio-cookie reconnect flows, likes, playlists, artist subscriptions, listening history, Jam sharing and bounded playback/crash diagnostics. Spotify metadata/import and local-library support remain in the codebase.
 
----
+## Install an update-compatible build
 
-## 📦 Latest Release
+Requires **Android 8.0 / API 26 or later**. Current package: `in.synthora.musicbox`.
 
-**The current source version is 2.4.40.** See GitHub Releases for published APKs. 🚀
+For the current feature build, use the signed **app-debug** artifact from [Android Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/workflows/android-feature.yml), on `feat/alexa-backend`, with `stable_release=false`.
 
-Update-compatible signed build: installs over previous releases without uninstalling, with optimized/shrunk packaging and release-only logging.
+The [verified 2.4.50 build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897516) contains a debug APK with version code 102. Actions artifacts have finite retention. For published stable packages, check [GitHub Releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) rather than assuming every source version has a release tag.
 
-[📥 Download v2.4.0](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0) | [📝 Full Release Notes](docs/v2.4.0-RELEASE_NOTES.md)
+Android updates require the same package, the original signing certificate and a compatible version code. The 2.4.50 artifact was checked against 2.4.49. Earlier `com.example.juke` builds have a different package identity. A disposable-key installation also cannot be updated with a differently signed APK.
 
-> If you installed a very old build signed with a disposable key, one final reinstall is required — every update after that works normally. Details in the release notes.
+The `music-box-review-apk` from Android CI is a review artifact; it does not establish update compatibility. Preserve the feature branch's signing identity and follow [APK signing](.github/signing/README.md). Never replace the key to solve an installation failure.
 
-## ✨ Features
+## Connect the backend
 
-### 🎵 Playback & Queue
+The [self-hosted companion](https://github.com/arookiecoder-ip/youtube-music-alexa-skill) supplies authenticated catalog/library access, progressive audio and authoritative output/queue state. Sign in through the app's account flow. An Echo additionally requires the custom skill and an Amazon/Alexa session on the server; browser/phone audio does not require an online Echo.
 
-- ExoPlayer (Media3) playback with foreground service, MediaSession, and notification controls
-- Smart queue with infinite radio-style recommendations and duplicate prevention
-- Queue tools: shuffle upcoming, sort A–Z, clear played, save queue as playlist
-- Shuffle, repeat (off / all / one), sleep timer, and tap-to-seek
-- Resumable playback position and queue restoration across restarts
-
-### 📥 Downloads & Offline
-
-- Dual download sources with automatic fallback on errors or duration mismatch
-- Instant streaming start with background download completion (LRU-cached)
-- Full offline playback of downloaded tracks and playlists
-- Resumable Spotify playlist imports that survive app close and network loss
-- Previews and wrong-length audio are detected, rejected, and re-fetched
-
-### 📝 Lyrics
-
-- Three-stage fallback: LRCLib → YouTube Music lyrics → YouTube captions
-- Time-synced lyrics with auto-scroll and adjustable sync offset (±12s)
-- Stale/instrumental-line filtering in the mini-player
-
-### 🔍 Search & Discovery
-
-- Debounced autocomplete suggestions while typing, full metadata search on submit
-- Track, artist, album, and playlist results with Spotify URL/URI support
-- Artist pages with top tracks and discography; album and playlist detail screens
-
-### 📚 Library
-
-- All Tracks, Favorites, playlists, Recently Played, and Most Played views
-- Multi-select batch actions (play next, add to queue, add to playlist, delete)
-- Playlist management with offline "save playlist" downloads
-
-### 🔊 Audio
-
-- 10-band equalizer with volume/bass boost and stable volume leveling
-- Playback speed control and edge-only skip-silence
-- Call handling: auto-pause on calls, resume afterwards
-- Power Tools diagnostics (hidden developer page)
-
-### 📱 Phone + Alexa Shared Output
-
-- Coordinated playback ownership between the phone app and Alexa devices
-- Guarded handoffs with lease deadlines — a silent device can never lock your controls
-- Queue position and playback state stay consistent across the handoff
-
-### 🎨 Interface
-
-- Material Design 3 with a liquid-glass player, search, and library
-- Phone and tablet layouts, dark theme, animated queue drag-and-drop
-- Mini player with progress line and swipe skip gestures
-
-## 📲 Installation
-
-1. Download `Music-Box-2.4.0.apk` from the [releases page](https://github.com/arookiecoder-ip/MusicBox-APP/releases).
-2. Install it on any device running **Android 8.0 (API 26) or newer**.
-3. Grant storage/notification permissions when prompted.
-
-The in-app updater tracks the stable channel: stable installs ignore prereleases, and beta installs are offered the upgrade to stable.
-
-## 🛠️ Build from Source
-
-Prerequisites: Android Studio (or JDK 17 + Android SDK, compileSdk 36).
-
-```bash
-git clone https://github.com/arookiecoder-ip/MusicBox-APP.git
-cd MusicBox-APP
-```
-
-Create `local.properties` in the project root with your backend and analytics configuration:
+For a configured build, use a developer checkout with JDK 17 and Android SDK 36, and set these non-secret/example values in an untracked `local.properties`:
 
 ```properties
-POSTHOG_API_KEY=your_key_here
-POSTHOG_HOST=https://your-posthog-host
-ALEXA_SESSION_BASE_URL=https://your-session-server
-ALEXA_BASE_URL=https://your-audio-server
+ALEXA_SESSION_BASE_URL=https://music.example.com
+ALEXA_BASE_URL=https://music.example.com
+POSTHOG_API_KEY=
+POSTHOG_HOST=
 ```
 
-Then build and install the debug variant:
+Session and audio origins can be split only when both services are configured for that arrangement. Current builds set `ALEXA_API_KEY` to an empty value and obtain scoped audio credentials through the owner session; do not embed a server-wide API key in the APK.
 
-```bash
-./gradlew assembleDebug
-./gradlew installDebug
-```
+For this deployment, build installable APKs **only in GitHub Actions**, on `feat/alexa-backend`. Keep `stable_release=false` for debug builds. The workflow restores/verifies the original signing key from its preserved cache or configured secret and fails if the pinned identity cannot be recovered. Do not build Android packages on the music server. Historical release and optional benchmark workflows are described in the signing/performance docs; they are not required to update this debug build.
 
-Release (signed, optimized) builds are produced by CI: dispatch the **Android Feature Build** workflow with `stable_release=true`. Release signing requires the preserved key — see `.github/signing/README.md`. Never commit keys or keystores.
+## Streaming storage and network behavior
 
-## 🧱 Tech Stack
+| Storage | Lifetime and purpose |
+| --- | --- |
+| Backend current-track bytes | One anonymous temporary current-song file; no persistent multi-song server cache. |
+| Phone stream cache | Default 256 MiB, configurable 128–1024 MiB; current plus a rolling next-five set. Separate from saved downloads. |
+| Explicit downloads | Persistent local files and Room-backed download/collection manifests. |
+| Catalog/Home/artwork/lyrics metadata | Separate caches; removing server song storage does not remove these features. |
 
-| Layer    | Technology                                                              |
-| -------- | ----------------------------------------------------------------------- |
-| UI       | Jetpack Compose (Material 3), Coil image loading                        |
-| Playback | Media3 ExoPlayer, MediaSession                                         |
-| Data     | Room database, Kotlin Coroutines + StateFlow                            |
-| Network  | Ktor client, authenticated Music Box backend / lyrics APIs                     |
-| Language | Kotlin 2.0.21, Java 11 bytecode                                         |
+Speculative next-song caching respects connectivity, buffering, metered-data preferences, battery saver, thermal state and low battery. Normal conditions permit five complete upcoming streams; moderate thermal pressure permits one; severe constraints stop speculation. Demand caching of the selected song remains separate. Settings and storage limits can prevent all five from being fully cached. Older temporary entries retire as the retained queue window advances.
 
-Project layout: `app/src/main/java/in/synthora/musicbox/` — `network/`, `services/` (playback, queue, updates), `ui/screens/` + `ui/components/`, `viewmodels/`, `database/`, `models/`, `utils/`.
+Available local audio can recover from network interruptions. A DNS failure or a missing uncached track still needs connectivity. Online ownership is reconciled before resuming shared playback; no distributed system can guarantee exclusive playback across devices isolated by a network partition.
 
-## Playback architecture and validation
+## Development and verification
 
-The Android client uses native Media3 playback and Room-backed downloads. Account,
-Home, library and device controls use the authenticated self-hosted backend.
-Audio-only credentials are issued by the backend; new APKs embed no global server key.
-See [the playback contract](docs/PLAYBACK_ARCHITECTURE.md) for ownership, queue
-revisions, restart behavior, polling and deployment order.
+| Area | Entry point |
+| --- | --- |
+| Application/bootstrap/navigation | [JukeApplication.kt](app/src/main/java/in/synthora/musicbox/JukeApplication.kt), [MainActivity.kt](app/src/main/java/in/synthora/musicbox/MainActivity.kt) |
+| UI and state | [screens](app/src/main/java/in/synthora/musicbox/ui/screens), [components](app/src/main/java/in/synthora/musicbox/ui/components), [viewmodels](app/src/main/java/in/synthora/musicbox/viewmodels) |
+| Audio/output/queues/downloads | [services](app/src/main/java/in/synthora/musicbox/services) |
+| Sessions, catalog, audio credentials, lyrics | [network](app/src/main/java/in/synthora/musicbox/network) |
+| Persistent data | [database](app/src/main/java/in/synthora/musicbox/database) |
+| JVM and emulator regressions | [unit tests](app/src/test), [Android tests](app/src/androidTest) |
 
-Every pull request runs all debug JVM tests and compiles a debug APK in **Android CI**.
-The run uploads `android-unit-tests` and `music-box-review-apk` artifacts. The review
-APK uses the runner's debug identity; use the existing signed Feature Build workflow
-for an APK that updates an installed release. CI does not contact the production
-server or require account credentials.
+[Android CI](.github/workflows/android.yml) runs JVM tests and assembles a review APK. [Android Feature Build](.github/workflows/android-feature.yml) produces the signed debug artifact and runs focused protocol/UI regressions on feature pushes. It also exposes optional broader phone/tablet and performance checks.
 
-## 🤝 Contributing
+Verified functional snapshot: **444 JVM tests and 30 API 35 emulator tests passed** in [Android CI](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897537) and [Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897516). The optional broad tablet suite was not part of that run. Test counts describe that commit, not a permanent minimum.
 
-Contributions are welcome! Open a pull request against `feat/alexa-backend` with a clear description and test notes. Do not commit secrets, keys, or binaries.
+See [architecture](ARCHITECTURE.md), [performance measurement](docs/PERFORMANCE_MEASUREMENT.md), [feature parity](docs/alexa-web-feature-parity.md) and [release/signing history](CHANGELOG.md).
 
-## 📞 Support
+## Known limits
 
-For bugs, questions, or feature requests, please [open an issue](https://github.com/arookiecoder-ip/MusicBox-APP/issues).
+- Alexa seeks restart custom-skill playback at an offset. The latest single live probe acknowledged the seek request in about 90 ms but confirmed playback after about 3.7 seconds; first-byte streaming latency is a different measurement.
+- Last-second Alexa queue edits have deterministic race/recovery coverage. The longer live boundary probe was interrupted by a separate Pause request and did not prove an audible end-to-end transition.
+- Phone battery-discharge and Samsung Android 17 frame-rate gains have not been measured. Recent changes reduce avoidable rendering, polling and cache scans without promising a battery percentage or eliminating every device-specific stall.
+- Call recovery preserves intent, allows explicit Play during a call and honors explicit Pause. Emulator coverage does not certify every carrier/Bluetooth/OEM audio route.
+- Lyrics availability, YouTube authorization and provider response formats remain external dependencies.
 
-## 📄 License
+## Contributing and license
 
-Music Box is licensed under the **GNU Affero General Public License v3.0** — see [LICENSE](LICENSE) for details.
+Report reproducible issues with the app version, output device, steps and redacted diagnostics at [Issues](https://github.com/arookiecoder-ip/MusicBox-APP/issues). Keep credentials, keystores and APK binaries out of commits. Target the active feature branch unless the maintainer directs otherwise.
 
----
-
-<div align="center">
-
-**Made with ❤️ using Kotlin and Jetpack Compose**
-
-[⬆ Back to Top](#music-box)
-
-**MADE WITH ❤️ BY MEEK**
-
-[![GitHub](https://img.shields.io/badge/GitHub-100000?style=for-the-badge&logo=github&logoColor=white)](https://github.com/arookiecoder-ip/MusicBox-APP)
-[![Release](https://img.shields.io/badge/Release-v2.4.0-green?style=for-the-badge)](https://github.com/arookiecoder-ip/MusicBox-APP/releases/tag/v2.4.0)
-
-</div>
+Licensed under [GNU AGPL v3](LICENSE). Music Box retains its JUKES history and original contributor credits: **MADE WITH ❤️ BY MEEK**.
