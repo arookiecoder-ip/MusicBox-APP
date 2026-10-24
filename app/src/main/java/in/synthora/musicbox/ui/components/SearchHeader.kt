@@ -32,6 +32,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextRange
+import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -100,7 +103,18 @@ fun SearchHeader(
         run {
             if (open) {
                 var fieldFocused by remember { mutableStateOf(false) }
+                var imeJob by remember { mutableStateOf<Job?>(null) }
+                DisposableEffect(Unit) {
+                    onDispose {
+                        imeJob?.cancel()
+                        keyboard?.hide()
+                        ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+                        // Compat show can enqueue a native request; this hide follows it.
+                        view.post { ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime()) }
+                    }
+                }
                 LaunchedEffect(selectAllTrigger) {
+                    imeJob=currentCoroutineContext()[Job]
                     // Both icon taps and programmatic opens use this attached field.
                     // The IME request must follow the text-input focus session.
                     snapshotFlow { window.isWindowFocused }.first { it }
@@ -126,7 +140,9 @@ fun SearchHeader(
                     IconButton(onClick = {
                         haptic.click()
                         focusManager.clearFocus(force = true)
+                        imeJob?.cancel()
                         keyboard?.hide()
+                        ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
                         onQueryChange("")
                         onOpenChange(false)
                     }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search") }
@@ -142,7 +158,13 @@ fun SearchHeader(
                         ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(onSearch = { onSearch() }),
+                        keyboardActions = KeyboardActions(onSearch = {
+                            imeJob?.cancel()
+                            keyboard?.hide()
+                            ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime())
+                            view.post { ViewCompat.getWindowInsetsController(view)?.hide(WindowInsetsCompat.Type.ime()) }
+                            onSearch()
+                        }),
                         modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused },
                         decorationBox = { inner ->
                             Box(contentAlignment = Alignment.CenterStart) {

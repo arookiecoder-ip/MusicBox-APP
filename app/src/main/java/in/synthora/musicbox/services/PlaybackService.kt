@@ -548,7 +548,8 @@ class PlaybackService : MediaLibraryService() {
         cancelResume = { mainHandler.removeCallbacks(resumeAfterCall) },
         manualFocus = { manualOverride ->
             if (::player.isInitialized) player.setAudioAttributes(player.audioAttributes,!manualOverride)
-        }
+        },
+        nowMs = { android.os.SystemClock.elapsedRealtime() }
     )
     private val callModeListener = if (android.os.Build.VERSION.SDK_INT >= 31)
         AudioManager.OnModeChangedListener {
