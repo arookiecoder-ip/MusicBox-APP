@@ -5,6 +5,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -121,6 +122,67 @@ class QueueSelectionRegressionTest {
             compose.runOnIdle { assertEquals(index,selected) }
         }
         compose.runOnIdle { assertEquals(6,tabClicks) }
+    }
+
+    @Test fun intermediatePlaybackFramesNeverShowAInsideBRow() {
+        val context=InstrumentationRegistry.getInstrumentation().targetContext
+        fun image(name:String,color:Int):String {
+            val file=java.io.File(context.cacheDir,"queue-$name-${System.nanoTime()}.png")
+            val bitmap=android.graphics.Bitmap.createBitmap(32,32,android.graphics.Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(color)
+            file.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            bitmap.recycle()
+            return android.net.Uri.fromFile(file).toString()
+        }
+        val a=songs[0].copy(thumbnailUri=image("a",android.graphics.Color.RED))
+        val b=songs[1].copy(thumbnailUri=image("b",android.graphics.Color.BLUE))
+        val canonical=listOf(a,b)
+        val known=canonical.associateBy { it.uuid }
+        val presenter=TrackQueuePresentation()
+        var snapshot by mutableStateOf(PhonePlaybackSnapshot(canonical.map { it.uuid },a.uuid,a))
+        var remote by mutableStateOf(false)
+        val emissions=mutableListOf<List<Track>>()
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(420.dp)) {
+            val resolved=if(remote) canonical else snapshot.resolveTracks(known)
+            val rows=presenter.present(resolved,active=snapshot.currentMetadata)
+            val index=canonical.indexOfFirst { it.uuid==snapshot.currentId }
+            SideEffect { emissions += rows }
+            QueueBottomSheetContent(canonical[index],rows,index,MusicUiState(),{}, {_,_->}, {_,_->}, {})
+        } } }
+        fun assertBlue() {
+            val pixels=compose.onNodeWithTag("Queue artwork ${b.uuid}",useUnmergedTree=true).captureToImage().toPixelMap()
+            val color=pixels[5.coerceAtMost(pixels.width-1),5.coerceAtMost(pixels.height-1)]
+            assertTrue("B must retain its blue artwork, got $color",color.blue>color.red+.2f)
+        }
+        compose.waitUntil(7000) {
+            val pixels=compose.onNodeWithTag("Queue artwork ${b.uuid}",useUnmergedTree=true).captureToImage().toPixelMap()
+            val c=pixels[5.coerceAtMost(pixels.width-1),5.coerceAtMost(pixels.height-1)]
+            c.blue>c.red+.2f
+        }
+        // Stop the clock so assertions inspect the intermediate frame rather than
+        // letting a settled final B update hide the transient corrupt row.
+        compose.mainClock.autoAdvance=false
+        for (remoteMode in listOf(false,true)) {
+            compose.runOnIdle { remote=remoteMode }
+            repeat(4) { attempt ->
+                val current=if(attempt%2==0)b else a
+                val prior=if(attempt%2==0)a else b
+                compose.runOnIdle { snapshot=PhonePlaybackSnapshot(canonical.map { it.uuid },current.uuid,
+                    prior.copy(uuid=current.uuid,ytVideoId=current.ytVideoId)) }
+                compose.mainClock.advanceTimeByFrame()
+                compose.onNodeWithTag("Queue row ${b.uuid}").assert(hasAnyDescendant(hasText("Song 1",substring=false)))
+                assertBlue()
+                compose.runOnIdle { snapshot=PhonePlaybackSnapshot(canonical.map { it.uuid },current.uuid,current) }
+                compose.mainClock.advanceTimeByFrame()
+                assertBlue()
+            }
+        }
+        compose.runOnIdle {
+            assertTrue(emissions.isNotEmpty())
+            assertTrue(emissions.all { rows -> rows.map { it.title }==canonical.map { it.title } &&
+                rows.map { it.thumbnailUri }==canonical.map { it.thumbnailUri } })
+        }
+        compose.mainClock.autoAdvance=true
     }
 
 }

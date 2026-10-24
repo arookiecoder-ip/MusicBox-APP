@@ -12,9 +12,9 @@ import org.junit.Test
 import `in`.synthora.musicbox.services.resolveTracks
 
 class PlaybackPresentationTest {
-    @Test fun liveMetadataUpdatesArtworkAndMissingCurrentRowsStillChangeTheSong() {
+    @Test fun liveMetadataFillsMissingFieldsAndMissingCurrentRowsStillChangeTheSong() {
         val old = Track("old", "Old", "Artist", durationSec = 100)
-        val stored = Track("next", "Stale", "Stale artist", thumbnailUri = "stale.jpg", durationSec = 100, ytVideoId = "video")
+        val stored = Track("next", "", "", thumbnailUri = null, durationSec = 100, ytVideoId = "video")
         val live = stored.copy(title = "New", artist = "New artist", thumbnailUri = "new.jpg", durationSec = 200, ytVideoId = null)
         val snapshot = `in`.synthora.musicbox.services.PhonePlaybackSnapshot(listOf("old", "next"), "next", live)
         val resolved = snapshot.resolveTracks(mapOf("old" to old, "next" to stored))

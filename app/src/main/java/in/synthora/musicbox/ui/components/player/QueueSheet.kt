@@ -195,7 +195,10 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Bool
         Box(grip, contentAlignment = Alignment.Center) { Icon(Icons.Default.DragHandle, "Drag to reorder ${track.title}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
         Text("$number", Modifier.width(20.dp), style = MaterialTheme.typography.labelSmall, color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
-            `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 40.dp, Modifier.fillMaxSize())
+            key(track.uuid, track.ytVideoId, track.thumbnailUri) {
+                `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 40.dp,
+                    Modifier.fillMaxSize().testTag("Queue artwork ${track.uuid}"))
+            }
             if (active) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Equalizer, "Playing", Modifier.size(24.dp), tint = accent)
             }

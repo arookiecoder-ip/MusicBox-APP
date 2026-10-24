@@ -38,4 +38,27 @@ class QueueMetadataIsolationTest {
             assertEquals(queue.map { it.uuid },presented.map { it.uuid })
         }
     }
+    @Test fun missingFieldsStillFillAndLyricsAndLikesArePreserved() {
+        val incomplete=b.copy(title="",artist="",thumbnailUri="")
+        val live=b.copy(plainLyrics="Lyrics",isFavourite=true)
+        val resolved=PhonePlaybackSnapshot(listOf(b.uuid),b.uuid,live).resolveTracks(mapOf(b.uuid to incomplete)).single()
+        assertEquals(b.title,resolved.title);assertEquals(b.thumbnailUri,resolved.thumbnailUri)
+        val projected=TrackQueuePresentation().present(listOf(b),liked=setOf(b.ytVideoId!!),active=live).single()
+        assertEquals("Lyrics",projected.plainLyrics);assertTrue(projected.isFavourite)
+    }
+    @Test fun metadataForAnotherItemDoesNotModifyANoncurrentRow() {
+        val wrong=a.copy(title="Unexpected",thumbnailUri="wrong.jpg")
+        val resolved=PhonePlaybackSnapshot(listOf(a.uuid,b.uuid),b.uuid,wrong).resolveTracks(mapOf(a.uuid to a,b.uuid to b))
+        assertEquals(listOf(a,b),resolved)
+    }
+
+    @Test fun actualQueueMetadataEditsStillUpdateTheRow() {
+        val presenter=TrackQueuePresentation()
+        presenter.present(listOf(a,b),active=b)
+        val corrected=b.copy(title="Corrected B",thumbnailUri="corrected-b.jpg")
+        val row=presenter.present(listOf(a,corrected),active=b)[1]
+        assertEquals(corrected.title,row.title)
+        assertEquals(corrected.thumbnailUri,row.thumbnailUri)
+    }
+
 }
