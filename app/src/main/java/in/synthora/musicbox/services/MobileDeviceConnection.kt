@@ -5,6 +5,7 @@ import `in`.synthora.musicbox.network.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -19,6 +20,15 @@ object MobileDeviceConnection {
     private val _devices = MutableStateFlow<List<MobileAudioDevice>>(emptyList())
     val devices = _devices.asStateFlow()
     private var job: Job? = null
+    private var presenceReplyAt=Long.MIN_VALUE
+    private var presenceRevision=Long.MIN_VALUE
+    private val _changes=kotlinx.coroutines.flow.MutableSharedFlow<Long>(replay=1,extraBufferCapacity=1)
+    internal val changes=_changes.asSharedFlow()
+    internal fun hasLivePresence():Boolean {
+        if(job?.isActive!=true || presenceReplyAt==Long.MIN_VALUE) return false
+        return android.os.SystemClock.elapsedRealtime()-presenceReplyAt in 0..12_000
+    }
+
     private var generation = 0L
     private var visibilityRevision = 0L
     private var foregroundOverride: Boolean? = null
@@ -43,6 +53,8 @@ object MobileDeviceConnection {
         appContext = context.applicationContext
         DeviceConnectionService.stop(context)
         if (job?.isActive == true) return
+        presenceReplyAt=Long.MIN_VALUE
+        presenceRevision=Long.MIN_VALUE
         val activeSession = UUID.randomUUID().toString()
         session = activeSession
         val activeGeneration = ++generation
@@ -109,6 +121,10 @@ object MobileDeviceConnection {
                     supportsWait = reply.containsKey("revision")
                     supportsLongWait = reply.number("presence_wait_seconds") >= 8
                     revision = reply.number("revision")
+                    if(supportsWait) {
+                        presenceReplyAt=android.os.SystemClock.elapsedRealtime()
+                        if(presenceRevision!=revision) { presenceRevision=revision;_changes.tryEmit(revision) }
+                    }
                     val output = rememberOutput(sharedPlaybackOutput(reply))
                     outputToken = output.token
                     // Playback preparation/acknowledgment may wait on slow audio or
@@ -121,6 +137,7 @@ object MobileDeviceConnection {
                     retryAfterMs = (error as? BackendHttpException)?.retryAfterMs ?: 0L
                 }
                 if (failures > 0) {
+                    presenceReplyAt=Long.MIN_VALUE
                     val retryDelay = presenceRetryDelay(failures, retryAfterMs)
                     if (retryAfterMs > 0) delay(retryDelay)
                     else withTimeoutOrNull(retryDelay) {

@@ -39,8 +39,9 @@ object PlaybackCoordinator {
 }
 
 /** State reads are separate from the short, mandatory phone ownership lease. */
-fun remotePollDelayMs(foreground: Boolean, playing: Boolean, processing: Boolean, failures: Int): Long {
+fun remotePollDelayMs(foreground: Boolean, playing: Boolean, processing: Boolean, failures: Int, livePresence: Boolean = false): Long {
     val base = when {
+        foreground && livePresence && !processing -> 5_000L
         foreground -> 500L
         processing -> 1_000L
         playing -> 10_000L

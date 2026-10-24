@@ -19,6 +19,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -156,9 +157,13 @@ class EchoController(
         pollingForeground = foreground
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
+            val changes=kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+            val presence=launch { MobileDeviceConnection.changes.collect { changes.trySend(Unit) } }
+            try {
             var failures = 0
             var lastPresenceRefresh = 0L
             while (isActive) {
+                changes.tryReceive()
                 try {
                     refresh()
                     val presenceNow = android.os.SystemClock.elapsedRealtime()
@@ -177,8 +182,10 @@ class EchoController(
                     failures++
                     Log.w(TAG, "Now-playing poll failed")
                 }
-                delay(remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures))
+                val interval=remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures,MobileDeviceConnection.hasLivePresence())
+                withTimeoutOrNull(interval) { changes.receive() }
             }
+            } finally { presence.cancel();changes.close() }
         }
     }
 

@@ -36,4 +36,11 @@ class ArchitecturePolicyTest {
         assertTrue(recorded.totalMs >= 0)
         assertTrue(PlaybackDiagnostics.snapshot().size <= PlaybackDiagnostics.Stage.entries.size)
     }
+    @org.junit.Test fun livePresenceRemovesFastIdlePollsWithoutSlowingProcessingOrLegacyServers() {
+        assertEquals(5_000L,remotePollDelayMs(true,true,false,0,true))
+        assertEquals(5_000L,remotePollDelayMs(true,false,false,0,true))
+        assertEquals(500L,remotePollDelayMs(true,true,true,0,true))
+        assertEquals(500L,remotePollDelayMs(true,true,false,0,false))
+    }
+
 }
