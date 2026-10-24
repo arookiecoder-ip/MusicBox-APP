@@ -41,6 +41,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
@@ -76,6 +79,7 @@ fun SearchHeader(
     val focus = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
     val window = LocalWindowInfo.current
+    val view = LocalView.current
 
     // The field keeps its own selection so a re-tap can select the whole query for replacing.
     var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
@@ -96,19 +100,28 @@ fun SearchHeader(
         run {
             if (open) {
                 var fieldFocused by remember { mutableStateOf(false) }
-                LaunchedEffect(selectAllTrigger) {
+                LaunchedEffect(selectAllTrigger, window.isWindowFocused) {
                     // Both icon taps and programmatic opens use this attached field.
                     // The IME request must follow the text-input focus session.
                     snapshotFlow { window.isWindowFocused }.first { it }
                     androidx.compose.runtime.withFrameNanos { }
+                    view.requestFocus()
                     focus.requestFocus()
                     snapshotFlow { fieldFocused }.first { it }
                     if (selectAllTrigger != handledSelectAll) {
                         handledSelectAll = selectAllTrigger
                         field = field.copy(selection = TextRange(0, field.text.length))
                     }
-                    androidx.compose.runtime.withFrameNanos { }
-                    keyboard?.show()
+                    // Native input connection creation can trail Compose focus on a real tap.
+                    // Stop once visible; closing the field cancels this effect and every retry.
+                    repeat(10) {
+                        androidx.compose.runtime.withFrameNanos { }
+                        keyboard?.show()
+                        ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())
+                        delay(100)
+                        if (ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == true)
+                            return@LaunchedEffect
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = {

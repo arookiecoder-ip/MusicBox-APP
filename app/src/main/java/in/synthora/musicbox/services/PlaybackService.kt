@@ -103,6 +103,24 @@ class PlaybackService : MediaLibraryService() {
         }
         private var activeService = java.lang.ref.WeakReference<PlaybackService>(null)
 
+        /** Explicit queue taps are atomic on the renderer, outside Media3's resume batching. */
+        internal suspend fun playPhoneQueueEntry(trackId: String, expectedToken: String): Boolean =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
+                val service = activeService.get() ?: return@withContext false
+                if (service.outputPrefs.getString("playback_output", "PHONE") != "PHONE" ||
+                    !PhonePlaybackOwnership.permitsPlayback(expectedToken)) return@withContext false
+                val index = (0 until service.player.mediaItemCount).firstOrNull {
+                    service.player.getMediaItemAt(it).mediaId == trackId
+                } ?: return@withContext false
+                service.cancelSessionResume()
+                service.cancelledMedia3Resume = false
+                service.leaseInterruption.clear()
+                service.networkInterruption.clear()
+                service.recoveryShouldResume = false
+                service.streamRecoveryJob?.cancel()
+                playQueueEntry(service.player, index)
+            }
+
         /** A silent default must not publish an old local player's queue over the shared queue. */
         internal suspend fun discardIdlePhoneQueue() = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main.immediate) {
             pausePhoneForHandoff()

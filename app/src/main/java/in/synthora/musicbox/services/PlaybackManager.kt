@@ -626,10 +626,13 @@ class PlaybackManager private constructor(private val context: Context) {
         } }
     }
 
-    fun pause() {
-        // A controller connection finishing later must not start the superseded song.
+    fun cancelPendingStart() {
         pendingQueueAction = null
         _isPlaying.value = false
+    }
+
+    fun pause() {
+        cancelPendingStart()
         controller?.pause()
     }
 
@@ -727,12 +730,8 @@ class PlaybackManager private constructor(private val context: Context) {
         Log.d(TAG, "Seeked to $target ms")
     }
 
-    fun seekToQueueEntry(trackId: String): Boolean {
-        val ctrl = controller ?: return false
-        val index = (0 until ctrl.mediaItemCount).firstOrNull { ctrl.getMediaItemAt(it).mediaId == trackId }
-            ?: return false
-        return playQueueEntry(ctrl, index)
-    }
+    suspend fun seekToQueueEntry(trackId: String): Boolean =
+        PlaybackService.playPhoneQueueEntry(trackId, PhonePlaybackOwnership.token)
 
     fun seekToIndex(index: Int) {
         controller?.let { playQueueEntry(it, index) }

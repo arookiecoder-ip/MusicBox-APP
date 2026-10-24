@@ -126,6 +126,7 @@ object AlexaBackendApi {
             AudioCredentials.header().let { header(it.first, it.second) }
             parameter("video_id", videoId)
             parameter("update_queue", 0)
+            parameter("request_id", UUID.randomUUID().toString())
         }
         if (response.status.value !in 200..299) {
             val body = runCatching { response.bodyAsText() }.getOrDefault("")

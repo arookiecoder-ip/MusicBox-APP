@@ -153,4 +153,20 @@ class KeyboardArtistPresentationTest {
         image.delete()
     }
 
+    @Test fun realTapOnClosedSearchPillAndIconOpensImeWithoutLeavingScreen() {
+        var opened by mutableStateOf(false)
+        lateinit var view:View
+        compose.setContent { JUKETheme { view=LocalView.current
+            SearchHeader("Find music","",{},opened,{opened=it},"Songs, artists, albums")
+        } }
+        repeat(2) { pass ->
+            if(pass==0) compose.onNodeWithText("Find music").performTouchInput { click() }
+            else compose.onNodeWithContentDescription("Search").performTouchInput { click() }
+            compose.waitUntil(7000) { keyboardVisible(view) }
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.onNodeWithContentDescription("Close search").performTouchInput { click() }
+            compose.waitUntil(7000) { !keyboardVisible(view) }
+        }
+    }
+
 }

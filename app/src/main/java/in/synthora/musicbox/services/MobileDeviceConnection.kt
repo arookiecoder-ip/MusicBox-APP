@@ -41,7 +41,7 @@ object MobileDeviceConnection {
     fun start(context: android.content.Context, onState: suspend (SharedPlaybackOutput) -> Unit,
               onCommand: suspend (String, JsonObject) -> Unit) {
         appContext = context.applicationContext
-        DeviceConnectionService.startWhileVisible(context)
+        DeviceConnectionService.stop(context)
         if (job?.isActive == true) return
         val activeSession = UUID.randomUUID().toString()
         session = activeSession

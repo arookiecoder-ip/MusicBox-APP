@@ -35,4 +35,27 @@ class QueueSelectionPresentationTest {
         assertEquals("offline",unavailableEchoSerial(listOf(offline),"removed-serial"))
     }
 
+    @Test fun failedBRemainsSelectedDespiteLatePlayingAndPositionEventsFromA() {
+        repeat(5) { event ->
+            val old = MusicUiState(currentTrack=a,queue=listOf(a,b),queueIndex=0,isPlaying=true,position=event*1000L)
+            val failed = withPendingPlayback(old,b,1,loading=false,error="Network unavailable")
+            assertEquals(b,failed.currentTrack)
+            assertEquals(1,failed.queueIndex)
+            assertFalse(failed.isPlaying)
+            assertFalse(failed.isLoading)
+            assertEquals("Network unavailable",failed.error)
+            val retry=withPendingPlayback(failed,b,1,loading=true)
+            assertTrue(retry.isLoading)
+            assertNull(retry.error)
+        }
+    }
+    @Test fun explicitlyPausingPendingBDoesNotExposeOrResumeA() {
+        val old=MusicUiState(currentTrack=a,queue=listOf(a,b),queueIndex=0,isPlaying=true)
+        val paused=withPendingPlayback(old,b,1,loading=false)
+        assertEquals(b,paused.currentTrack)
+        assertFalse(paused.isPlaying)
+        assertFalse(paused.isLoading)
+        assertNull(paused.error)
+    }
+
 }

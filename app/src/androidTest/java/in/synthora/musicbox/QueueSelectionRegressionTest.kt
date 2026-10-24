@@ -231,4 +231,64 @@ class QueueSelectionRegressionTest {
         compose.onAllNodesWithContentDescription("Downloaded").assertCountEquals(3)
     }
 
+    @Test fun realServiceQueueTapPlaysAfterPauseAndKeepsOrdinaryPausedSeekingPaused() {
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val context=instrumentation.targetContext
+        val prefs=context.getSharedPreferences("music_settings_prefs",android.content.Context.MODE_PRIVATE)
+        val savedOutput=prefs.getString("playback_output",null)
+        prefs.edit().putString("playback_output","PHONE").commit()
+        val audio=java.io.File(context.cacheDir,"queue-service-${System.nanoTime()}.wav").apply {
+            writeBytes(PlaybackStreamRegressionTest.AudioServer.audioSample())
+        }
+        try {
+            androidx.test.core.app.ActivityScenario.launch(MainActivity::class.java).use {
+                lateinit var future:com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.MediaController>
+                instrumentation.runOnMainSync {
+                    future=androidx.media3.session.MediaController.Builder(context,androidx.media3.session.SessionToken(context,
+                        android.content.ComponentName(context,PlaybackService::class.java))).buildAsync()
+                }
+                val controller=future.get(20,java.util.concurrent.TimeUnit.SECONDS)
+                val manager=PlaybackManager.getInstance(context)
+                fun waitFor(id:String,playing:Boolean) {
+                    val deadline=android.os.SystemClock.elapsedRealtime()+10_000
+                    while(android.os.SystemClock.elapsedRealtime()<deadline) {
+                        var matches=false
+                        instrumentation.runOnMainSync { matches=controller.currentMediaItem?.mediaId==id && controller.isPlaying==playing }
+                        if(matches) return
+                        android.os.SystemClock.sleep(25)
+                    }
+                    fail("Renderer did not reach $id playing=$playing")
+                }
+                try {
+                    instrumentation.runOnMainSync {
+                        PhonePlaybackOwnership.forget(allowOffline=true)
+                        PhonePlaybackOwnership.beginSongPreparation()
+                        manager.setQueue(songs.take(2).map { song -> song.copy(localUri=audio.toURI().toString(),isStream=false) })
+                    }
+                    try { waitFor(songs[0].uuid,true) }
+                    finally { instrumentation.runOnMainSync { PhonePlaybackOwnership.endSongPreparation() } }
+                    repeat(4) { attempt ->
+                        val target=songs[(attempt+1)%2]
+                        kotlinx.coroutines.runBlocking {
+                            PlaybackService.pausePhoneForHandoff()
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { manager.cancelPendingStart() }
+                            assertTrue(manager.seekToQueueEntry(target.uuid))
+                        }
+                        waitFor(target.uuid,true)
+                        instrumentation.runOnMainSync { controller.pause() }
+                        waitFor(target.uuid,false)
+                        instrumentation.runOnMainSync { manager.seekTo(200) }
+                        waitFor(target.uuid,false)
+                    }
+                    assertFalse(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry("removed-entry") })
+                } finally {
+                    instrumentation.runOnMainSync { controller.stop();controller.clearMediaItems();controller.release();manager.release() }
+                }
+            }
+        } finally {
+            audio.delete()
+            prefs.edit().apply { if(savedOutput==null)remove("playback_output") else putString("playback_output",savedOutput) }.commit()
+        }
+    }
+
 }
