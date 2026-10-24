@@ -100,22 +100,21 @@ fun SearchHeader(
         run {
             if (open) {
                 var fieldFocused by remember { mutableStateOf(false) }
-                LaunchedEffect(selectAllTrigger, window.isWindowFocused) {
+                LaunchedEffect(selectAllTrigger) {
                     // Both icon taps and programmatic opens use this attached field.
                     // The IME request must follow the text-input focus session.
                     snapshotFlow { window.isWindowFocused }.first { it }
                     androidx.compose.runtime.withFrameNanos { }
-                    view.requestFocus()
                     focus.requestFocus()
-                    snapshotFlow { fieldFocused }.first { it }
                     if (selectAllTrigger != handledSelectAll) {
                         handledSelectAll = selectAllTrigger
                         field = field.copy(selection = TextRange(0, field.text.length))
                     }
                     // Native input connection creation can trail Compose focus on a real tap.
                     // Stop once visible; closing the field cancels this effect and every retry.
-                    repeat(10) {
+                    repeat(15) {
                         androidx.compose.runtime.withFrameNanos { }
+                        if (!fieldFocused) focus.requestFocus()
                         keyboard?.show()
                         ViewCompat.getWindowInsetsController(view)?.show(WindowInsetsCompat.Type.ime())
                         delay(100)
