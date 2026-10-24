@@ -26,9 +26,20 @@ fun DownloadedBadge(videoId: String?, modifier: Modifier = Modifier) {
     val progressFlow = remember(repository, videoId) { repository.progress.map { progress -> videoId?.let { progress[it] } }.distinctUntilChanged() }
     val downloaded by downloadedFlow.collectAsStateWithLifecycle(initialValue = false)
     val value by progressFlow.collectAsStateWithLifecycle(initialValue = null)
-    if (value != null) {
-        if (value!! >= 0) CircularProgressIndicator(progress = { value!! / 100f }, modifier = modifier.size(18.dp), strokeWidth = 2.dp)
+    DownloadStateBadge(downloaded, value, modifier)
+}
+
+/** Material may invoke progress during semantics/drawing after the flow has changed. */
+@Composable
+internal fun DownloadStateBadge(downloaded: Boolean, progress: Int?, modifier: Modifier = Modifier) {
+    if (progress != null) {
+        val snapshot = downloadProgressSnapshot(progress)
+        if (snapshot != null) CircularProgressIndicator(progress = snapshot, modifier = modifier.size(18.dp), strokeWidth = 2.dp)
         else CircularProgressIndicator(modifier.size(18.dp), strokeWidth = 2.dp)
     } else if (downloaded)
         Icon(Icons.Default.DownloadDone, "Downloaded", modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
 }
+
+/** Capture this frame's number, never reread mutable nullable state from a deferred callback. */
+internal fun downloadProgressSnapshot(progress: Int): (() -> Float)? =
+    if (progress < 0) null else (progress.coerceIn(0, 100) / 100f).let { fraction -> { fraction } }

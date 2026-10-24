@@ -202,4 +202,32 @@ class QueueSelectionRegressionTest {
         }
     }
 
+    @Test fun playlistDownloadBadgeSurvivesCompletionCancellationAndRestartBetweenFrames() {
+        val progress = (0..2).map { mutableStateOf<Int?>(25) }
+        val downloaded = (0..2).map { mutableStateOf(false) }
+        compose.setContent { JUKETheme { Column {
+            progress.forEachIndexed { index, value ->
+                Box(Modifier.size(40.dp).testTag("download-$index")) {
+                    DownloadStateBadge(downloaded[index].value, value.value)
+                }
+            }
+        } } }
+        compose.mainClock.autoAdvance=false
+        repeat(12) { step ->
+            compose.runOnIdle {
+                progress.forEachIndexed { index, value ->
+                    value.value=when((step+index)%4) { 0->null;1-> -1;2->100;else->70 }
+                    downloaded[index].value=value.value==null
+                }
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+            }
+            // Semantics are queried while the preceding frame can still be attached.
+            (0..2).forEach { compose.onNodeWithTag("download-$it").fetchSemanticsNode() }
+            compose.mainClock.advanceTimeByFrame()
+        }
+        compose.runOnIdle { progress.forEach { it.value=null };downloaded.forEach { it.value=true } }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onAllNodesWithContentDescription("Downloaded").assertCountEquals(3)
+    }
+
 }
