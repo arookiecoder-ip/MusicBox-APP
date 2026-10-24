@@ -127,7 +127,10 @@ fun HomeScreen(
     }
 
     if (uiState.isLoading && uiState.shelves.isEmpty()) {
-        HomeSkeleton(bottomPadding = bottomPadding)
+        Box(Modifier.fillMaxSize()) {
+            `in`.synthora.musicbox.ui.components.HomeAmbientBackdrop(Modifier.matchParentSize())
+            HomeSkeleton(bottomPadding = bottomPadding)
+        }
         return
     }
 
@@ -167,6 +170,7 @@ internal fun HomeContent(
         onRefresh = { onRefresh() },
         modifier = Modifier.fillMaxSize()
     ) {
+        `in`.synthora.musicbox.ui.components.HomeAmbientBackdrop(Modifier.matchParentSize())
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("Home feed"),
             contentPadding = PaddingValues(bottom = 16.dp + bottomPadding)

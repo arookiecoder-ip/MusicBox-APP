@@ -1,7 +1,11 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package `in`.synthora.musicbox
 
 import android.view.View
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -167,6 +171,69 @@ class KeyboardArtistPresentationTest {
             compose.onNodeWithContentDescription("Close search").performTouchInput { click() }
             compose.waitUntil(7000) { !keyboardVisible(view) }
         }
+    }
+
+    @Test fun lyricHighlightTracksTimePauseAndBackwardSeek() {
+        var position by mutableLongStateOf(0)
+        var seek=-1L
+        val lines=`in`.synthora.musicbox.utils.parseLrc("[0:01]First\n[00:03.5]Second\n[00:08]Third")
+        compose.setContent { JUKETheme {
+            `in`.synthora.musicbox.ui.components.player.SyncedLyricsLines(lines,position,{seek=it;position=it},Modifier.fillMaxWidth().height(300.dp))
+        } }
+        compose.onNodeWithTag("Lyric line 0").assertIsNotSelected()
+        compose.runOnIdle { position=1500 }
+        compose.onNodeWithTag("Lyric line 0").assertIsSelected()
+        compose.runOnIdle { position=4000 }
+        compose.onNodeWithTag("Lyric line 1").assertIsSelected()
+        compose.runOnIdle { position=1500 }
+        compose.onNodeWithTag("Lyric line 0").assertIsSelected()
+        compose.onNodeWithTag("Lyric line 1").performClick()
+        compose.runOnIdle { assertEquals(3500L,seek) }
+        compose.onNodeWithTag("Lyric line 1").assertIsSelected()
+    }
+
+    @Test fun homeBlendFadesOutByThirtyPercentAndPlayerColorChangesAreInterpolated() {
+        var palette by mutableStateOf(listOf(Color.Red,Color.Green,Color.Blue))
+        var extent by mutableFloatStateOf(.3f)
+        compose.setContent { JUKETheme { AnimatedAmbientBackdrop(palette,Modifier.size(240.dp,400.dp),extent,Color.Black) } }
+        val home=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()
+        val left=home[home.width/8,5]
+        val right=home[home.width*7/8,5]
+        assertTrue(kotlin.math.abs(left.red-right.red)>.02f || kotlin.math.abs(left.blue-right.blue)>.02f)
+        val below=home[home.width/2,home.height/2]
+        assertTrue(below.red<.01f && below.green<.01f && below.blue<.01f)
+        compose.runOnIdle { palette=List(3){Color.Red};extent=1f }
+        compose.mainClock.advanceTimeBy(1200)
+        compose.mainClock.autoAdvance=false
+        compose.runOnIdle { palette=List(3){Color.Blue} }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(550)
+        val middle=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15,15]
+        assertTrue("Both artwork colors should be visible during the blend",middle.red>.02f && middle.blue>.02f)
+        compose.mainClock.advanceTimeBy(650)
+        val end=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15,15]
+        assertTrue(end.blue>end.red && end.red<middle.red)
+    }
+
+    @Test fun compactNavigationMatchesTheMiniPlayerDockAndKeepsFortyEightDpTabs() {
+        var density=1f
+        var bottomInset=0f
+        compose.setContent { JUKETheme(darkTheme=true) {
+            val d=androidx.compose.ui.platform.LocalDensity.current
+            density=d.density
+            bottomInset=androidx.compose.foundation.layout.WindowInsets.navigationBarsIgnoringVisibility.getBottom(d).toFloat()
+            Column(Modifier.fillMaxWidth()) {
+                Box(Modifier.fillMaxWidth().height(20.dp).background(`in`.synthora.musicbox.ui.theme.dockColor()).testTag("Mini dock reference"))
+                GlassNavBar((0..2).map { n -> GlassNavItem("Tab $n",n==0,{}, { Spacer(Modifier.size(24.dp)) }) },Modifier.testTag("Compact nav"))
+            }
+        } }
+        val bounds=compose.onNodeWithTag("Compact nav").fetchSemanticsNode().boundsInRoot
+        assertTrue("Navigation padding should be compact",bounds.height-bottomInset<=57*density)
+        val tab=compose.onNodeWithTag("Navigation tab Tab 1").fetchSemanticsNode().boundsInRoot
+        assertTrue("Tab touch target must remain at least 48 dp",tab.height>=48*density)
+        val reference=compose.onNodeWithTag("Mini dock reference").captureToImage().toPixelMap()[2,2]
+        val nav=compose.onNodeWithTag("Compact nav").captureToImage().toPixelMap()[2,2]
+        assertEquals(reference,nav)
     }
 
 }

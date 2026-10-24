@@ -2,6 +2,7 @@ package `in`.synthora.musicbox.network
 
 import `in`.synthora.musicbox.utils.SafeLog as Log
 import `in`.synthora.musicbox.models.LRCLibResult
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -11,6 +12,9 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import `in`.synthora.musicbox.utils.hasTimedLyrics
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
@@ -21,10 +25,17 @@ import kotlin.math.abs
  * Lyrics lookup: LRCLib first, then YouTube captions and YouTube Music lyrics for the track's
  * video id.
  */
+internal const val LRCLIB_SEARCH_URL = "https://lrclib.net/api/search"
+internal fun lrclibSearchParameters(title:String, artist:String, album:String=""): Map<String,String> = buildMap {
+    put("track_name",title)
+    if(artist.isNotBlank()) put("artist_name",artist)
+    if(album.isNotBlank()) put("album_name",album)
+}
+
 object LyricsApi {
 
     private const val TAG = "LyricsApi"
-    private const val LRCLIB_BASE_URL = "https://lrclib.meek.workers.dev"
+    private const val LRCLIB_BASE_URL = LRCLIB_SEARCH_URL
     private const val YTM_BASE_URL = "https://music.youtube.com"
     private const val YT_BASE_URL  = "https://www.youtube.com"
 
@@ -32,30 +43,34 @@ object LyricsApi {
 
     // LRCLib is a free community service: cap concurrent calls and back off when it says it is busy,
     // instead of retrying (and fanning out into fallback searches) while it is overloaded.
-    private val lrclibGate = Semaphore(2)
+    private val lrclibGate = Semaphore(1)
     @Volatile private var lrclibBlockedUntil = 0L
     private var lrclibBackoffMs = 0L
+    private var lrclibNextRequestAt = 0L
 
     /** Body of one LRCLib request, or null when skipped/failed because the service is busy. */
     private suspend fun lrclibGet(block: HttpRequestBuilder.() -> Unit): String? {
         if (System.currentTimeMillis() < lrclibBlockedUntil) return null
         return lrclibGate.withPermit {
             if (System.currentTimeMillis() < lrclibBlockedUntil) return@withPermit null
-            val response = ApiClient.httpClient.get(LRCLIB_BASE_URL, block)
-            val raw = response.bodyAsText()
-            val code = response.status.value
-            // Success is a JSON array; an object with statusCode is LRCLib's error envelope.
-            val busy = code == 429 || code >= 500 ||
-                    (raw.trimStart().startsWith("{") && raw.contains("\"statusCode\""))
-            if (busy) {
-                lrclibBackoffMs = (if (lrclibBackoffMs == 0L) 5_000L else lrclibBackoffMs * 2).coerceAtMost(120_000L)
-                lrclibBlockedUntil = System.currentTimeMillis() + lrclibBackoffMs
-                Log.w(TAG, "LRCLib busy ($code); pausing requests for ${lrclibBackoffMs / 1000}s")
-                null
-            } else {
-                lrclibBackoffMs = 0L
-                raw
-            }
+            delay((lrclibNextRequestAt-System.currentTimeMillis()).coerceAtLeast(0))
+            try {
+                val response = ApiClient.httpClient.get(LRCLIB_BASE_URL) {
+                    header("User-Agent", "MusicBox/${`in`.synthora.musicbox.BuildConfig.VERSION_NAME} (https://github.com/arookiecoder-ip/MusicBox-APP)")
+                    timeout { requestTimeoutMillis=10_000;connectTimeoutMillis=5_000;socketTimeoutMillis=5_000 }
+                    block()
+                }
+                lrclibNextRequestAt=System.currentTimeMillis()+250
+                val code=response.status.value
+                if(code==429 || code>=500) {
+                    lrclibBackoffMs=(if(lrclibBackoffMs==0L) 5_000L else lrclibBackoffMs*2).coerceAtMost(120_000L)
+                    val retryAfter=response.headers["Retry-After"]?.toLongOrNull()?.coerceIn(0,86_400)?.times(1000) ?: 0
+                    lrclibBlockedUntil=System.currentTimeMillis()+maxOf(lrclibBackoffMs,retryAfter)
+                    null
+                } else if(code !in 200..299) null
+                else { lrclibBackoffMs=0;response.bodyAsText() }
+            } catch(e: CancellationException) { throw e }
+            catch (_: Exception) { lrclibBlockedUntil=System.currentTimeMillis()+5_000;null }
         }
     }
 
@@ -88,22 +103,15 @@ object LyricsApi {
             )
 
             val raw = lrclibGet {
-                header(
-                    "User-Agent",
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
-                )
-                parameter("track", cleanedTitle)
-                parameter("artist", artist)
-                if (album.isNotBlank()) {
-                    parameter("album", album)
-                }
+                lrclibSearchParameters(cleanedTitle,artist,album).forEach { (key,value)->parameter(key,value) }
             }
             val lrclibBusy = raw == null
             Log.d(TAG, "LRCLib Response: ${raw?.take(1000) ?: "skipped (busy)"}")
 
             val results: List<LRCLibResult> = try {
                 if (raw == null) emptyList() else json.decodeFromString(raw)
-            } catch (e: Exception) {
+            } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
                 Log.e(TAG, "Failed to decode LRCLib response: ${e.message}")
                 emptyList()
             }
@@ -118,10 +126,10 @@ object LyricsApi {
                         !result.syncedLyrics.isNullOrBlank()
                         Triple(result, score, durationDiff)
                     }
-                    .filter { it.second > 0 } // Only consider results with some match
+                    .filter { it.second >= 2 && (duration == null || duration <= 0 || abs(it.first.duration-duration) <= maxOf(15.0,duration*.05)) } // Only consider results with some match
                     .sortedWith(
                         compareByDescending<Triple<LRCLibResult, Int, Double>> { it.second } // 1. Highest Score
-                            .thenByDescending { it.first.syncedLyrics?.isNotBlank() == true }    // 2. Has Synced Lyrics
+                            .thenByDescending { hasTimedLyrics(it.first.syncedLyrics) }    // 2. Has Synced Lyrics
                             .thenBy { it.third } // 3. Lowest Duration Difference
                     )
                     .firstOrNull()
@@ -129,7 +137,7 @@ object LyricsApi {
             } else null
 
             // 2. Fallback Search (Individual Artists)
-            if (bestMatch == null && !lrclibBusy) {
+            if (!hasTimedLyrics(bestMatch?.syncedLyrics) && !lrclibBusy) {
                 val separators = charArrayOf(',', '&')
                 val individualArtists = artist.split(*separators)
                     .map { it.trim() }
@@ -141,15 +149,10 @@ object LyricsApi {
                         "Primary lyrics search failed. Attempting fallback for artists: $individualArtists"
                     )
 
-                    for (singleArtist in individualArtists) {
+                    for (singleArtist in individualArtists.take(3)) {
                         try {
                             val fallbackRaw = lrclibGet {
-                                header(
-                                    "User-Agent",
-                                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
-                                )
-                                parameter("track", cleanedTitle)
-                                parameter("artist", singleArtist)
+                                lrclibSearchParameters(cleanedTitle,singleArtist).forEach { (key,value)->parameter(key,value) }
                             } ?: break // LRCLib went busy: stop the per-artist fan-out
 
                             val fallbackResults: List<LRCLibResult> = json.decodeFromString(fallbackRaw)
@@ -160,7 +163,7 @@ object LyricsApi {
                             val validFallback = fallbackResults
                                 .filter { result ->
                                     val resultTitle = result.trackName.lowercase().trim()
-                                    val normalizedTitle = title.lowercase().trim()
+                                    val normalizedTitle = cleanedTitle.lowercase().trim()
                                     val titleMatch =
                                         resultTitle.contains(normalizedTitle) || normalizedTitle.contains(
                                             resultTitle
@@ -177,17 +180,18 @@ object LyricsApi {
                                     titleMatch && durationMatch
                                 }
                                 .sortedWith(
-                                    compareByDescending<LRCLibResult> { !it.syncedLyrics.isNullOrBlank() } // 1. Has Synced Lyrics
+                                    compareByDescending<LRCLibResult> { hasTimedLyrics(it.syncedLyrics) } // 1. Has Synced Lyrics
                                         .thenBy { if (duration != null) abs(it.duration - duration) else 0.0 } // 2. Closest Duration
                                 )
                                 .firstOrNull()
 
-                            if (validFallback != null) {
+                            if (validFallback != null && (hasTimedLyrics(validFallback.syncedLyrics) || bestMatch == null)) {
                                 Log.d(TAG, "Fallback lyrics found with artist '$singleArtist'")
                                 bestMatch = validFallback
                                 break // Stop if we found a good match
                             }
-                        } catch (e: Exception) {
+                        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
                             Log.w(
                                 TAG,
                                 "Fallback search failed for artist '$singleArtist': ${e.message}"
@@ -201,7 +205,7 @@ object LyricsApi {
             // LRCLib synced > YT Captions synced > LRCLib plain > YTM plain > YT Captions plain
 
             // Tier 1: LRCLib synced lyrics — return immediately if found
-            if (bestMatch?.syncedLyrics?.isNotBlank() == true) {
+            if (hasTimedLyrics(bestMatch?.syncedLyrics)) {
                 Log.d(TAG, "Tier 1: LRCLib synced lyrics returned for: $title")
                 return bestMatch
             }
@@ -214,7 +218,7 @@ object LyricsApi {
 
                 // Tier 2: YT Captions synced — beats LRCLib plain
                 val captionsText = getYoutubeCaptions(resolvedVideoId)
-                val captionsSynced = captionsText?.takeIf { it.startsWith("[") }
+                val captionsSynced = captionsText?.takeIf(::hasTimedLyrics)
                 if (captionsSynced != null) {
                     Log.d(TAG, "Tier 2: YT Captions synced LRC returned for: $title")
                     return LRCLibResult(
@@ -242,7 +246,7 @@ object LyricsApi {
                 }
 
                 // Tier 5: YT Captions plain (already fetched above)
-                val captionsPlain = captionsText?.takeIf { !it.startsWith("[") }
+                val captionsPlain = captionsText?.takeIf { !hasTimedLyrics(it) }
                 if (!captionsPlain.isNullOrBlank()) {
                     Log.d(TAG, "Tier 5: YT Captions plain returned for: $title")
                     return LRCLibResult(
@@ -264,7 +268,8 @@ object LyricsApi {
 
             null
 
-        } catch (e: Exception) {
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
             Log.e(TAG, "Error searching lyrics: ${e.message}", e)
             null
         }
@@ -354,7 +359,8 @@ object LyricsApi {
             } else {
                 text
             }
-        } catch (e: Exception) {
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
             Log.w(TAG, "getYoutubeMusicLyrics failed: ${e.message}")
             null
         }
@@ -440,7 +446,7 @@ object LyricsApi {
                     val totalSec = tStartMs / 1000.0
                     val min = (totalSec / 60).toInt()
                     val sec = totalSec % 60
-                    lrcSb.append("[%02d:%05.2f]%s\n".format(min, sec, lineText))
+                    lrcSb.append(String.format(java.util.Locale.ROOT, "[%02d:%05.2f]%s\n", min, sec, lineText))
                 } else {
                     lrcSb.append("$lineText\n")
                 }
@@ -449,7 +455,8 @@ object LyricsApi {
             val result = lrcSb.toString().trim()
             Log.d(TAG, "YT Captions: hasTimestamps=$hasTimestamps, lines=${result.lines().size}")
             if (result.isBlank()) null else result
-        } catch (e: Exception) {
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) {
             Log.w(TAG, "getYoutubeCaptions failed: ${e.message}")
             null
         }

@@ -5,57 +5,55 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CallPlaybackGuardTest {
-    @Test fun explicitPlayDuringCallPausesAndSchedulesResumeWithoutCancellingItself() {
-        var paused = false
-        var pending = false
-        lateinit var guard: CallPlaybackGuard
-        guard = CallPlaybackGuard({ true }, {
-            paused = true
-            guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        }, { pending = true }, { pending = false })
-        guard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertTrue(paused)
+    @Test fun callEntryPausesAndRetainsIntentAcrossDelayedOwnPauseAcknowledgement() {
+        var calling=true
+        var pending=false
+        var pauses=0
+        val guard=CallPlaybackGuard({calling},{pauses++},{pending=true},{pending=false})
+        guard.modeChanged(true)
+        assertEquals(1,pauses);assertTrue(pending);assertTrue(guard.resumePending)
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
         assertTrue(pending)
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertFalse(pending) // Explicit pause prevents unwanted playback when the call ends.
-    }
-    @Test fun focusRestorationDuringCallIsHeldButOrdinaryPlayIsUnchanged() {
-        var calling = true
-        var pauses = 0
-        var schedules = 0
-        val guard = CallPlaybackGuard({ calling }, { pauses++ }, { schedules++ }, {})
-        guard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
-        assertEquals(1, pauses)
-        assertEquals(1, schedules)
-        calling = false
-        guard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertEquals(1, pauses)
-        assertEquals(1, schedules)
-    }
-    @Test fun focusLossWhileCallingSchedulesRecoveryButExplicitPauseCancelsIt() {
-        var calling = true
-        var pending = false
-        val guard = CallPlaybackGuard({ calling }, {}, { pending = true }, { pending = false })
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        calling=false;guard.modeChanged(false)
         assertTrue(pending)
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertFalse(pending)
-        calling = false
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
-        assertFalse(pending)
+        guard.resumeConsumed();assertFalse(pending);assertFalse(guard.resumePending)
     }
-
-    @Test fun asynchronousPauseAcknowledgementMustNotCancelTheCallResume() {
-        var pending = false
-        var pauseCommand = false
-        val guard = CallPlaybackGuard({ true }, { pauseCommand = true }, { pending = true }, { pending = false })
-        guard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertTrue(pauseCommand)
-        assertTrue(pending)
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertTrue("The guard's own delayed acknowledgement must preserve resume", pending)
-        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
-        assertFalse("An explicit later pause must cancel resume", pending)
+    @Test fun explicitPauseDuringCallCancelsResumeEvenWhenAlreadyPaused() {
+        var pending=false
+        val guard=CallPlaybackGuard({true},{},{pending=true},{pending=false})
+        guard.modeChanged(true)
+        guard.explicitPause()
+        assertFalse(pending);assertFalse(guard.resumePending)
     }
-
+    @Test fun explicitPlayDuringCallIsAllowedAndModeUpdatesDoNotPauseItAgain() {
+        var calling=true
+        var pauses=0
+        var manualFocus=false
+        val guard=CallPlaybackGuard({calling},{pauses++},{},{},{manualFocus=it})
+        guard.explicitPlay()
+        guard.onPlayWhenReadyChanged(true,Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST)
+        guard.modeChanged(true)
+        assertTrue(manualFocus);assertTrue(guard.manualDuringCall);assertEquals(0,pauses)
+        assertFalse(guard.resumePending)
+        calling=false;guard.modeChanged(true)
+        assertFalse(manualFocus);assertFalse(guard.manualDuringCall)
+    }
+    @Test fun transientSuppressionCapturesCallIntentEvenWithoutPlayWhenReadyChange() {
+        val guard=CallPlaybackGuard({true},{},{},{})
+        guard.onPlaybackSuppressionReasonChanged(Player.PLAYBACK_SUPPRESSION_REASON_TRANSIENT_AUDIO_FOCUS_LOSS)
+        assertTrue(guard.resumePending)
+    }
+    @Test fun ordinaryExternalFocusLossDoesNotCreateACallResume() {
+        val guard=CallPlaybackGuard({false},{fail("Must not pause")},{fail("Must not auto-resume")},{})
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(guard.resumePending)
+    }
+    @Test fun explicitPauseAfterManualOverrideDoesNotReacquireFocusDuringTheCall() {
+        var pending=false
+        val focuses=mutableListOf<Boolean>()
+        val guard=CallPlaybackGuard({true},{},{pending=true},{pending=false},{focuses+=it})
+        guard.explicitPlay();guard.explicitPause()
+        assertEquals(listOf(true),focuses)
+        assertFalse(pending);assertFalse(guard.manualDuringCall)
+    }
 }

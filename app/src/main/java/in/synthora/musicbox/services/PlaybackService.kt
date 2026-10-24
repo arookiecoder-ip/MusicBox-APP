@@ -119,6 +119,7 @@ class PlaybackService : MediaLibraryService() {
                 service.recoveryShouldResume = false
                 service.streamRecoveryJob?.cancel()
                 resetExplicitStreamRetry()
+                service.callGuard.explicitPlay()
                 playQueueEntry(service.player, index)
             }
 
@@ -134,6 +135,7 @@ class PlaybackService : MediaLibraryService() {
             val service = activeService.get() ?: return@withContext (fallbackPlaying to fallbackPosition.coerceAtLeast(0))
             val snapshot = (service.player.playWhenReady || service.leaseInterruption.matches(
                 service.player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token) || service.recoveryShouldResume) to service.player.currentPosition
+            service.callGuard.explicitPause()
             service.cancelSessionResume()
             service.mainHandler.removeCallbacks(service.resumeAfterCall)
             service.leaseInterruption.clear()
@@ -354,7 +356,7 @@ class PlaybackService : MediaLibraryService() {
 
     private fun recoverAfterLeaseRenewal() {
         if (!leaseInterruption.canResume(player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token,
-                PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, inCall()) ||
+                PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, callBlocksPlayback()) ||
             outputPrefs.getString("playback_output", "PHONE") != "PHONE") return
         leaseInterruption.clear()
         recoveryShouldResume = true
@@ -366,7 +368,7 @@ class PlaybackService : MediaLibraryService() {
     private fun recoverAfterNetworkReconnect() {
         if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value ||
             !networkInterruption.canResume(player.currentMediaItem?.mediaId, PhonePlaybackOwnership.token,
-                PhonePlaybackOwnership.permitsPlayback(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, inCall()) ||
+                PhonePlaybackOwnership.permitsPlayback(), PhonePlaybackOwnership.localHandoff || PhonePlaybackOwnership.preparingSong, callBlocksPlayback()) ||
             outputPrefs.getString("playback_output", "PHONE") != "PHONE") return
         // Reopen the broken socket now, rather than waiting for the 180-second audio read timeout.
         // Cached spans and the current cursor survive the source rebuild.
@@ -513,32 +515,44 @@ class PlaybackService : MediaLibraryService() {
         audioManager.mode == AudioManager.MODE_IN_COMMUNICATION ||
         audioManager.mode == AudioManager.MODE_RINGTONE
 
+    private var callResumeMediaId: String? = null
+    private var callResumeToken = ""
+    private fun callBlocksPlayback() = inCall() && !callGuard.manualDuringCall
     private val resumeAfterCall = object : Runnable {
         override fun run() {
-            if (inCall()) mainHandler.postDelayed(this, 1_500)
-            else if (!PhonePlaybackOwnership.preparingSong && !PhonePlaybackOwnership.localHandoff &&
-                outputPrefs.getString("playback_output", "PHONE") == "PHONE" &&
-                (PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline())) {
-                player.play()
-                Log.d(TAG, "Call ended - resumed")
+            if (!callGuard.resumePending) return
+            if (outputPrefs.getString("playback_output", "PHONE") != "PHONE" ||
+                player.currentMediaItem?.mediaId != callResumeMediaId || PhonePlaybackOwnership.token != callResumeToken) {
+                callGuard.explicitPause()
+                return
             }
+            if (inCall() || PhonePlaybackOwnership.preparingSong || PhonePlaybackOwnership.localHandoff) {
+                mainHandler.postDelayed(this,500)
+                return
+            }
+            callGuard.resumeConsumed()
+            // The normal resume path safely renews an expired lease and fences newer devices.
+            cancelledMedia3Resume=false
+            resumeFromSession(explicit=false)
         }
     }
-
     private val callGuard = CallPlaybackGuard(
         isInCall = ::inCall,
         pause = { player.pause() },
         scheduleResume = {
+            callResumeMediaId=player.currentMediaItem?.mediaId
+            callResumeToken=PhonePlaybackOwnership.token
             mainHandler.removeCallbacks(resumeAfterCall)
-            mainHandler.postDelayed(resumeAfterCall, 500)
+            mainHandler.postDelayed(resumeAfterCall,500)
         },
-        cancelResume = { mainHandler.removeCallbacks(resumeAfterCall) }
+        cancelResume = { mainHandler.removeCallbacks(resumeAfterCall) },
+        manualFocus = { manualOverride ->
+            if (::player.isInitialized) player.setAudioAttributes(player.audioAttributes,!manualOverride)
+        }
     )
-
     private val callModeListener = if (android.os.Build.VERSION.SDK_INT >= 31)
         AudioManager.OnModeChangedListener {
-            if (::player.isInitialized && inCall() && player.playWhenReady)
-                callGuard.onPlayWhenReadyChanged(true, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+            if (::player.isInitialized) callGuard.modeChanged(player.playWhenReady)
         } else null
 
     private val outputPrefs by lazy { getSharedPreferences("music_settings_prefs", MODE_PRIVATE) }
@@ -620,6 +634,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun cancelSessionResume() {
+        callGuard.explicitPause()
         cancelledMedia3Resume = true
         resumeCommands.pause()
         mainHandler.removeCallbacks(resumeAfterCall)
@@ -649,6 +664,7 @@ class PlaybackService : MediaLibraryService() {
         resumeFuture?.takeIf { !it.isDone }?.let { return it }
         cancelledMedia3Resume = false
         getSystemService(NotificationManager::class.java).cancel(1004)
+        if(explicit) callGuard.explicitPlay()
         val request = resumeCommands.play()
         val expectedOutput = outputPrefs.getString("playback_output", "PHONE")
         val result = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
@@ -713,7 +729,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** All session Play calls pass here; the app's already-authorized renderer calls stay unchanged. */
-    private fun resumeFromSession() {
+    private fun resumeFromSession(explicit: Boolean = true) {
         if (cancelledMedia3Resume) return
         if (outputPrefs.getString("playback_output", "PHONE") != "PHONE") {
             showSessionResumeFailure("Playback is selected on another device. Open Music Box to select this phone.")
@@ -722,10 +738,14 @@ class PlaybackService : MediaLibraryService() {
         val original = player.currentMediaItem ?: return
         getSystemService(NotificationManager::class.java).cancel(1004)
         if (resumeSessionJob?.isActive == true) {
-            if (resumeSessionClaim == PhonePlaybackOwnership.token) return
+            if (resumeSessionClaim == PhonePlaybackOwnership.token) {
+                if(explicit) callGuard.explicitPlay()
+                return
+            }
             cancelSessionResume()
             cancelledMedia3Resume = false // This is a new command under a different lease.
         }
+        if(explicit) callGuard.explicitPlay()
         val request = resumeCommands.play()
         val claimAtStart = PhonePlaybackOwnership.token
         resumeSessionClaim = claimAtStart
@@ -790,7 +810,7 @@ class PlaybackService : MediaLibraryService() {
                 else {
                     if (player.playbackState == Player.STATE_ENDED) player.seekToDefaultPosition()
                     if (player.playbackState == Player.STATE_IDLE) player.prepare()
-                    if (inCall()) mainHandler.postDelayed(resumeAfterCall, 500) else player.play()
+                    player.play()
                 }
             } catch (e: Exception) {
                 if (e is CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
@@ -1018,8 +1038,7 @@ class PlaybackService : MediaLibraryService() {
                     .setCustomCacheKey(if (cachedSource) original.localConfiguration?.customCacheKey else null).build())
                 player.seekTo(index, position)
                 player.prepare()
-                player.playWhenReady = resume && !inCall()
-                if (resume && inCall()) mainHandler.postDelayed(resumeAfterCall, 500)
+                player.playWhenReady = resume
                 PlaybackDiagnostics.record(PlaybackDiagnostics.Stage.RECOVERY, android.os.SystemClock.elapsedRealtime() - recoveryStarted, false)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -1412,7 +1431,7 @@ class PlaybackService : MediaLibraryService() {
             player = player,
             eligible = {
                 outputPrefs.getString("playback_output", "PHONE") == "PHONE" &&
-                    !inCall() &&
+                    !callBlocksPlayback() &&
                     audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) > 0
             },
             onSilent = { trackId, firstStrike -> onSilentPlayback(trackId, firstStrike) }
@@ -1443,7 +1462,7 @@ class PlaybackService : MediaLibraryService() {
                 try {
                     if (player.isPlaying) saveResumptionState()
                     if (resumeCommands.wantsPlay && player.playWhenReady && PhonePlaybackOwnership.token.isBlank() &&
-                        `in`.synthora.musicbox.network.NetworkFeedback.online.value) resumeFromSession()
+                        `in`.synthora.musicbox.network.NetworkFeedback.online.value) resumeFromSession(explicit=false)
                     publishResumedQueue()
                     updatePreloader() // Retry failed warming even without a new UI/player event.
                     recoverAfterLeaseRenewal()
@@ -1452,14 +1471,14 @@ class PlaybackService : MediaLibraryService() {
                             player.playbackState == Player.STATE_BUFFERING, player.playWhenReady,
                             outputPrefs.getString("playback_output", "PHONE") == "PHONE" &&
                                 PhonePlaybackOwnership.permitsPlayback() && !PhonePlaybackOwnership.localHandoff &&
-                                `in`.synthora.musicbox.network.NetworkFeedback.online.value && !inCall(),
+                                `in`.synthora.musicbox.network.NetworkFeedback.online.value && !callBlocksPlayback(),
                             android.os.SystemClock.elapsedRealtime(), player.currentPosition, player.bufferedPosition)) {
                         Log.w(TAG, "Buffering stalled without progress; reopening the current stream")
                         recoverCurrentStream(manual = true)
                     }
                     if (recoveryShouldResume && player.playerError != null &&
                         `in`.synthora.musicbox.network.NetworkFeedback.online.value &&
-                        PhonePlaybackOwnership.permitsPlayback() && !PhonePlaybackOwnership.localHandoff && !PhonePlaybackOwnership.preparingSong && !inCall()) {
+                        PhonePlaybackOwnership.permitsPlayback() && !PhonePlaybackOwnership.localHandoff && !PhonePlaybackOwnership.preparingSong && !callBlocksPlayback()) {
                         recoverCurrentStream()
                     }
                 } catch (e: CancellationException) { throw e }
@@ -1531,9 +1550,9 @@ class PlaybackService : MediaLibraryService() {
 
         val bitmapLoader = SharedArtworkBitmapLoader(this, serviceScope)
 
-        val sessionPlayer = ResumableSessionPlayer(player, ::resumeFromSession,
-            onPause = { mainHandler.removeCallbacks(resumeAfterCall); cancelSessionResume(); player.pause() },
-            onStop = { mainHandler.removeCallbacks(resumeAfterCall); saveResumptionState(); cancelSessionResume(); player.stop() })
+        val sessionPlayer = ResumableSessionPlayer(player, { resumeFromSession() },
+            onPause = { callGuard.explicitPause(); cancelSessionResume(); player.pause() },
+            onStop = { callGuard.explicitPause(); saveResumptionState(); cancelSessionResume(); player.stop() })
         mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, MediaLibrarySessionCallback())
             .apply {
                 sessionActivityPendingIntent?.let { setSessionActivity(it) }
@@ -1593,7 +1612,7 @@ class PlaybackService : MediaLibraryService() {
         if (!::player.isInitialized || !retainRecoveryNotification(
                 outputPrefs.getString("playback_output", "PHONE") == "PHONE", isPlaybackOngoing,
                 player.isPlaying, leaseInterruption.pending, networkInterruption.pending,
-                recoveryShouldResume || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING), PhonePlaybackOwnership.localHandoff)) return false
+                recoveryShouldResume || recoveryLoading.value || (player.playWhenReady && player.playbackState == Player.STATE_BUFFERING), PhonePlaybackOwnership.localHandoff, callGuard.resumePending)) return false
         val session = mediaSession ?: return false
         val open = PendingIntent.getActivity(this, 0, Intent(this, `in`.synthora.musicbox.MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -1602,7 +1621,7 @@ class PlaybackService : MediaLibraryService() {
         val notification = androidx.core.app.NotificationCompat.Builder(this, "media_playback")
             .setSmallIcon(R.drawable.media3_notification_small_icon)
             .setContentTitle(player.mediaMetadata.title ?: "Music Box")
-            .setContentText("Reconnecting… Playback will resume when available.")
+            .setContentText(if (callGuard.resumePending) "Paused during call" else "Reconnecting… Playback will resume when available.")
             .setContentIntent(open).setOnlyAlertOnce(true).setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Cancel recovery", cancel)
             .setStyle(androidx.media3.session.MediaStyleNotificationHelper.MediaStyle(session)

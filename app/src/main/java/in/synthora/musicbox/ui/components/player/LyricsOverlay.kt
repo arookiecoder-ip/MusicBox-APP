@@ -117,7 +117,7 @@ fun LyricsOverlay(
     val density = LocalDensity.current
     val headerHeight = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() + 56.dp
     val haptic = rememberJukeHaptics()
-    val syncedLyrics = currentTrack.syncedLyrics?.takeIf { it.isNotBlank() }
+    val syncedLyrics = currentTrack.syncedLyrics?.takeIf { `in`.synthora.musicbox.utils.hasTimedLyrics(it) }
     val plainLyrics = currentTrack.plainLyrics?.takeIf { it.isNotBlank() }
     var localOffsetMs by remember(currentTrack.uuid) {
         mutableFloatStateOf(currentTrack.lyricsOffsetMs.toFloat())
@@ -128,6 +128,9 @@ fun LyricsOverlay(
     var showSyncControls by remember(currentTrack.uuid) { mutableStateOf(false) }
     var lyricsPending by remember(currentTrack.uuid) { mutableStateOf(false) }
 
+    LaunchedEffect(currentTrack.uuid) {
+        if (syncedLyrics == null) musicViewModel.refreshLyrics(currentTrack)
+    }
     LaunchedEffect(currentTrack.uuid, syncedLyrics, plainLyrics) {
         if (syncedLyrics != null || plainLyrics != null) {
             lyricsPending = false

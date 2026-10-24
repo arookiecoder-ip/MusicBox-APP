@@ -49,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -76,7 +77,7 @@ fun GlassNavBar(items: List<GlassNavItem>, modifier: Modifier = Modifier) {
     GlassTabGroup(
         items = items,
         vertical = false,
-        modifier = modifier.fillMaxWidth().clip(GlassShapes.Bar).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF303034), Color(0xFF252529)))).stableNavigationBarsPadding().padding(6.dp)
+        modifier = modifier.fillMaxWidth().clip(GlassShapes.Bar).background(`in`.synthora.musicbox.ui.theme.dockColor()).stableNavigationBarsPadding().padding(4.dp)
     )
 }
 
@@ -190,7 +191,8 @@ private fun GlassNavTab(item: GlassNavItem, modifier: Modifier = Modifier) {
     )
     Column(
         modifier = modifier
-            .heightIn(min = 52.dp)
+            .testTag("Navigation tab ${item.label}")
+            .heightIn(min = 48.dp)
             .clip(GlassShapes.Control)
             .selectable(
                 selected = item.selected,
@@ -199,7 +201,7 @@ private fun GlassNavTab(item: GlassNavItem, modifier: Modifier = Modifier) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             )
-            .padding(vertical = 6.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

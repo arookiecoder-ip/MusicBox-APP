@@ -12,6 +12,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -25,7 +27,7 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val dragged by list.interactionSource.collectIsDraggedAsState()
-    val active = remember(lines, position) { `in`.synthora.musicbox.utils.lyricIndexAt(lines.size, position) { lines[it].timeMs }.coerceAtLeast(0) }
+    val active = remember(lines, position) { `in`.synthora.musicbox.utils.lyricIndexAt(lines.size, position) { lines[it].timeMs } }
     val currentActive by rememberUpdatedState(active)
     suspend fun center(index: Int) {
         if (index !in lines.indices || dragged) return
@@ -52,7 +54,7 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
         LazyColumn(Modifier.fillMaxSize(), state = list,
             contentPadding = PaddingValues(vertical = maxHeight / 2), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             items(lines.size) { index ->
-                Text(lines[index].text, Modifier.fillMaxWidth().testTag("Lyric line $index").clickable {
+                Text(lines[index].text, Modifier.fillMaxWidth().testTag("Lyric line $index").semantics { selected = index == active }.clickable {
                     onSeek(lines[index].timeMs); scope.launch { center(index) }
                 }, style = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp, lineHeight = 35.sp),
                     color = if (index == active) Color.White else Color.White.copy(alpha = 0.42f), fontWeight = FontWeight.Bold)

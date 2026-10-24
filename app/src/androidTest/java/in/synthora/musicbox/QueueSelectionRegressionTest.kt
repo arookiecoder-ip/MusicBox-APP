@@ -301,10 +301,35 @@ class QueueSelectionRegressionTest {
                             `in`.synthora.musicbox.network.NetworkFeedback.refresh(context)
                             !`in`.synthora.musicbox.network.NetworkFeedback.online.value
                         }
+                        val audioManager=context.getSystemService(android.media.AudioManager::class.java)
+                        fun mode(value:Int) {
+                            instrumentation.runOnMainSync { audioManager.mode=value }
+                            waitForState("Audio mode did not change") { audioManager.mode==value }
+                        }
+                        assertTrue(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry(songs[0].uuid) })
+                        waitFor(songs[0].uuid,true)
+                        mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
+                        waitFor(songs[0].uuid,false)
+                        mode(android.media.AudioManager.MODE_NORMAL)
+                        waitFor(songs[0].uuid,true)
+                        mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
+                        waitFor(songs[0].uuid,false)
+                        assertTrue(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry(songs[0].uuid) })
+                        waitFor(songs[0].uuid,true) // Explicit Play is allowed during the call.
+                        instrumentation.runOnMainSync { controller.pause() }
+                        waitFor(songs[0].uuid,false)
+                        mode(android.media.AudioManager.MODE_NORMAL)
+                        android.os.SystemClock.sleep(700)
+                        instrumentation.runOnMainSync { assertFalse("Explicit pause must prevent call-end resume",controller.playWhenReady) }
+                        assertTrue(kotlinx.coroutines.runBlocking { manager.seekToQueueEntry(songs[0].uuid) })
+                        mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
+                        waitFor(songs[0].uuid,false)
                         val missing=Track("offline-requested-b","Requested B","Artist",durationSec=200,ytVideoId="offline0001")
                         instrumentation.runOnMainSync { model.playTrack(missing) }
                         fun failedB() = model.uiState.value.let { it.currentTrack?.uuid==missing.uuid && !it.isLoading && it.error!=null }
                         waitForState("Failed B reverted to A") { failedB() }
+                        mode(android.media.AudioManager.MODE_NORMAL)
+                        android.os.SystemClock.sleep(700)
                         instrumentation.runOnMainSync { assertFalse(controller.isPlaying);manager.seekTo(400) }
                         android.os.SystemClock.sleep(200)
                         assertTrue("Late A cursor update replaced the selected B",failedB())
@@ -314,7 +339,10 @@ class QueueSelectionRegressionTest {
                         waitFor(songs[0].uuid,true)
                         waitForState("A queue tap remained presented as paused") { model.uiState.value.currentTrack?.uuid==songs[0].uuid && model.uiState.value.isPlaying }
                     } finally {
-                        instrumentation.runOnMainSync { model.onSignedOut() }
+                        instrumentation.runOnMainSync {
+                            context.getSystemService(android.media.AudioManager::class.java).mode=android.media.AudioManager.MODE_NORMAL
+                            model.onSignedOut()
+                        }
                         shell("svc wifi enable")
                         shell("svc data enable")
                         `in`.synthora.musicbox.network.NetworkFeedback.refresh(context)

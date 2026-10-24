@@ -212,10 +212,10 @@ fun MiniPlayer(
             computeAdaptiveLyricsGapThreshold(parsedLyrics)
         }
 
-        val lyricFlow = remember(musicViewModel, parsedLyrics, gapThreshold, isPlaying, isMiniPlayerLyricsEnabled) {
+        val lyricFlow = remember(musicViewModel, parsedLyrics, gapThreshold, uiState.isLoading, isMiniPlayerLyricsEnabled) {
             musicViewModel.playbackProgress.map { progress ->
                 val currentPosition = progress.positionMs
-                if (!isMiniPlayerLyricsEnabled || !isPlaying || parsedLyrics.isEmpty()) {
+                if (!isMiniPlayerLyricsEnabled || uiState.isLoading || parsedLyrics.isEmpty()) {
                     null
                 } else {
                     val activeIndex = `in`.synthora.musicbox.utils.lyricIndexAt(parsedLyrics.size, currentPosition) { parsedLyrics[it].timeMs }

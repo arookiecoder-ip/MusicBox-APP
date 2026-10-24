@@ -141,43 +141,10 @@ import kotlinx.coroutines.launch
 
 // Re-export LyricLine for compatibility if needed elsewhere,
 // though it should ideally be in a model file.
-data class LyricLine(
-    val timeMs: Long,
-    val text: String
-)
+typealias LyricLine = `in`.synthora.musicbox.utils.TimedLyricLine
 
-// Helper moved to top level or util file, keeping here for now to avoid breaking changes if used elsewhere
-fun parseSyncedLyrics(syncedLyrics: String, offsetMs: Long = 0L): List<LyricLine> {
-    val lines = mutableListOf<LyricLine>()
-    val regex = """\[(\d{2}):(\d{2})\.(\d{1,3})]\s*(.*)""".toRegex()
-
-    syncedLyrics.lines().forEach { line ->
-        regex.find(line)?.let { match ->
-            val minutes = match.groupValues[1].toLongOrNull() ?: 0L
-            val seconds = match.groupValues[2].toLongOrNull() ?: 0L
-            val frac = match.groupValues[3]
-            var text = match.groupValues[4]
-
-            // Basic cleanup of lrc artifact chars
-            text = text.trim()
-
-            val millisFromFrac = when (frac.length) {
-                3 -> frac.toLongOrNull() ?: 0L
-                2 -> (frac.toLongOrNull() ?: 0L) * 10L
-                1 -> (frac.toLongOrNull() ?: 0L) * 100L
-                else -> frac.padEnd(3, '0').take(3).toLongOrNull() ?: 0L
-            }
-
-            val timeMs = (minutes * 60 * 1000) + (seconds * 1000) + millisFromFrac
-            val adjustedTimeMs = (timeMs + offsetMs).coerceAtLeast(0L)
-            if (text.isNotBlank()) {
-                lines.add(LyricLine(adjustedTimeMs, text))
-            }
-        }
-    }
-
-    return lines.sortedBy { it.timeMs }
-}
+fun parseSyncedLyrics(syncedLyrics: String, offsetMs: Long = 0L): List<LyricLine> =
+    `in`.synthora.musicbox.utils.parseLrc(syncedLyrics,offsetMs)
 
 @SuppressLint("ConfigurationScreenWidthHeight")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -407,7 +374,7 @@ fun PlayerScreen(
             translationY = (1f - entrance.value) * 48.dp.toPx()
         }) {
             // Plain black backdrop; the artwork is the only color on the screen.
-            Box(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())))
+            `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(uiState.extractedColors?.let { listOf(it.background,it.secondary,it.tertiary) }.orEmpty(), Modifier.fillMaxSize(), baseColor = GlassBackdrop.color(isGlassDark()))
             // Content — fully responsive, adapts to screen height
             BoxWithConstraints(
                 modifier = Modifier

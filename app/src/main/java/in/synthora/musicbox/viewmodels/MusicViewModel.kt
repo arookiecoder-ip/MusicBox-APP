@@ -194,6 +194,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private data class PendingSelection(val track: Track, val index: Int?, val requestId: Long, val loading: Boolean = true, val error: String? = null)
     private val pendingPlayback = MutableStateFlow<PendingSelection?>(null)
     private val presentedPlaybackRequest = MutableStateFlow(0L)
+    private val lyricsRefreshJobs = mutableMapOf<String, Job>()
+    private var paletteJob: Job? = null
+    @Volatile private var paletteRevision = 0L
     private var pendingPlaybackJob: Job? = null
     private var youtubeLinkJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
@@ -516,12 +519,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        viewModelScope.launch {
+            uiState.map { it.currentTrack?.thumbnailUri }.distinctUntilChanged().collect { extractColors(it) }
+        }
+
         // Lyrics for whatever is playing, on the phone or the Echo.
         viewModelScope.launch {
-            uiState.map { it.currentTrack }
-                .distinctUntilChanged { old, new -> old?.uuid == new?.uuid && old?.title == new?.title && old?.artist == new?.artist }
+            combine(uiState.map { it.currentTrack }
+                .distinctUntilChanged { old,new -> old?.uuid==new?.uuid && old?.title==new?.title && old?.artist==new?.artist && old?.durationSec==new?.durationSec },
+                `in`.synthora.musicbox.network.NetworkFeedback.online) { track,online -> track.takeIf { online } }
                 .collect { track ->
-                    if (track != null && track.title.isNotBlank() && track.title != "Loading…" && track.syncedLyrics.isNullOrBlank()) {
+                    if(track!=null) lyricsRefreshJobs.filterKeys { it!=track.uuid }.values.toList().forEach { it.cancel() }
+                    if (track != null && track.title.isNotBlank() && track.title != "Loading…" && !`in`.synthora.musicbox.utils.hasTimedLyrics(track.syncedLyrics)) {
                         refreshLyrics(track)
                     }
                 }
@@ -1279,10 +1288,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- Colors ----------
 
-    private var paletteJob: Job? = null
 
     private fun extractColors(thumbnailUri: String?) {
         paletteJob?.cancel()
+        val revision=++paletteRevision
         if (thumbnailUri == null) {
             _colors.value = null
             return
@@ -1299,7 +1308,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
                 val result = (loader.execute(request) as? SuccessResult)?.drawable
                 val bitmap = (result as? android.graphics.drawable.BitmapDrawable)?.bitmap
-
+                ensureActive()
+                if(revision!=paletteRevision) return@launch
                 if (bitmap != null) {
                     val palette = Palette.from(bitmap).generate()
                     ensureActive()
@@ -1347,7 +1357,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         primary = Color(finalPrimaryInt),
                         secondary = Color(secondaryInt),
                         tertiary = Color(tertiaryInt),
-                        background = Color.Black,
+                        background = Color(dominant?.rgb ?: primaryInt),
                         surface = Color.Black,
                         onPrimary = Color(finalOnPrimary),
                         onSecondary = Color.White,
@@ -1362,7 +1372,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to extract colors", e)
-                _colors.value = null
+                if(revision==paletteRevision) _colors.value = null
             }
         }
     }
@@ -2440,7 +2450,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playbackManager.cancelSleepTimer()
     }
 
-    private val lyricsRefreshJobs = mutableMapOf<String, Job>()
 
     fun refreshLyrics(track: Track) {
         if (lyricsRefreshJobs[track.uuid]?.isActive == true) return
@@ -2462,9 +2471,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (isEcho) {
                     val videoId = track.ytVideoId ?: return@launch
                     _echoLyrics.update {
-                        it + (videoId to track.withUpdatedLyrics(
-                            syncedLyrics = result.syncedLyrics?.takeIf { s -> s.isNotBlank() },
-                            plainLyrics = result.plainLyrics?.takeIf { s -> s.isNotBlank() }
+                        val previous=it[videoId] ?: track
+                        it + (videoId to previous.withUpdatedLyrics(
+                            syncedLyrics = result.syncedLyrics?.takeIf { s -> `in`.synthora.musicbox.utils.hasTimedLyrics(s) } ?: previous.syncedLyrics,
+                            plainLyrics = result.plainLyrics?.takeIf { s -> s.isNotBlank() } ?: previous.plainLyrics
                         ))
                     }
                     return@launch
@@ -2474,7 +2484,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     database.withTransaction {
                         val latest = trackDao.getTrackByUuid(track.uuid)?.toTrack() ?: track
                         val refreshedTrack = latest.withUpdatedLyrics(
-                            syncedLyrics = result.syncedLyrics?.takeIf { it.isNotBlank() } ?: latest.syncedLyrics,
+                            syncedLyrics = result.syncedLyrics?.takeIf { `in`.synthora.musicbox.utils.hasTimedLyrics(it) } ?: latest.syncedLyrics,
                             plainLyrics = result.plainLyrics?.takeIf { it.isNotBlank() } ?: latest.plainLyrics
                         )
                         trackDao.insertTrack(refreshedTrack.toEntity())

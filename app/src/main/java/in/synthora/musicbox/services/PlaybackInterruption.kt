@@ -30,8 +30,8 @@ internal class BackgroundRetry(private val baseMs: Long = 5_000, private val max
 /** Retain an existing foreground service only for an interrupted local play intent. */
 internal fun retainRecoveryNotification(phoneOutput: Boolean, alreadyForeground: Boolean,
     playing: Boolean, leasePending: Boolean, networkPending: Boolean, streamPending: Boolean,
-    handingOff: Boolean): Boolean = phoneOutput && alreadyForeground && !playing && !handingOff &&
-    (leasePending || networkPending || streamPending)
+    handingOff: Boolean, callPending: Boolean = false): Boolean = phoneOutput && alreadyForeground && !playing && !handingOff &&
+    (leasePending || networkPending || streamPending || callPending)
 
 /** A hung buffering loader is different from silence in real, advancing playback. */
 internal class BufferingStall(private val timeoutMs: Long = 30_000) {

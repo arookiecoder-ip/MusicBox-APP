@@ -308,4 +308,10 @@ class BackgroundPlaybackRecoveryTest {
         assertFalse(canJoinRemoteForeground(false, false, false, false))
         assertFalse(canJoinRemoteForeground(true, true, true, true))
     }
+    @Test fun callInterruptionRetainsOnlyAnAlreadyForegroundLocalSession() {
+        assertTrue(retainRecoveryNotification(true,true,false,false,false,false,false,callPending=true))
+        assertFalse(retainRecoveryNotification(true,false,false,false,false,false,false,callPending=true))
+        assertFalse(retainRecoveryNotification(false,true,false,false,false,false,false,callPending=true))
+    }
+
 }
