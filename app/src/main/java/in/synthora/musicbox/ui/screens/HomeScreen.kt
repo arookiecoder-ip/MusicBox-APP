@@ -321,7 +321,7 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (In
                                 onLongClick = { menu?.show(track) }, onLongClickLabel = "Song options"), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                                     `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 56.dp, Modifier.fillMaxSize())
-                                    Icon(Icons.Default.PlayArrow, null, Modifier.size(28.dp), tint = Color.White)
+                                    `in`.synthora.musicbox.ui.components.ArtworkPlayIndicator(28.dp)
                                 }
                                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                     Text(track.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
@@ -433,9 +433,7 @@ private fun MusicCard(track: Track, onClick: () -> Unit) {
     Column(Modifier.width(160.dp).combinedClickable(onClick = onClick, onLongClick = { menu?.show(track) }, onLongClickLabel = "Song options")) {
         Box(Modifier.size(160.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 160.dp, Modifier.fillMaxSize())
-            androidx.compose.material3.FilledIconButton(onClick = onClick, modifier = Modifier.size(48.dp), colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = 0.24f))) {
-                Icon(Icons.Filled.PlayArrow, "Play ${track.title}", Modifier.size(30.dp), tint = Color.White)
-            }
+            `in`.synthora.musicbox.ui.components.CollectionPlayButton("Play ${track.title}", onClick, Modifier.size(48.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(track.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

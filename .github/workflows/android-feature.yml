@@ -314,7 +314,7 @@ jobs:
         with:
           name: ui-test-apk
           path: test-apk
-      - name: Test diagonal scrolling, song selection, speed dial and playlist headers
+      - name: Test keyboard, artist portraits, scrolling and playlist presentation
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -325,7 +325,8 @@ jobs:
           script: |
             adb install apk/app-debug.apk
             adb install test-apk/app-debug-androidTest.apk
-            adb shell am instrument -w -e class in.synthora.musicbox.InteractionPolishRegressionTest in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > interaction-results.txt
+            adb shell settings put secure show_ime_with_hard_keyboard 1
+            adb shell am instrument -w -e class in.synthora.musicbox.InteractionPolishRegressionTest,in.synthora.musicbox.KeyboardArtistPresentationTest in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > interaction-results.txt
             cat interaction-results.txt
             ! grep -E 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' interaction-results.txt
             grep -E 'OK \([0-9]+ tests?\)' interaction-results.txt

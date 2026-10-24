@@ -33,7 +33,8 @@ fun CollectionDetailHero(item: BrowseItem, title: String, image: String, credit:
         BoxWithConstraints(Modifier.fillMaxWidth().stableStatusBarsPadding()) {
             val wide = paneHeight == null && maxWidth >= 840.dp
             @Composable fun labels() {
-                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                    maxLines = if (item.kind == "playlist") 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
                 if (credit.isNotBlank()) Text(credit, style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.clickable(enabled = onCreditClick != null) { onCreditClick?.invoke() })
@@ -44,8 +45,8 @@ fun CollectionDetailHero(item: BrowseItem, title: String, image: String, credit:
                     Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
                         maxLines = 3, overflow = TextOverflow.Ellipsis,
                         onTextLayout = { if (!expanded) overflowed = it.hasVisualOverflow })
-                    if (overflowed) OutlinedButton(onClick = { expanded = true }, shape = RoundedCornerShape(0.dp)) {
-                        Text("Read more")
+                    if (overflowed) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                        TextButton(onClick = { expanded = true }) { Text("Read more") }
                     }
                     if (expanded) AlertDialog(onDismissRequest = { expanded = false },
                         shape = RoundedCornerShape(0.dp), title = { Text(title) },

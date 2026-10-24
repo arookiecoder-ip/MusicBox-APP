@@ -40,6 +40,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -70,6 +74,8 @@ fun SearchHeader(
     val haptic = rememberJukeHaptics()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    val window = LocalWindowInfo.current
 
     // The field keeps its own selection so a re-tap can select the whole query for replacing.
     var field by remember { mutableStateOf(TextFieldValue(query, TextRange(query.length))) }
@@ -77,39 +83,37 @@ fun SearchHeader(
         if (field.text != query) field = TextFieldValue(query, TextRange(query.length))
     }
     var handledSelectAll by remember { mutableIntStateOf(selectAllTrigger) }
-    var explicitOpen by remember { mutableStateOf(false) }
-    LaunchedEffect(selectAllTrigger, open) {
-        if (open && selectAllTrigger != handledSelectAll) {
-            handledSelectAll = selectAllTrigger
-            delay(60) // let the field enter composition when the bar was closed
-            field = field.copy(selection = TextRange(0, field.text.length))
-            try { focus.requestFocus() } catch (_: Exception) {}
-            keyboard?.show()
-        }
-    }
     Row(
         modifier = modifier
             .stableStatusBarsPadding()
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .fillMaxWidth()
             .glassFloat(GlassShapes.Pill, GlassLevel.Regular)
-            .then(if (!open) Modifier.clickable { explicitOpen = true; onOpenChange(true) } else Modifier)
+            .then(if (!open) Modifier.clickable { onOpenChange(true) } else Modifier)
             .padding(horizontal = 4.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         run {
             if (open) {
-                LaunchedEffect(explicitOpen) {
-                    if (!explicitOpen) return@LaunchedEffect
+                var fieldFocused by remember { mutableStateOf(false) }
+                LaunchedEffect(selectAllTrigger) {
+                    // Both icon taps and programmatic opens use this attached field.
+                    // The IME request must follow the text-input focus session.
+                    snapshotFlow { window.isWindowFocused }.first { it }
                     androidx.compose.runtime.withFrameNanos { }
                     focus.requestFocus()
-                    delay(50)
+                    snapshotFlow { fieldFocused }.first { it }
+                    if (selectAllTrigger != handledSelectAll) {
+                        handledSelectAll = selectAllTrigger
+                        field = field.copy(selection = TextRange(0, field.text.length))
+                    }
+                    androidx.compose.runtime.withFrameNanos { }
                     keyboard?.show()
-                    explicitOpen = false
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = {
                         haptic.click()
+                        focusManager.clearFocus(force = true)
                         keyboard?.hide()
                         onQueryChange("")
                         onOpenChange(false)
@@ -127,7 +131,7 @@ fun SearchHeader(
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                         keyboardActions = KeyboardActions(onSearch = { onSearch() }),
-                        modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { if (it.isFocused) keyboard?.show() },
+                        modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused },
                         decorationBox = { inner ->
                             Box(contentAlignment = Alignment.CenterStart) {
                                 if (query.isEmpty()) {
@@ -156,7 +160,7 @@ fun SearchHeader(
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f).padding(start = 14.dp)
                     )
-                    IconButton(onClick = { haptic.click(); explicitOpen = true; onOpenChange(true) }) {
+                    IconButton(onClick = { haptic.click(); onOpenChange(true) }) {
                         Icon(Icons.Default.Search, "Search")
                     }
                     actions()

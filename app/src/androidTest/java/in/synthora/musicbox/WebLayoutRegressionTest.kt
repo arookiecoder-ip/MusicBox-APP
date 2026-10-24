@@ -77,7 +77,7 @@ class WebLayoutRegressionTest {
     }
     @Test fun artistPickerListsAndSelectsIndividualArtists() {
         var selected: ArtistCredit? = null
-        compose.setContent { JUKETheme { ArtistPickerSheet(listOf(ArtistCredit("First", "UCfirst"), ArtistCredit("Second", "UCsecond")), {}) { selected = it } } }
+        compose.setContent { JUKETheme { ArtistPickerSheet(listOf(ArtistCredit("First", "UCfirst"), ArtistCredit("Second", "UCsecond")), {}, loadPortrait = { null }) { selected = it } } }
         compose.onNodeWithText("First").assertIsDisplayed()
         compose.onNodeWithText("Second").performClick()
         assertEquals(ArtistCredit("Second", "UCsecond"), selected)
