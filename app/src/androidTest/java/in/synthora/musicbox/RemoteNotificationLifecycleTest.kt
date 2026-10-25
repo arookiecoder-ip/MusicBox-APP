@@ -47,7 +47,11 @@ class RemoteNotificationLifecycleTest {
         }
         val intent = Intent(context, RemotePlaybackService::class.java).setAction(MediaSessionService.SERVICE_INTERFACE)
         assertTrue(context.bindService(intent, connection, Context.BIND_AUTO_CREATE))
-        val covers = mutableListOf<java.io.File>()
+        val bitmap = android.graphics.Bitmap.createBitmap(720, 720, android.graphics.Bitmap.Config.ARGB_8888)
+        bitmap.eraseColor(android.graphics.Color.BLUE)
+        val png = java.io.ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        bitmap.recycle()
+        val artwork = DelayedArtworkServer(png)
         fun until(message: String, condition: () -> Boolean) {
             val deadline = SystemClock.elapsedRealtime() + 8000
             while (SystemClock.elapsedRealtime() < deadline) {
@@ -61,12 +65,8 @@ class RemoteNotificationLifecycleTest {
             val apply = RemotePlaybackService::class.java.getDeclaredMethod("applyRemoteSnapshot", EchoState::class.java).apply { isAccessible = true }
             val notifications = context.getSystemService(NotificationManager::class.java)
             val tracks = (0..4).map { index ->
-                val cover = java.io.File(context.cacheDir, "notification-cover-$index.png").also { covers.add(it) }
-                val bitmap = android.graphics.Bitmap.createBitmap(32, 32, android.graphics.Bitmap.Config.ARGB_8888)
-                bitmap.eraseColor(android.graphics.Color.rgb(index * 40, 80, 100))
-                cover.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
-                bitmap.recycle()
-                Track("notification-$index", "Remote song $index", "Artist", durationSec = 180, thumbnailUri = cover.toURI().toString())
+                Track("notification-$index", "Remote song $index", "Artist", durationSec = 180,
+                    thumbnailUri = "http://127.0.0.1:${artwork.port}/$index-${System.nanoTime()}.png")
             }
             fun send(index: Int, mode: String) {
                 instrumentation.runOnMainSync {
@@ -106,7 +106,7 @@ class RemoteNotificationLifecycleTest {
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             context.stopService(intent)
             context.unbindService(connection)
-            covers.forEach { it.delete() }
+            artwork.close()
             prefs.edit().apply {
                 saved.forEach { (key, value) -> when (value) {
                     is String -> putString(key, value)
@@ -115,5 +115,28 @@ class RemoteNotificationLifecycleTest {
                 } }
             }.commit()
         }
+    }
+
+    /** Local HD images arrive after metadata so the real async provider path runs. */
+    private class DelayedArtworkServer(private val png: ByteArray) : java.io.Closeable {
+        private val server = java.net.ServerSocket(0, 8, java.net.InetAddress.getByName("127.0.0.1"))
+        val port: Int get() = server.localPort
+        private val worker = Thread {
+            while (!server.isClosed) {
+                try {
+                    server.accept().use { client ->
+                        client.soTimeout = 2000
+                        val input = client.getInputStream().bufferedReader()
+                        while (true) { val line = input.readLine() ?: break; if (line.isEmpty()) break }
+                        SystemClock.sleep(250)
+                        val output = client.getOutputStream()
+                        output.write("HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: ${png.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                        output.write(png)
+                        output.flush()
+                    }
+                } catch (_: java.io.IOException) { if (server.isClosed) break }
+            }
+        }.apply { isDaemon = true; start() }
+        override fun close() { server.close(); worker.join(3000) }
     }
 }
