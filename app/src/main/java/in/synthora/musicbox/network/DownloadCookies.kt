@@ -27,7 +27,9 @@ class DownloadCookies(
 
     private suspend fun boundedRequest(method: HttpMethod, body: JsonObject?, force: Boolean): JsonElement =
         withTimeoutOrNull(65_000) { requestWithRetry(method, body, force) }
-            ?: throw IllegalStateException("Audio check timed out. Try again when connected. Existing cookies were kept.")
+            ?: throw IllegalStateException(if (method == HttpMethod.Post)
+                "Cookie upload timed out. Check audio access before retrying."
+                else "Audio check timed out. Try again when connected. Existing cookies were kept.")
 
     // Canceling a background client request does not stop an already running server probe.
     private suspend fun requestWithRetry(method: HttpMethod, body: JsonObject?, force: Boolean): JsonElement {

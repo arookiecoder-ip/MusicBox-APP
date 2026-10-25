@@ -42,9 +42,12 @@ private fun searchMatch(item: BrowseItem, query: String): Int {
     val title=searchText(item.title)
     val artist=searchText(item.subtitle)
     val words=("$title $artist").split(" ").toSet()
+    val compactQuery = q.replace(" ", "")
+    val titlePrefixes = title.split(" ").runningFold("") { prefix, word -> prefix + word }
     return when {
-        title == q -> 4
-        artist == q && item.kind == "artist" -> 4
+        title == q || (compactQuery.length >= 4 && title.replace(" ", "") == compactQuery) -> 5
+        artist == q && item.kind == "artist" -> 5
+        item.kind == "track" && compactQuery.length >= 4 && compactQuery in titlePrefixes -> 4
         q.split(" ").all { it in words } -> 3
         title.startsWith("$q ") -> 2
         else -> 0

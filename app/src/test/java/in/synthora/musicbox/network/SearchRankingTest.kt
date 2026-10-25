@@ -78,4 +78,31 @@ class SearchRankingTest {
         assertEquals(right,relevantSearchHero(listOf(wrong,right),emptyList(),"কাটা"))
     }
 
+    @Test fun spacedSongTitleBeatsLooselyMatchingPlaylistAndUnrelatedSongs() {
+        val playlist = BrowseParser.item(buildJsonObject {
+            put("browseId", "VLplaylist"); put("title", "kulo sa sped up"); put("resultType", "playlist"); put("category", "Top result")
+        })
+        val wrong = item("wrong", "Ra Ma Da Sa", "song")
+        val song = item("actual", "KU LO SA", "song")
+        assertEquals(listOf(song, wrong), searchSongItems(listOf(wrong), listOf(wrong, song), "kulo sa"))
+        assertEquals(song, relevantSearchHero(listOf(playlist, wrong), listOf(song, wrong), "kulo sa"))
+        val video = item("official", "KU LO SA (A COLORS SHOW)", "video")
+        assertEquals(video, relevantSearchHero(listOf(playlist), listOf(video, wrong), "kulo sa"))
+    }
+
+    @Test fun explicitPlaylistAndExactArtistQueriesKeepTheirOwnTopResult() {
+        val playlist = BrowseParser.item(buildJsonObject {
+            put("browseId", "VLplaylist"); put("title", "Kulo Sa Playlist"); put("resultType", "playlist"); put("category", "Top result")
+        })
+        val song = item("song", "KU LO SA", "song")
+        assertEquals(playlist, relevantSearchHero(listOf(playlist), listOf(song), "kulo sa playlist"))
+        val artist = BrowseParser.item(buildJsonObject {
+            put("browseId", "UCartist"); put("title", "Singer"); put("resultType", "artist"); put("category", "Top result")
+        })
+        assertEquals(artist, relevantSearchHero(listOf(artist), listOf(song), "Singer"))
+        val unrelated = item("unrelated", "Other", "song")
+        assertEquals(listOf(unrelated, item("lovely", "Lovely", "song")),
+            searchSongItems(listOf(unrelated, item("lovely", "Lovely", "song")), emptyList(), "love"))
+    }
+
 }
