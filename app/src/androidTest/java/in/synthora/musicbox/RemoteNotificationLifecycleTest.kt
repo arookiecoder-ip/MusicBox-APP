@@ -123,6 +123,12 @@ class RemoteNotificationLifecycleTest {
                 !ongoing
             }
             assertTrue("Sustained pause removed media controls", notifications.activeNotifications.any { it.id == 1002 })
+            val pausedStarts = RemoteNotificationDiagnostics.snapshot().count { it.endsWith(":start_command") }
+            send(4, "alexa")
+            SystemClock.sleep(300)
+            assertEquals("External resume tried to restart a background service", pausedStarts,
+                RemoteNotificationDiagnostics.snapshot().count { it.endsWith(":start_command") })
+            assertTrue(RemoteNotificationDiagnostics.snapshot().any { it.endsWith(":background_regular_update") })
             val denied = RemotePlaybackService::class.java.getDeclaredMethod("onRemoteForegroundDenied").apply { isAccessible = true }
             instrumentation.runOnMainSync { denied.invoke(service) }
             SystemClock.sleep(200)

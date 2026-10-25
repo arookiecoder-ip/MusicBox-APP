@@ -42,7 +42,6 @@ class RemotePlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var notificationProvider: GuardedMediaNotificationProvider
     private var pausedForegroundJob: Job? = null
-    private var foregroundPromotionDenied = false
     private var restoringNotification = false
     private var skipSequence = 0L
     private var boundaryJob: Job? = null
@@ -354,7 +353,6 @@ class RemotePlaybackService : MediaSessionService() {
         if (holdDestinationHandoff()) return
         val visible = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState
             .isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
-        if (visible) foregroundPromotionDenied = false
         RemoteNotificationDiagnostics.record("update:playing=${remote.snapshot.playing},loading=${remote.snapshot.loading},track=${remote.snapshot.track != null},foreground=$isPlaybackOngoing")
         if (isPlaybackOngoing) {
             retainForegroundAcrossReceiverPause()
@@ -363,7 +361,12 @@ class RemotePlaybackService : MediaSessionService() {
             // Rebuild metadata/actions in place while its existing grant is held.
             if (remote.snapshot.track == null || notificationProvider.refresh(session, ::postRemoteNotification)) return
         }
-        if (foregroundPromotionDenied && !visible && notificationProvider.refresh(session, ::postRemoteNotification)) return
+        if (!visible && notificationProvider.refresh(session, ::postRemoteNotification)) {
+            // External playback resuming after a sustained pause does not grant
+            // this phone a new background foreground-service start exemption.
+            RemoteNotificationDiagnostics.record("background_regular_update")
+            return
+        }
         RemoteNotificationDiagnostics.record(if (startInForegroundRequired) "promote" else "update")
         try { super.onUpdateNotification(session, startInForegroundRequired); updateForegroundBridge() }
         catch (e: Exception) {
@@ -400,7 +403,6 @@ class RemotePlaybackService : MediaSessionService() {
     }
 
     private fun onRemoteForegroundDenied() {
-        foregroundPromotionDenied = true
         RemoteNotificationDiagnostics.record("foreground_denied_retained")
         // Remote controls render no audio here. A denied promotion is not a
         // reason to cancel their existing notification or destroy the session.
