@@ -40,6 +40,9 @@ class RemotePlaybackService : MediaSessionService() {
     private lateinit var echo: EchoController
     private lateinit var remote: EchoPlayer
     private var session: MediaSession? = null
+    private lateinit var notificationProvider: GuardedMediaNotificationProvider
+    private var pausedForegroundJob: Job? = null
+    private var foregroundPromotionDenied = false
     private var restoringNotification = false
     private var skipSequence = 0L
     private var boundaryJob: Job? = null
@@ -80,19 +83,19 @@ class RemotePlaybackService : MediaSessionService() {
         remote = EchoPlayer().apply { snapshot = if (prefs.getBoolean("remote_controls_dismissed", false)) EchoState() else echo.state.value.takeIf { it.track != null } ?: initialSnapshot ?: EchoState() }
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(
             NotificationChannel("alexa_playback", "Alexa playback", NotificationManager.IMPORTANCE_LOW))
-        setMediaNotificationProvider(GuardedMediaNotificationProvider(MusicNotificationProvider(this, 1002, "alexa_playback").apply { setSmallIcon(R.drawable.media3_notification_small_icon) },
+        notificationProvider = GuardedMediaNotificationProvider(MusicNotificationProvider(this, 1002, "alexa_playback").apply { setSmallIcon(R.drawable.media3_notification_small_icon) },
             { session != null && prefs.getString("playback_output", "PHONE") in setOf("ALEXA", "REMOTE_PHONE") && !prefs.getBoolean("remote_controls_dismissed", false) },
-            { PlaybackService.leaveRemoteForeground(); stopForeground(STOP_FOREGROUND_REMOVE); stopSelf() },
+            ::onRemoteForegroundDenied,
             onRecoveryUpdate = ::holdDestinationHandoff, onUpdated = ::updateForegroundBridge,
             publishForegroundUpdate = { notification ->
-                if (isPlaybackOngoing) {
-                    // Artwork completion is an update of existing controls, not a
-                    // fresh background foreground-service start.
-                    getSystemService(NotificationManager::class.java).notify(notification.notificationId, notification.notification)
-                    RemoteNotificationDiagnostics.record("artwork_update")
-                    true
-                } else false
-            }))
+                postRemoteNotification(notification)
+                RemoteNotificationDiagnostics.record("artwork_update")
+                true
+            })
+        setMediaNotificationProvider(notificationProvider)
+        setListener(object : MediaSessionService.Listener {
+            override fun onForegroundServiceStartNotAllowedException() { onRemoteForegroundDenied() }
+        })
         session = MediaSession.Builder(this, remote).setId("alexa")
             .setBitmapLoader(SharedArtworkBitmapLoader(this, scope))
             .setSessionActivity(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java),
@@ -343,27 +346,65 @@ class RemotePlaybackService : MediaSessionService() {
     }
 
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
+        if (this.session !== session) return
         if (restoringNotification && remote.snapshot.track == null) return
         restoringNotification = false
         // A source pause is not permission to tear down the destination's already
         // authorized foreground services before its local renderer is ready.
         if (holdDestinationHandoff()) return
-        // Media3 normally calls startForegroundService on every metadata update,
-        // even for an already foreground session. Android can deny that fresh
-        // background start. Notify in place once this service is foreground.
-        val promote = startInForegroundRequired && !isPlaybackOngoing
-        RemoteNotificationDiagnostics.record(if (promote) "promote" else "update")
-        try { super.onUpdateNotification(session, promote); updateForegroundBridge() }
+        val visible = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState
+            .isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        if (visible) foregroundPromotionDenied = false
+        RemoteNotificationDiagnostics.record("update:playing=${remote.snapshot.playing},loading=${remote.snapshot.loading},track=${remote.snapshot.track != null},foreground=$isPlaybackOngoing")
+        if (isPlaybackOngoing) {
+            retainForegroundAcrossReceiverPause()
+            // A receiver briefly reports paused at song boundaries. Calling
+            // Media3's ordinary update here demotes the service immediately.
+            // Rebuild metadata/actions in place while its existing grant is held.
+            if (remote.snapshot.track == null || notificationProvider.refresh(session, ::postRemoteNotification)) return
+        }
+        if (foregroundPromotionDenied && !visible && notificationProvider.refresh(session, ::postRemoteNotification)) return
+        RemoteNotificationDiagnostics.record(if (startInForegroundRequired) "promote" else "update")
+        try { super.onUpdateNotification(session, startInForegroundRequired); updateForegroundBridge() }
         catch (e: Exception) {
             if (android.os.Build.VERSION.SDK_INT >= 31 && e is android.app.ForegroundServiceStartNotAllowedException) {
-                RemoteNotificationDiagnostics.record("foreground_denied")
-                // A remote Echo can resume while Android no longer permits a background service start.
-                // Drop only this notification service; the foreground Activity recreates it legally.
-                `in`.synthora.musicbox.utils.SafeLog.e("RemotePlaybackService", "Android deferred remote notification restart", e)
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                onRemoteForegroundDenied()
             } else throw e
         }
+    }
+
+    private fun postRemoteNotification(notification: androidx.media3.session.MediaNotification) {
+        val prefs = getSharedPreferences("music_settings_prefs", MODE_PRIVATE)
+        if (session == null || prefs.getBoolean("remote_controls_dismissed", false) ||
+            prefs.getString("playback_output", "PHONE") !in setOf("ALEXA", "REMOTE_PHONE")) return
+        getSystemService(NotificationManager::class.java).notify(notification.notificationId, notification.notification)
+    }
+
+    private fun retainForegroundAcrossReceiverPause() {
+        val wantsPlay = remote.snapshot.playing || remote.snapshot.loading || PlaybackCoordinator.notificationLoading.value
+        if (wantsPlay) {
+            pausedForegroundJob?.cancel(); pausedForegroundJob = null
+        } else if (pausedForegroundJob?.isActive != true) {
+            pausedForegroundJob = scope.launch {
+                delay(10_000)
+                pausedForegroundJob = null
+                if (!remote.snapshot.playing && !remote.snapshot.loading && !PlaybackCoordinator.notificationLoading.value) {
+                    RemoteNotificationDiagnostics.record("pause_grace_expired")
+                    // A real sustained pause releases foreground resources, but
+                    // retains ordinary media controls. A short boundary pause does not.
+                    session?.let { super@RemotePlaybackService.onUpdateNotification(it, false) }
+                    updateForegroundBridge()
+                }
+            }
+        }
+    }
+
+    private fun onRemoteForegroundDenied() {
+        foregroundPromotionDenied = true
+        RemoteNotificationDiagnostics.record("foreground_denied_retained")
+        // Remote controls render no audio here. A denied promotion is not a
+        // reason to cancel their existing notification or destroy the session.
+        session?.let { notificationProvider.refresh(it, ::postRemoteNotification) }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -385,6 +426,8 @@ class RemotePlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         RemoteNotificationDiagnostics.record("destroy")
+        val closingSession = session
+        session = null
         PlaybackCoordinator.notificationLoading.value = false
         PlaybackService.leaveRemoteForeground(force = true)
         PlaybackCoordinator.observe(this, "notification", false)
@@ -395,7 +438,7 @@ class RemotePlaybackService : MediaSessionService() {
         val anchor = localServiceAnchor
         localServiceAnchor = null
         anchor?.let { androidx.media3.session.MediaController.releaseFuture(it) }
-        session?.let { removeSession(it); it.release() }; remote.release(); scope.cancel()
+        closingSession?.let { removeSession(it); it.release() }; remote.release(); scope.cancel()
         super.onDestroy()
     }
 

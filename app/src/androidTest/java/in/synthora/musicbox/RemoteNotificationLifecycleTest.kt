@@ -95,6 +95,15 @@ class RemoteNotificationLifecycleTest {
             for (index in 1..4) {
                 val output = if (index < 3) "REMOTE_PHONE" else "ALEXA"
                 prefs.edit().putString("playback_output", output).commit()
+                // Reproduce the receiver's confirmed pause immediately before
+                // changing songs, with no processing flag. 2.4.60 demoted here.
+                instrumentation.runOnMainSync {
+                    apply.invoke(service, EchoState(track = tracks[index - 1], queue = tracks, index = index - 1,
+                        playing = false, confirmed = true, durationMs = 180_000,
+                        sharedOutput = SharedPlaybackOutput(mode = if (index < 3) "phone" else "alexa",
+                            owner = "fixture", token = "fixture", epoch = "fixture")))
+                }
+                SystemClock.sleep(150)
                 send(index, if (index < 3) "phone" else "alexa")
                 SystemClock.sleep(500) // Include asynchronous bitmap completion.
                 assertTrue(notifications.activeNotifications.any { it.id == 1002 })
@@ -102,6 +111,26 @@ class RemoteNotificationLifecycleTest {
             assertEquals("Track/artwork refresh restarted the background foreground service", starts,
                 RemoteNotificationDiagnostics.snapshot().count { it.endsWith(":start_command") })
             assertTrue("Artwork callback was not exercised", RemoteNotificationDiagnostics.snapshot().any { it.endsWith(":artwork_update") })
+            instrumentation.runOnMainSync {
+                apply.invoke(service, EchoState(track = tracks.last(), queue = tracks, index = 4,
+                    playing = false, confirmed = true, durationMs = 180_000,
+                    sharedOutput = SharedPlaybackOutput(mode = "alexa", owner = "fixture", token = "fixture", epoch = "fixture")))
+            }
+            SystemClock.sleep(10_500)
+            until("Sustained pause did not release foreground resources") {
+                var ongoing = true
+                instrumentation.runOnMainSync { ongoing = service.isPlaybackOngoing }
+                !ongoing
+            }
+            assertTrue("Sustained pause removed media controls", notifications.activeNotifications.any { it.id == 1002 })
+            val denied = RemotePlaybackService::class.java.getDeclaredMethod("onRemoteForegroundDenied").apply { isAccessible = true }
+            instrumentation.runOnMainSync { denied.invoke(service) }
+            SystemClock.sleep(200)
+            assertTrue("Denied promotion removed existing controls", notifications.activeNotifications.any { it.id == 1002 })
+            assertTrue(RemoteNotificationDiagnostics.snapshot().any { it.endsWith(":foreground_denied_retained") })
+            send(4, "alexa")
+            SystemClock.sleep(300)
+            assertTrue("Background resume removed retained controls", notifications.activeNotifications.any { it.id == 1002 })
         } finally {
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             context.stopService(intent)

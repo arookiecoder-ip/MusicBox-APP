@@ -21,9 +21,22 @@ internal class GuardedMediaNotificationProvider(
     private val publishForegroundUpdate: (MediaNotification) -> Boolean = { false }
 ) : MediaNotification.Provider {
     private val main = Handler(Looper.getMainLooper())
+    private var lastActions: MediaNotification.ActionFactory? = null
+
+    /** Rebuild controls using the existing service action factory, without asking
+     * Media3 to promote/demote the service during a remote receiver transition. */
+    fun refresh(session: MediaSession, publish: (MediaNotification) -> Unit): Boolean {
+        val actions = lastActions ?: return false
+        val buttons = session.mediaButtonPreferences.ifEmpty { session.customLayout }
+        val notification = createNotification(session, ImmutableList.copyOf(buttons), actions) { publish(it) }
+        publish(notification)
+        onUpdated()
+        return true
+    }
     override fun createNotification(session: MediaSession, buttons: ImmutableList<CommandButton>,
-        actions: MediaNotification.ActionFactory, callback: MediaNotification.Provider.Callback): MediaNotification =
-        delegate.createNotification(session, buttons, actions) { notification ->
+        actions: MediaNotification.ActionFactory, callback: MediaNotification.Provider.Callback): MediaNotification {
+        lastActions = actions
+        return delegate.createNotification(session, buttons, actions) { notification ->
             main.post {
                 deliverNotificationUpdate({ if (!onRecoveryUpdate()) {
                         if (!publishForegroundUpdate(notification)) callback.onNotificationChanged(notification)
@@ -32,6 +45,7 @@ internal class GuardedMediaNotificationProvider(
                     { Build.VERSION.SDK_INT >= 31 && it is android.app.ForegroundServiceStartNotAllowedException }, onDenied, active)
             }
         }
+    }
     override fun handleCustomCommand(session: MediaSession, action: String, extras: Bundle): Boolean =
         delegate.handleCustomCommand(session, action, extras)
 }
