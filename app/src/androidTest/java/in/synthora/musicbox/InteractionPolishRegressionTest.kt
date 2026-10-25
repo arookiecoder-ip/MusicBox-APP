@@ -82,7 +82,9 @@ class InteractionPolishRegressionTest {
                 controller.release()
             }
             notifications.cancel(1002)
-            notifications.deleteNotificationChannel(channel)
+            // Foreground posts are asynchronous in Android's notification service.
+            // Keep this emulator-only channel valid while pending bridge posts drain;
+            // removing it here can crash the process with Bad notification for startForeground.
             prefs.edit().apply { if (savedOutput == null) remove("playback_output") else putString("playback_output", savedOutput) }.commit()
         }
     }
