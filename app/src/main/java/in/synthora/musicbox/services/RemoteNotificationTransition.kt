@@ -5,6 +5,8 @@ internal class RemoteNotificationTransition {
     private var baseline: EchoState? = null
     private var startedAt: Long? = null
 
+    fun remainingMs(now: Long): Long? = startedAt?.let { (30_000 - (now - it)).takeIf { left -> left > 0 } }
+
     fun present(incoming: EchoState, now: Long): EchoState {
         val previous = baseline
         val a = previous?.sharedOutput

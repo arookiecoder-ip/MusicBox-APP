@@ -30,8 +30,10 @@ class RemoteNotificationTransitionTest {
         bridge.present(initial, 0)
         val pending = initial.copy(track = null, playing = false, processing = true, confirmed = false)
         assertEquals(first, bridge.present(pending, 100).track)
+        assertEquals(30_000L, bridge.remainingMs(100))
         assertTrue(bridge.present(pending, 30_099).playing)
         assertEquals(pending, bridge.present(pending, 30_100))
+        assertNull(bridge.remainingMs(30_100))
         assertEquals(pending, bridge.present(pending, 50_000))
     }
 

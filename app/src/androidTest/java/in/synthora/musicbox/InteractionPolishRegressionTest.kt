@@ -32,6 +32,10 @@ class InteractionPolishRegressionTest {
     @Test fun localSessionUpdatesCannotRemoveRemoteTrackNotifications() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(
+                "pm grant ${context.packageName} android.permission.POST_NOTIFICATIONS")).use { it.readBytes() }
+        }
         val prefs = context.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)
         val savedOutput = prefs.getString("playback_output", null)
         val notifications = context.getSystemService(android.app.NotificationManager::class.java)
