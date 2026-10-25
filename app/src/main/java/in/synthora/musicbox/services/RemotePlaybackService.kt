@@ -42,6 +42,9 @@ class RemotePlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
     private lateinit var notificationProvider: GuardedMediaNotificationProvider
     private var pausedForegroundJob: Job? = null
+    private var notificationPublishJob: Job? = null
+    private var pendingNotification: androidx.media3.session.MediaNotification? = null
+    private var lastNotificationPostAt = 0L
     private var restoringNotification = false
     private var skipSequence = 0L
     private var boundaryJob: Job? = null
@@ -392,10 +395,29 @@ class RemotePlaybackService : MediaSessionService() {
     }
 
     private fun postRemoteNotification(notification: androidx.media3.session.MediaNotification) {
+        pendingNotification = notification
+        val remaining = 500 - (android.os.SystemClock.elapsedRealtime() - lastNotificationPostAt)
+        if (remaining <= 0) {
+            notificationPublishJob?.cancel(); notificationPublishJob = null
+            publishPendingNotification()
+        } else if (notificationPublishJob?.isActive != true) {
+            notificationPublishJob = scope.launch {
+                delay(remaining)
+                notificationPublishJob = null
+                publishPendingNotification()
+            }
+        }
+    }
+
+    /** Latest metadata/artwork wins; Android drops bursts above its package rate limit. */
+    private fun publishPendingNotification() {
+        val notification = pendingNotification ?: return
+        pendingNotification = null
         val prefs = getSharedPreferences("music_settings_prefs", MODE_PRIVATE)
         if (session == null || prefs.getBoolean("remote_controls_dismissed", false) ||
             prefs.getString("playback_output", "PHONE") !in setOf("ALEXA", "REMOTE_PHONE")) return
         getSystemService(NotificationManager::class.java).notify(notification.notificationId, notification.notification)
+        lastNotificationPostAt = android.os.SystemClock.elapsedRealtime()
     }
 
     private fun retainForegroundAcrossReceiverPause() {

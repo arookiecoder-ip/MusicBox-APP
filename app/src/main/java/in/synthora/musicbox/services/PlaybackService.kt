@@ -152,6 +152,9 @@ class PlaybackService : MediaLibraryService() {
          * This preserves the playback service across a later background phone handoff. */
         internal fun joinRemoteForeground(notification: android.app.Notification) {
             val service = activeService.get() ?: return
+            // Sharing is a one-time ownership bridge, not another metadata post.
+            // Reposting here doubles each remote update and can hit Android's rate cap.
+            if (service.remoteForegroundBridge) return
             val visible = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState
                 .isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
             if (!canJoinRemoteForeground(visible, service.isPlaybackOngoing, service.remoteForegroundBridge,

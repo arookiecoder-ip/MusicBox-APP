@@ -62,6 +62,7 @@ class InteractionPolishRegressionTest {
                         .setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(title).setOngoing(true).build()
                     instrumentation.runOnMainSync {
                         `in`.synthora.musicbox.services.PlaybackService.joinRemoteForeground(notification)
+                        notifications.notify(1002, notification)
                     }
                     compose.waitUntil(5000) { notifications.activeNotifications.any { it.id == 1002 } }
                     instrumentation.runOnMainSync { service.onUpdateNotification(session, false) }

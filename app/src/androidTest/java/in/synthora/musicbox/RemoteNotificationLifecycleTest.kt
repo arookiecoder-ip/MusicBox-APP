@@ -58,7 +58,7 @@ class RemoteNotificationLifecycleTest {
                 if (condition()) return
                 SystemClock.sleep(30)
             }
-            fail(message)
+            fail("$message; lifecycle=${RemoteNotificationDiagnostics.snapshot()}")
         }
         try {
             assertTrue(connected.await(10, TimeUnit.SECONDS))

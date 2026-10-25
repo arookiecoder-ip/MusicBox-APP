@@ -6,6 +6,7 @@ Entries below distinguish source/debug builds from published releases. Dates fol
 
 ## 2.4.61 (113)
 
+- Coalesce remote notification metadata/artwork posts and avoid redundant foreground-bridge reposts so Android does not shed rapid updates.
 - Preserve foreground authorization across brief confirmed remote pauses at track boundaries, and retain media controls if Android denies a later promotion. Release foreground resources after sustained pauses.
 
 - Recognize song titles with different word spacing, prefer strong song matches over loosely matching playlists, and preserve explicit artist/playlist queries.
