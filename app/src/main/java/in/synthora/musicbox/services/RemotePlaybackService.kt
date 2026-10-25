@@ -160,7 +160,15 @@ class RemotePlaybackService : MediaSessionService() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (intent == null) {
+        val userMediaAction = intent?.action == Intent.ACTION_MEDIA_BUTTON
+        if (userMediaAction && remote.snapshot.track != null && !isPlaybackOngoing) {
+            // Media3's paused Play action uses PendingIntent.getForegroundService.
+            // Fulfil that user-authorized start before its network command runs.
+            RemoteNotificationDiagnostics.record("user_media_promotion")
+            try { session?.let { super.onUpdateNotification(it, true) } }
+            catch (error: android.app.ForegroundServiceStartNotAllowedException) { onRemoteForegroundDenied() }
+        }
+        if (intent == null || (userMediaAction && remote.snapshot.track == null)) {
             // Android may restart a formerly foreground service before a server
             // snapshot is available. Meet its foreground deadline without waiting
             // for artwork, presence or Alexa to respond.

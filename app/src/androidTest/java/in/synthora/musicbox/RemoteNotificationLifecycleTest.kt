@@ -137,6 +137,18 @@ class RemoteNotificationLifecycleTest {
             send(4, "alexa")
             SystemClock.sleep(300)
             assertTrue("Background resume removed retained controls", notifications.activeNotifications.any { it.id == 1002 })
+            compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+            val mediaIntent = Intent(context, RemotePlaybackService::class.java).setAction(Intent.ACTION_MEDIA_BUTTON)
+                .putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_UNKNOWN))
+            // Unknown key exercises service promotion without contacting a real receiver.
+            android.app.PendingIntent.getForegroundService(context, 8091, mediaIntent,
+                android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT).send()
+            until("User media action did not regain foreground status") {
+                var ongoing = false
+                instrumentation.runOnMainSync { ongoing = service.isPlaybackOngoing }
+                ongoing
+            }
+            assertTrue(RemoteNotificationDiagnostics.snapshot().any { it.endsWith(":user_media_promotion") })
         } finally {
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             context.stopService(intent)
