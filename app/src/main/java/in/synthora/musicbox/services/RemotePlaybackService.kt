@@ -166,7 +166,11 @@ class RemotePlaybackService : MediaSessionService() {
             // Fulfil that user-authorized start before its network command runs.
             RemoteNotificationDiagnostics.record("user_media_promotion")
             try { session?.let { super.onUpdateNotification(it, true) } }
-            catch (error: android.app.ForegroundServiceStartNotAllowedException) { onRemoteForegroundDenied() }
+            catch (error: Exception) {
+                if (android.os.Build.VERSION.SDK_INT >= 31 && error is android.app.ForegroundServiceStartNotAllowedException)
+                    onRemoteForegroundDenied()
+                else throw error
+            }
         }
         if (intent == null || (userMediaAction && remote.snapshot.track == null)) {
             // Android may restart a formerly foreground service before a server
