@@ -738,14 +738,6 @@ internal fun OutputPickerContent(
             OutputRow(icon = Icons.Outlined.PhoneAndroid, title = device.name, detail = "Online",
                 selected = selectedMobileId == device.id, enabled = !busy, onClick = { onSelectMobile(device.id) })
         }
-        if (devices.isEmpty()) {
-            Text(
-                "No Echo found. Connect Amazon in Settings to play on an Echo.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-            )
-        }
         devices.filter { it.online }.forEach { device ->
             OutputRow(
                 icon = Icons.Outlined.Speaker, title = device.name,
