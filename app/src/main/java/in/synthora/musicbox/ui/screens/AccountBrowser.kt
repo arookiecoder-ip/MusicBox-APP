@@ -21,6 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -43,6 +46,17 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
     val server = Backend.baseUrl
     var browser by remember { mutableStateOf<WebView?>(null) }
     val manager = CookieManager.getInstance()
+    val closeScope = rememberCoroutineScope()
+    fun requestClose() {
+        val web = browser
+        if (web == null) { onClose(); return }
+        // Let the leased page revoke its browser before destroying the WebView.
+        // A failed/offline page must never trap the Android back/close action.
+        closeScope.launch { delay(2_000); onClose() }
+        web.evaluateJavascript("(function(){const cancel=document.getElementById('cancel');if(cancel){cancel.click();return true;}return false;})()") { handled ->
+            if (handled != "true") onClose()
+        }
+    }
     fun clearCookies() {
         listOf(server, "$server/youtube-login/").forEach { scope ->
             manager.getCookie(scope).orEmpty().split(";").forEach { part ->
@@ -55,12 +69,12 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
         }
     }
     DisposableEffect(Unit) { onDispose { browser?.stopLoading(); browser?.destroy(); clearCookies() } }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = ::requestClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())).stableNavigationBarsPadding().imePadding()) {
             GlassTopAppBar(
                 title = { Text("Account sign-in") },
                 navigationIcon = {
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
+                    IconButton(onClick = ::requestClose) { Icon(Icons.Default.Close, "Close") }
                 }
             )
             AndroidView(modifier = Modifier.weight(1f), factory = { context ->

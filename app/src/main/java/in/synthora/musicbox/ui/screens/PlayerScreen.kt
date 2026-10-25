@@ -745,7 +745,7 @@ internal fun OutputPickerContent(
         devices.filter { it.online }.forEach { device ->
             OutputRow(
                 icon = Icons.Outlined.Speaker, title = device.name + if (!device.controllable) " (logged out)" else "",
-                detail = if (!device.controllable) "Logged out" else if (device.online) null else "Offline",
+                detail = if (!device.controllable) "Sign in to control" else if (device.online) null else "Offline",
                 selected = isAlexa && device.serial == selectedSerial,
                 enabled = device.online, readOnly = !device.controllable,
                 onClick = { if (device.controllable) onSelectEcho(device.serial) else android.widget.Toast.makeText(contextForOutputPicker, "Sign in to Amazon to control Alexa.", android.widget.Toast.LENGTH_SHORT).show() }
