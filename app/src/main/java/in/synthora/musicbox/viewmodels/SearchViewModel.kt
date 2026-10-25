@@ -73,6 +73,7 @@ data class ArtistDetailUiState(
     val albums: List<BrowseItem> = emptyList(),
     val singles: List<BrowseItem> = emptyList(),
     val playlists: List<BrowseItem> = emptyList(),
+    val featured: List<BrowseItem> = emptyList(),
     val related: List<BrowseItem> = emptyList(),
     val subscriptionChannelId: String = "",
     val subscriptionBusy: Boolean = false,
@@ -432,8 +433,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 val data = Backend.get("/api/artist/${artist.id}").objectOrEmpty()
                 val info = data["artist"].objectOrEmpty()
                 val liked = AccountRepository.liked.value
-                fun releases(key: String) = data.array(key).mapNotNull { (it as? JsonObject)?.let { raw -> BrowseParser.item(raw, if (key == "playlists") "" else "albums") } }
-                    .filter { it.id.isNotBlank() }
+                fun releases(key: String) = `in`.synthora.musicbox.network.artistCollectionItems(data, key)
                 val name = info.text("name").ifBlank { artist.title }
                 _artistDetailState.value = ArtistDetailUiState(
                     artist = artist.copy(title = name),
@@ -449,6 +449,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                     albums = releases("albums"),
                     singles = releases("singles"),
                     playlists = releases("playlists"),
+                    featured = releases("featured"),
                     albumsHasMore = info["albums"].objectOrEmpty().text("params").isNotBlank(),
                     singlesHasMore = info["singles"].objectOrEmpty().text("params").isNotBlank(),
                     related = data.array("related").mapNotNull { (it as? JsonObject)?.let { row -> BrowseParser.item(row, "related") } }.filter { it.id.isNotBlank() },
