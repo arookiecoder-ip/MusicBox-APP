@@ -530,6 +530,16 @@ class PlaybackService : MediaLibraryService() {
                 mainHandler.postDelayed(this,500)
                 return
             }
+            if (!callGuard.readyToResume() || resumeSessionJob?.isActive == true) {
+                mainHandler.postDelayed(this,250)
+                return
+            }
+            // Do not take playback back from another music app selected during
+            // the call or during Android's final focus handoff.
+            if (audioManager.isMusicActive && !player.isPlaying) {
+                callGuard.explicitPause()
+                return
+            }
             callGuard.resumeConsumed()
             // The normal resume path safely renews an expired lease and fences newer devices.
             cancelledMedia3Resume=false

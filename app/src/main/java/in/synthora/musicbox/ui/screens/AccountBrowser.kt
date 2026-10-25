@@ -80,6 +80,10 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
             AndroidView(modifier = Modifier.weight(1f), factory = { context ->
                 WebView(context).apply {
                     browser = this
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.useWideViewPort = true

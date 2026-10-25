@@ -104,4 +104,45 @@ class CallPlaybackGuardTest {
         guard.explicitPause();assertFalse(guard.needsModePolling)
     }
 
+    @Test fun delayedPostCallFocusLossSchedulesOnlyOneRecovery() {
+        var calling=true;var now=1_000L;var schedules=0
+        val guard=CallPlaybackGuard({calling},{},{schedules++},{},nowMs={now})
+        guard.modeChanged(true);calling=false;guard.modeChanged(false)
+        now+=800;assertTrue(guard.readyToResume());guard.resumeConsumed()
+        now+=100;guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertTrue(guard.resumePending);assertTrue(guard.isSettlingRetry)
+        guard.resumeConsumed()
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(guard.resumePending)
+    }
+    @Test fun explicitPauseAndExpiredSettlingWindowNeverRestartMusic() {
+        var calling=true;var now=1_000L
+        val guard=CallPlaybackGuard({calling},{},{},{},nowMs={now})
+        guard.modeChanged(true);calling=false;guard.modeChanged(false);guard.resumeConsumed()
+        guard.explicitPause()
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(guard.resumePending)
+        calling=true;guard.modeChanged(true);calling=false;guard.modeChanged(false);guard.resumeConsumed()
+        now+=2_001
+        guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(guard.resumePending)
+    }
+    @Test fun normalModeMustSettleAgainAfterCallModeJitter() {
+        var calling=true;var now=1_000L
+        val guard=CallPlaybackGuard({calling},{},{},{},nowMs={now})
+        guard.modeChanged(true);calling=false;guard.modeChanged(false)
+        now+=500;assertFalse(guard.readyToResume())
+        calling=true;guard.modeChanged(false);calling=false;guard.modeChanged(false)
+        now+=500;assertFalse(guard.readyToResume())
+        now+=250;assertTrue(guard.readyToResume())
+    }
+
+    @Test fun endingCallRestoresManualFocusOverrideOnlyOnceEvenAfterExplicitPause() {
+        var calling=true;val updates=mutableListOf<Boolean>()
+        val guard=CallPlaybackGuard({calling},{},{},{},{updates+=it})
+        guard.explicitPlay();guard.explicitPause()
+        calling=false;guard.modeChanged(false);guard.modeChanged(false)
+        assertEquals(listOf(true,false),updates)
+    }
+
 }

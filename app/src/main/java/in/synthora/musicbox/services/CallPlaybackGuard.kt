@@ -13,7 +13,23 @@ internal class CallPlaybackGuard(
     private val onInterruption: () -> Unit = {}
 ) : Player.Listener {
     private var ownPauseAck = false
+    private var focusOverrideActive = false
+    private fun updateManualFocus(override: Boolean) {
+        if (focusOverrideActive == override) return
+        focusOverrideActive = override
+        manualFocus(override)
+    }
     private var focusLossAt: Long? = null
+    private var normalSince: Long? = null
+    private var settlingUntil = 0L
+    private var settlingRetryUsed = false
+    val isSettlingRetry get() = settlingRetryUsed && resumePending
+    fun readyToResume(): Boolean {
+        if (!resumePending || isInCall()) { normalSince = null; return false }
+        val now = nowMs()
+        val since = normalSince ?: now.also { normalSince = it }
+        return now - since >= 750
+    }
     var resumePending = false
         private set
     var manualDuringCall = false
@@ -24,21 +40,34 @@ internal class CallPlaybackGuard(
     fun explicitPlay() {
         resumePending=false
         focusLossAt=null
+        settlingUntil=0L
+        settlingRetryUsed=false
+        normalSince=null
         cancelResume()
         manualDuringCall=isInCall()
-        manualFocus(manualDuringCall)
+        updateManualFocus(manualDuringCall)
     }
     fun explicitPause() {
         resumePending=false
         focusLossAt=null
+        settlingUntil=0L
+        settlingRetryUsed=false
+        normalSince=null
         manualDuringCall=false
         ownPauseAck=false
         cancelResume()
         // Restoring media focus during a live call can emit a new focus-loss event.
         // Keep an already disabled focus handler idle until the call ends.
-        if(!isInCall()) manualFocus(false)
+        if(!isInCall()) updateManualFocus(false)
     }
-    fun resumeConsumed() { resumePending=false;cancelResume() }
+    fun resumeConsumed() {
+        val now=nowMs()
+        if (now > settlingUntil || settlingUntil == 0L) settlingRetryUsed=false
+        settlingUntil=now+2_000
+        resumePending=false
+        focusLossAt=null
+        cancelResume()
+    }
     private fun remember() { if (!resumePending) { resumePending=true;scheduleResume() } }
     private fun hold() {
         remember() // Notification/foreground retention sees the intent before Pause events.
@@ -47,14 +76,16 @@ internal class CallPlaybackGuard(
     }
     fun modeChanged(wantsPlayback:Boolean) {
         if(isInCall()) {
+            normalSince=null
             if(!manualDuringCall) {
                 if(wantsPlayback) hold()
                 else if(focusLossAt?.let { nowMs()-it in 0..10_000 } == true) remember()
             }
             focusLossAt=null
         } else {
+            if(normalSince == null) normalSince=nowMs()
+            updateManualFocus(false)
             manualDuringCall=false
-            manualFocus(false)
             if(resumePending) scheduleResume()
         }
     }
@@ -74,6 +105,13 @@ internal class CallPlaybackGuard(
                 focusLossAt=nowMs()
                 onInterruption()
                 if(blocksAutomaticPlayback) remember()
+                else if (!isInCall() && settlingUntil > 0 && nowMs() <= settlingUntil && !settlingRetryUsed) {
+                    // Some modem/VoIP stacks deliver the call's final focus loss
+                    // after NORMAL and the first resume. Repair once, bounded
+                    // by this call, without retrying ordinary later focus loss.
+                    settlingRetryUsed=true
+                    remember()
+                }
             }
             !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> explicitPause()
         }
