@@ -117,6 +117,7 @@ fun HomeScreen(
     bottomPadding: Dp = 0.dp,
     jam: `in`.synthora.musicbox.viewmodels.JamViewModel = viewModel()
 ) {
+    val amazonConnected by musicViewModel.echo.amazonConnected.collectAsStateWithLifecycle()
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val jamState by jam.state.collectAsStateWithLifecycle()
     LaunchedEffect(jam) { jam.refresh() }
@@ -135,7 +136,7 @@ fun HomeScreen(
     }
 
     HomeContent(
-        uiState = uiState, alexaStatus = "", bottomPadding = bottomPadding, jamActive = jamState.active,
+        uiState = uiState, alexaStatus = if (amazonConnected == false) "disconnected" else "", bottomPadding = bottomPadding, jamActive = jamState.active,
         onSettingsClick = { haptic.click(); onSettingsClick() }, onRefresh = homeViewModel::refresh,
         onSearchClick = onSearchClick, onOpenItem = onOpenItem,
         onPlayTracks = { tracks, index -> musicViewModel.setQueue(tracks, index) },
@@ -294,7 +295,7 @@ private fun HomeHeader(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.size(44.dp).clip(androidx.compose.ui.graphics.RectangleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh, androidx.compose.ui.graphics.RectangleShape)
-                .then(Modifier.border(1.dp, if (jamActive) Color(0xFF66BB6A) else MaterialTheme.colorScheme.outlineVariant, androidx.compose.ui.graphics.RectangleShape))
+                .then(Modifier.border(1.dp, if (alexaStatus == "disconnected") Color(0xFFF16F65) else if (jamActive) Color(0xFF66BB6A) else MaterialTheme.colorScheme.outlineVariant, androidx.compose.ui.graphics.RectangleShape))
                 .clickable(role = Role.Button, onClick = onSettingsClick)
         ) {
             Icon(Icons.Filled.Person, contentDescription = "Profile", modifier = Modifier.size(24.dp))

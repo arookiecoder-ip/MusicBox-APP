@@ -37,7 +37,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-data class EchoDevice(val serial: String, val name: String, val online: Boolean)
+data class EchoDevice(val serial: String, val name: String, val online: Boolean, val controllable: Boolean = true)
 
 /**
  * Echo playback through the server's web-remote endpoints: device list, now-playing polling
@@ -110,14 +110,14 @@ class EchoController(
         val loggedIn = init["status"].objectOrEmpty().flag("logged_in")
         _amazonConnected.value = loggedIn
         val list = init.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
         _devices.value = list
         val online = list.filter { it.online }
         val chosen = online.firstOrNull { it.serial == saved }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
         if (chosen != _serial.value) setSerial(chosen)
         init["now_playing"]?.let { np -> if (np is JsonObject) apply(np) }
-        return loggedIn && list.any { it.online }
+        return list.any { it.online }
     }
 
     /** Refresh presence without changing playback, artwork or the selected output. */
@@ -125,8 +125,9 @@ class EchoController(
         val epoch = mutationEpoch
         val response = read("/alexa/devices/", emptyMap()).objectOrEmpty()
         if (epoch != mutationEpoch) return
+        response["amazon_connected"]?.let { _amazonConnected.value = response.flag("amazon_connected") }
         _devices.value = response.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
     }
 
@@ -252,6 +253,16 @@ class EchoController(
         val preview = pendingSeek
         val reconciled = preview?.reconcile(parsed, now) ?: parsed
         val accepted = _state.compareAndSet(previous, reconciled)
+        if (accepted) {
+            np["amazon_connected"]?.let { if (it.toString() != "null") _amazonConnected.value = np.flag("amazon_connected") }
+            val shared = parsed.sharedOutput
+            if (shared.mode == "alexa" && np["remote_control_available"]?.toString() == "false" && parsed.playing && shared.serial.isNotBlank()) {
+                val known = _devices.value.firstOrNull { it.serial == shared.serial }
+                _devices.value = _devices.value.filter { it.serial != shared.serial } + EchoDevice(shared.serial, known?.name ?: "Alexa", true, false)
+            } else if (shared.mode == "phone") {
+                _devices.value = _devices.value.filter { it.controllable }
+            }
+        }
         if (accepted && preview != null && reconciled === parsed && pendingSeek === preview)
             pendingSeek = null
         return accepted

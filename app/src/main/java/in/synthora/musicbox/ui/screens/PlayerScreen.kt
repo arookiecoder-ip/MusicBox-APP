@@ -191,6 +191,7 @@ fun PlayerScreen(
     val echoVolume by musicViewModel.echoVolume.collectAsStateWithLifecycle()
     val mobileDevices by musicViewModel.mobileDevices.collectAsStateWithLifecycle()
     val remoteMobileOutput by musicViewModel.remoteMobileOutput.collectAsStateWithLifecycle()
+    val amazonConnected by musicViewModel.echo.amazonConnected.collectAsStateWithLifecycle()
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoSerial by musicViewModel.echo.serial.collectAsStateWithLifecycle()
     val isAlexa = output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.ALEXA
@@ -323,6 +324,7 @@ fun PlayerScreen(
         val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
             MusicUiState(isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
         }
+            Box(Modifier.alpha(if (isAlexa && amazonConnected == false) .4f else 1f)) {
             QueueBottomSheetContent(
                 statusText = when {
                     rec.reserve > 0 -> "${rec.reserve} more songs ready from the radio"
@@ -344,6 +346,7 @@ fun PlayerScreen(
                 onClearPlayed = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.CLEAR_PLAYED) },
                 onSaveAsPlaylist = { musicViewModel.saveQueueAsPlaylist() }
             )
+            }
     }
 
     // Present the shell immediately; use a short, controlled entrance instead of the
@@ -724,6 +727,7 @@ internal fun OutputPickerContent(
     onSelectEcho: (String) -> Unit,
     onRefresh: () -> Unit
 ) {
+    val contextForOutputPicker = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
         Text(
             "Play on",
@@ -740,11 +744,11 @@ internal fun OutputPickerContent(
         }
         devices.filter { it.online }.forEach { device ->
             OutputRow(
-                icon = Icons.Outlined.Speaker, title = device.name,
-                detail = if (device.online) null else "Offline",
+                icon = Icons.Outlined.Speaker, title = device.name + if (!device.controllable) " (logged out)" else "",
+                detail = if (!device.controllable) "Logged out" else if (device.online) null else "Offline",
                 selected = isAlexa && device.serial == selectedSerial,
-                enabled = device.online,
-                onClick = { onSelectEcho(device.serial) }
+                enabled = device.online, readOnly = !device.controllable,
+                onClick = { if (device.controllable) onSelectEcho(device.serial) else android.widget.Toast.makeText(contextForOutputPicker, "Sign in to Amazon to control Alexa.", android.widget.Toast.LENGTH_SHORT).show() }
             )
         }
         TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
@@ -761,6 +765,7 @@ private fun OutputRow(
     detail: String?,
     selected: Boolean,
     enabled: Boolean,
+    readOnly: Boolean = false,
     onClick: () -> Unit
 ) {
     ListItem(
@@ -779,7 +784,7 @@ private fun OutputRow(
             if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
         },
         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, onClick = onClick)
+        modifier = Modifier.fillMaxWidth().alpha(if (enabled && !readOnly) 1f else 0.4f).clickable(enabled = enabled, onClick = onClick)
     )
 }
 

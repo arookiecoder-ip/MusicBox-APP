@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -55,7 +56,7 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
     }
     DisposableEffect(Unit) { onDispose { browser?.stopLoading(); browser?.destroy(); clearCookies() } }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())).stableNavigationBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())).stableNavigationBarsPadding().imePadding()) {
             GlassTopAppBar(
                 title = { Text("Account sign-in") },
                 navigationIcon = {
@@ -67,12 +68,15 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
                     browser = this
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.setSupportZoom(false)
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     manager.setAcceptCookie(true)
                     clearCookies()
-                    Backend.cookieHeaders().forEach { manager.setCookie(server, it) }
+                    val authCookies = Backend.cookieHeaders()
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             val target = request.url.toString()
@@ -80,13 +84,19 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
                             if (!AlexaRemotePolicy.trusted(server, target)) return true
                             val prefix = java.net.URI(server).path.orEmpty().trimEnd('/')
                             val path = request.url.path.orEmpty().removePrefix(prefix)
-                            val allowed = path.startsWith("/alexa/proxy/") || path.startsWith("/youtube-login/")
+                            val allowed = path.startsWith("/alexa/proxy/") || path.startsWith("/youtube-login/") || path == "/accounts/amazon" || path == "/accounts/youtube"
                             // Leaving the sign-in pages means it finished.
                             if (!allowed && request.isForMainFrame) onClose()
                             return !allowed
                         }
                     }
-                    loadUrl(url)
+                    fun installCookie(index: Int) {
+                        if (index >= authCookies.size) {
+                            manager.flush()
+                            loadUrl(url)
+                        } else manager.setCookie(server, authCookies[index]) { installCookie(index + 1) }
+                    }
+                    installCookie(0)
                 }
             })
         }

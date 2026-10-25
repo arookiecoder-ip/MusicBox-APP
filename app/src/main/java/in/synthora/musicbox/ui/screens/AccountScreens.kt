@@ -398,8 +398,8 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
                 detail = state.amazonMessage ?: if (status?.amazonConnected == true) "Controls your Echo devices" else "Needed to play on Echo",
                 ok = status?.amazonConnected,
                 checking = checking && status == null,
-                action = if (status != null && !status.amazonConnected) "Connect" else null,
-                onAction = { showAmazonDialog = true }
+                action = if (status?.amazonConnected == true) "Change account" else "Sign in",
+                onAction = { account.connectAmazon() }
             )
             AccountRow(
                 icon = Icons.Outlined.MusicNote,
@@ -408,7 +408,7 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
                 else "Home shows trending music until you connect",
                 ok = status?.youtubeLibrary,
                 checking = checking && status == null,
-                action = if (status != null && !status.youtubeLibrary) "Connect" else null,
+                action = if (status?.youtubeLibrary == true) "Change account" else "Sign in",
                 onAction = { account.connectYouTube(retry = status?.youtubeReconnectRequired == true) }
             )
             AccountRow(

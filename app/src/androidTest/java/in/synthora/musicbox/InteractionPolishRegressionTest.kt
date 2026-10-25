@@ -29,6 +29,22 @@ class InteractionPolishRegressionTest {
     @get:Rule val compose = createComposeRule()
     private val songs = (1..30).map { Track("s$it", "Song $it", "Artist", durationSec = 180, ytVideoId = "video0000$it") }
 
+    @Test fun loggedOutEchoRemainsVisibleButCannotBeSelectedAndPhoneStillWorks() {
+        var echoSelections = 0
+        var phoneSelections = 0
+        compose.setContent { JUKETheme { OutputPickerContent(
+            isAlexa = true,
+            devices = listOf(EchoDevice("echo-one", "Bedroom", true, false)),
+            mobileDevices = emptyList(), ownDeviceId = "phone", selectedMobileId = null,
+            onSelectMobile = {}, selectedSerial = "echo-one", busy = false,
+            onSelectPhone = { phoneSelections++ }, onSelectEcho = { echoSelections++ }, onRefresh = {}
+        ) } }
+        compose.onNodeWithText("Bedroom (logged out)").performClick()
+        compose.runOnIdle { assertEquals(0, echoSelections) }
+        compose.onNodeWithText("This phone").performClick()
+        compose.runOnIdle { assertEquals(1, phoneSelections) }
+    }
+
     @Test fun speedDialHoldOpensSongOptionsWithoutPlayingOrNavigating() {
         val menu = MediaMenuController()
         var plays = 0; var opens = 0

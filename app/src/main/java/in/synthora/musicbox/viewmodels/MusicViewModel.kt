@@ -1506,6 +1506,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playTrack(track: Track) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("song", buildJsonObject { put("track", kotlinx.serialization.json.Json.encodeToJsonElement(Track.serializer(), track)); put("radio", true) }, requestedTrack = track); return }
         if (isAlexa) {
             launchPlayback(track) { echo.playSong(track, radio = false) }
@@ -1696,6 +1697,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playTrackFromQueue(track: Track, selectedIndex: Int? = null) {
+        if (blockUnavailableAlexaControl()) return
         val index = selectedIndex?.takeIf { uiState.value.queue.getOrNull(it)?.uuid == track.uuid }
             ?: uiState.value.queue.indexOfFirst { it.uuid == track.uuid }
         if (index < 0) return
@@ -1733,6 +1735,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Play [tracks] (a shelf, album, playlist or list) starting at [startIndex]. */
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
+        if (blockUnavailableAlexaControl()) return
         if (startIndex !in tracks.indices) return
         if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)); put("index", startIndex) }, requestedTrack = tracks[startIndex]); return }
         if (isAlexa) {
@@ -2062,7 +2065,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return true
     }
 
+    fun blockUnavailableAlexaControl(): Boolean {
+        if (!isAlexa || echo.amazonConnected.value != false) return false
+        _messages.tryEmit("Sign in to Amazon to control Alexa, or choose another playback device.")
+        return true
+    }
+
     fun togglePlayPause() {
+        if (blockUnavailableAlexaControl()) return
         pendingPlayback.value?.let { selection ->
             if (!selection.loading) {
                 if (selection.track.uuid.startsWith("youtube-link:")) {
@@ -2116,6 +2126,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("shuffle", buildJsonObject {}); return }
         if (isAlexa) {
             launchEcho { echo.shuffle() }
@@ -2127,6 +2138,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleRepeat() {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("repeat", buildJsonObject {}); return }
         if (isAlexa) return
         playbackManager.toggleRepeatMode()
@@ -2173,6 +2185,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Add songs to the end of the queue. */
     fun addToQueue(tracks: List<Track>) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("append", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)) }); return }
         if (tracks.isEmpty()) return
         if (isAlexa) {
@@ -2237,6 +2250,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToNext() {
+        if (blockUnavailableAlexaControl()) return
         clearSelectionForNavigation()
         cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("next"); return }
@@ -2248,6 +2262,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        if (blockUnavailableAlexaControl()) return
         clearSelectionForNavigation()
         cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("previous"); return }
@@ -2259,6 +2274,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seekTo(positionMs: Long) {
+        if (blockUnavailableAlexaControl()) return
         // A failed/new target must never seek the superseded song still in the renderer.
         pendingPlayback.value?.let { if (playbackManager.snapshot.value.currentId != it.track.uuid) return }
         if (isRemotePhone) { remoteControl("seek", buildJsonObject { put("position_ms", positionMs) }); return }
@@ -2320,6 +2336,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 
     fun removeFromQueue(trackId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        if (blockUnavailableAlexaControl()) { onComplete?.invoke(false); return }
         if (isRemotePhone) {
             viewModelScope.launch {
                 try {
@@ -2374,6 +2391,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun moveInQueue(fromIndex: Int, toIndex: Int) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("reorder", buildJsonObject { put("from", fromIndex); put("to", toIndex) }); return }
         if (isAlexa) {
             launchEcho { echo.queueReorder(fromIndex, toIndex) }
@@ -2611,6 +2629,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Power tools for the phone queue. The playing song and its position are untouched. */
     fun applyQueueTool(tool: QueueTool) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("tool", buildJsonObject { put("tool", tool.name) }); return }
         if (isAlexa) {
             if (tool == QueueTool.SHUFFLE_UPCOMING) launchEcho { echo.shuffle() }

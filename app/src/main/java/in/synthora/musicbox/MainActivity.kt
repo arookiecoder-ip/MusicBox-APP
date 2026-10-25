@@ -237,6 +237,9 @@ class MainActivity : ComponentActivity() {
             JUKETheme(
                 extractedColors = themeColors
             ) {
+                accountState.browserUrl?.let { url ->
+                    `in`.synthora.musicbox.ui.screens.AccountBrowser(url, account::browserClosed)
+                }
                 LaunchedEffect(accountState.stage) {
                     when (accountState.stage) {
                         AuthStage.SIGNED_IN -> musicViewModel.onSignedIn()

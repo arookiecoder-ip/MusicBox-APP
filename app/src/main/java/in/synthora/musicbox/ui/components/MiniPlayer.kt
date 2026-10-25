@@ -410,7 +410,7 @@ fun MiniPlayer(
                         },
                         modifier = Modifier
                             .size(40.dp)
-                            .scale(miniPlayScale.value)
+                            .scale(miniPlayScale.value).alexaControlAvailability(musicViewModel)
                     ) {
                         if (uiState.isLoading) {
                             androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
