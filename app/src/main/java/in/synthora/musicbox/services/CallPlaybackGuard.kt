@@ -70,6 +70,7 @@ internal class CallPlaybackGuard(
     }
     private fun remember() { if (!resumePending) { resumePending=true;scheduleResume() } }
     private fun hold() {
+        normalSince=null
         remember() // Notification/foreground retention sees the intent before Pause events.
         ownPauseAck=true
         try { pause() } catch(error:Throwable) { ownPauseAck=false;throw error }
@@ -104,7 +105,7 @@ internal class CallPlaybackGuard(
             !playWhenReady && reason==Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> {
                 focusLossAt=nowMs()
                 onInterruption()
-                if(blocksAutomaticPlayback) remember()
+                if(blocksAutomaticPlayback) { normalSince=null;remember() }
                 else if (!isInCall() && settlingUntil > 0 && nowMs() <= settlingUntil && !settlingRetryUsed) {
                     // Some modem/VoIP stacks deliver the call's final focus loss
                     // after NORMAL and the first resume. Repair once, bounded

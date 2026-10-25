@@ -93,13 +93,16 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
                     settings.allowContentAccess = false
                     settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     manager.setAcceptCookie(true)
+                    manager.setAcceptThirdPartyCookies(this, true)
                     clearCookies()
                     val authCookies = Backend.cookieHeaders()
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             val target = request.url.toString()
                             // Amazon's own pages are proxied through the server, so every page is on it.
-                            if (!AlexaRemotePolicy.trusted(server, target)) return true
+                            if (!AlexaRemotePolicy.trusted(server, target)) {
+                                return request.isForMainFrame || !`in`.synthora.musicbox.network.amazonVerificationFrame(target)
+                            }
                             val prefix = java.net.URI(server).path.orEmpty().trimEnd('/')
                             val path = request.url.path.orEmpty().removePrefix(prefix)
                             val allowed = path.startsWith("/alexa/proxy/") || path.startsWith("/youtube-login/") || path == "/accounts/amazon" || path == "/accounts/youtube"
