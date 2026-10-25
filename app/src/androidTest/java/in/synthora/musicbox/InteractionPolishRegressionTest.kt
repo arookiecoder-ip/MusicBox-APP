@@ -163,7 +163,8 @@ class InteractionPolishRegressionTest {
             swipe(Offset(24.dp.toPx(), height * .8f), Offset(27.dp.toPx(), height * .2f), 400)
         }
         compose.onNodeWithTag("Queue row s1").assertDoesNotExist()
-        compose.onNodeWithText("Song 12").performScrollTo().performTouchInput {
+        compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Song 12"))
+        compose.onNodeWithText("Song 12").performTouchInput {
             down(center); moveBy(Offset(1.dp.toPx(), 1.dp.toPx())); up()
         }
         compose.runOnIdle { assertEquals(1, plays); assertEquals(0, moves); assertEquals(0, removals) }
