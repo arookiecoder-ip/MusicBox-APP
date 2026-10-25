@@ -26,6 +26,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests and debug APK
         run: sh ./gradlew testDebugUnitTest assembleDebug --stacktrace --no-daemon
+      - name: Check release shrinking using optimized debug only
+        if: ${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[readiness]') }}
+        run: |
+          sh ./gradlew :app:assembleOptimizedDebug --no-daemon
+          python3 scripts/verify_apk_components.py app/build/outputs/apk/optimizedDebug/app-optimizedDebug.apk
+      - name: Preserve shrinking readiness mapping
+        if: ${{ always() && github.event_name == 'push' && contains(github.event.head_commit.message, '[readiness]') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimized-debug-readiness
+          path: |
+            app/build/outputs/mapping/optimizedDebug/
+            app/build/outputs/apk/optimizedDebug/
+          if-no-files-found: warn
       - name: Upload JVM test results
         if: always()
         uses: actions/upload-artifact@v4
