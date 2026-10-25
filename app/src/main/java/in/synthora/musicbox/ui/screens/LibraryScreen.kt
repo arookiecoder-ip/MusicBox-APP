@@ -42,7 +42,8 @@ import `in`.synthora.musicbox.network.text
 import `in`.synthora.musicbox.network.metadata
 import `in`.synthora.musicbox.network.BrowseParser
 import `in`.synthora.musicbox.ui.components.CreatePlaylistDialog
-import `in`.synthora.musicbox.ui.components.GlassAlertDialog
+import `in`.synthora.musicbox.ui.components.PlaylistNameDialog
+import `in`.synthora.musicbox.ui.components.PlaylistDeleteDialog
 import `in`.synthora.musicbox.ui.components.GlassFilterChip
 import `in`.synthora.musicbox.ui.components.LocalMediaMenu
 import `in`.synthora.musicbox.ui.components.SearchHeader
@@ -133,9 +134,10 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             if (filter == LibraryFilter.DOWNLOADS) Row(Modifier.padding(bottom = bottomPadding), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                SmallFloatingActionButton(onClick = { if (downloaded.isNotEmpty()) musicViewModel.playDownloaded(downloaded.shuffled(), 0) }) { Icon(Icons.Default.Shuffle, "Shuffle downloads") }
-                FloatingActionButton(onClick = { if (downloaded.isNotEmpty()) musicViewModel.playDownloaded(downloaded, 0) }) { Icon(Icons.Default.PlayArrow, "Play downloads") }
+                SmallFloatingActionButton(shape = androidx.compose.ui.graphics.RectangleShape, onClick = { if (downloaded.isNotEmpty()) musicViewModel.playDownloaded(downloaded.shuffled(), 0) }) { Icon(Icons.Default.Shuffle, "Shuffle downloads") }
+                FloatingActionButton(shape = androidx.compose.ui.graphics.RectangleShape, onClick = { if (downloaded.isNotEmpty()) musicViewModel.playDownloaded(downloaded, 0) }) { Icon(Icons.Default.PlayArrow, "Play downloads") }
             } else FloatingActionButton(
+                shape = androidx.compose.ui.graphics.RectangleShape,
                 onClick = { createPlaylist = true },
                 modifier = Modifier.padding(bottom = bottomPadding),
                 containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -268,17 +270,12 @@ fun LibraryScreen(
     }
     }
     rename?.let { item ->
-        var name by remember(item.id) { mutableStateOf(item.title) }
-        GlassAlertDialog(onDismissRequest = { rename = null }, title = { Text("Rename playlist") },
-            text = { OutlinedTextField(value = name, onValueChange = { name = it }, singleLine = true, label = { Text("Name") }) },
-            confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { libraryViewModel.renamePlaylist(item, name); rename = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { rename = null }) { Text("Cancel") } })
+        PlaylistNameDialog(title = "Rename playlist", initialName = item.title, confirmLabel = "Save",
+            onDismiss = { rename = null }, onConfirm = { libraryViewModel.renamePlaylist(item, it); rename = null })
     }
     delete?.let { item ->
-        GlassAlertDialog(onDismissRequest = { delete = null }, title = { Text("Delete playlist") },
-            text = { Text("Delete '${item.title}' from your YouTube Music account?") },
-            confirmButton = { TextButton(onClick = { libraryViewModel.deletePlaylist(item); delete = null }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { delete = null }) { Text("Cancel") } })
+        PlaylistDeleteDialog(name = item.title, onDismiss = { delete = null },
+            onDelete = { libraryViewModel.deletePlaylist(item); delete = null })
     }
     if (createPlaylist) CreatePlaylistDialog(
         onDismiss = { createPlaylist = false },

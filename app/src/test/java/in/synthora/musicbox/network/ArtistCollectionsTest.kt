@@ -21,4 +21,11 @@ class ArtistCollectionsTest {
         assertEquals("Featured on",artistCollectionTitle("featured"))
         assertEquals("Playlists by artist",artistCollectionTitle("playlists"))
     }
+    @Test fun extraArtistShelvesKeepPlayableTracksAndCollectionTypes() {
+        val data = Json.parseToJsonElement("""{"additionalShelves":[{"title":"Live performances","items":[{"kind":"track","video_id":"abcdefghijk","title":"Live"}]},{"title":"From your library","items":[{"browseId":"MPREalbum"}]},{"title":"Empty","items":[]}]}""") as JsonObject
+        val shelves = artistAdditionalShelves(data)
+        assertEquals(listOf("Live performances","From your library"),shelves.map { it.title })
+        assertEquals("track",shelves[0].items.single().kind)
+        assertEquals("album",shelves[1].items.single().kind)
+    }
 }

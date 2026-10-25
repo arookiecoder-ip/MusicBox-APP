@@ -4,6 +4,13 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.53 (105)
+
+- Match queue surfaces to the navigation dock, refine create/rename/delete playlist dialogs, and use square collection/download floating buttons.
+
+- Preserve additional artist shelves supplied by YouTube Music, including live performances and items from your library, with the correct song, album, artist and playlist actions.
+- Includes the artist playlist/featured shelves, normal song-row spacing and microphone-permission removal from the 2.4.52 feature updates.
+
 ## 2.4.52 (104)
 
 - Reduce extra spacing between artist top-song and video rows.

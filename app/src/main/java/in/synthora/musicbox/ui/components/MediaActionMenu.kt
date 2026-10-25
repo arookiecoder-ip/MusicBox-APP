@@ -63,7 +63,6 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
     var playlists by remember { mutableStateOf<List<BrowseItem>?>(null) }
     var playlistError by remember { mutableStateOf<String?>(null) }
     var create by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
     var deletingCollection by remember { mutableStateOf<`in`.synthora.musicbox.services.DownloadedCollection?>(null) }
     fun resolve(block: suspend () -> Unit) {
         scope.launch {
@@ -200,10 +199,9 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
     }
     saveTrack?.let { selected ->
         if (create) {
-            GlassAlertDialog(shape = RectangleShape, onDismissRequest = { create = false; saveTrack = null }, title = { Text("New playlist") },
-                text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Playlist name") }) },
-                confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { library.createPlaylist(name.trim(), listOf(selected)); create = false; saveTrack = null; name = "" }) { Text("Create") } },
-                dismissButton = { TextButton(onClick = { create = false }) { Text("Back") } })
+            CreatePlaylistDialog(onDismiss = { create = false }, onCreate = { playlistName ->
+                library.createPlaylist(playlistName, listOf(selected)); create = false; saveTrack = null
+            })
         } else {
             AddToPlaylistDialog(playlists, listOf(selected), onDismiss = { saveTrack = null },
                 onAddToPlaylist = { library.addTracksToPlaylist(it, listOf(selected)); saveTrack = null }, onCreatePlaylist = { create = true }, error = playlistError,

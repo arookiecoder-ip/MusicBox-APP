@@ -13,3 +13,11 @@ fun artistCollectionTitle(category: String): String = when (category) {
     "singles" -> "Singles"
     else -> "Albums"
 }
+
+fun artistAdditionalShelves(data: JsonObject): List<BrowseShelf> =
+    data.array("additionalShelves").mapNotNull { raw ->
+        val shelf = raw as? JsonObject ?: return@mapNotNull null
+        val items = artistCollectionItems(shelf, "items")
+        val title = shelf.text("title")
+        if (items.isEmpty() || title.isBlank()) null else BrowseShelf(title, items)
+    }

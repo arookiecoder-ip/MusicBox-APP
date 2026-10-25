@@ -460,7 +460,7 @@ fun PlayerScreen(
         }
         ModalBottomSheet(
             shape = androidx.compose.ui.graphics.RectangleShape,
-            containerColor = `in`.synthora.musicbox.ui.theme.glassSheetColor(),
+            containerColor = `in`.synthora.musicbox.ui.theme.dockColor(),
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
             onDismissRequest = { showQueue = false },
             sheetState = queueSheet,

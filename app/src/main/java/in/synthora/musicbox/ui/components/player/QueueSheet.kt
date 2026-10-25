@@ -98,7 +98,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             delay(16)
         }
     }
-    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).stableNavigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(`in`.synthora.musicbox.ui.theme.dockColor()).stableNavigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -186,7 +186,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Bool
     onPlay: () -> Unit, onLongClick: () -> Unit, onOptions: () -> Unit, options: @Composable BoxScope.() -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val divider = MaterialTheme.colorScheme.outlineVariant
-    Row(Modifier.fillMaxWidth().height(64.dp).background(if (active || lifted) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface)
+    Row(Modifier.fillMaxWidth().height(64.dp).background(if (active || lifted) MaterialTheme.colorScheme.surfaceContainerHigh else `in`.synthora.musicbox.ui.theme.dockColor())
         .drawBehind {
             if (active) drawRect(accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             drawLine(divider, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())

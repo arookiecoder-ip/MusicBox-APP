@@ -105,4 +105,34 @@ class InteractionPolishRegressionTest {
         compose.mainClock.advanceTimeBy(250)
         compose.onNodeWithText("Playlist title").assertDoesNotExist()
     }
+
+    @Test fun playlistCreationTrimsNameRejectsBlankAndSubmitsOnce() {
+        val created = mutableListOf<String>()
+        compose.setContent { JUKETheme { CreatePlaylistDialog(onDismiss = {}, onCreate = { created.add(it) }) } }
+        compose.onNodeWithText("Create").assertIsNotEnabled()
+        compose.onNode(hasSetTextAction()).performTextInput("   ")
+        compose.onNodeWithText("Create").assertIsNotEnabled()
+        compose.onNode(hasSetTextAction()).performTextReplacement("  Late night  ")
+        compose.onNodeWithText("Create").performClick()
+        compose.onNodeWithText("Create").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(listOf("Late night"), created) }
+    }
+
+    @Test fun playlistRenameUsesExistingNameAndImeDone() {
+        val renamed = mutableListOf<String>()
+        compose.setContent { JUKETheme { PlaylistNameDialog("Rename playlist", "Old name", "Save", {}, { renamed.add(it) }) } }
+        compose.onNodeWithText("Save").assertIsNotEnabled()
+        compose.onNode(hasSetTextAction()).performTextReplacement("New name")
+        compose.onNode(hasSetTextAction()).performImeAction()
+        compose.runOnIdle { assertEquals(listOf("New name"), renamed) }
+    }
+
+    @Test fun deletingPlaylistRequiresExplicitConfirmationAndCancelDoesNotDelete() {
+        var deletes = 0; var dismissed = 0
+        compose.setContent { JUKETheme { PlaylistDeleteDialog("My playlist", { dismissed++ }, { deletes++ }) } }
+        compose.onNodeWithText("Cancel").performClick()
+        compose.runOnIdle { assertEquals(1, dismissed); assertEquals(0, deletes) }
+        compose.onNodeWithText("Delete", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals(1, deletes) }
+    }
 }
