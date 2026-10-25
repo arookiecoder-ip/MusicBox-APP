@@ -321,8 +321,8 @@ fun PlayerScreen(
         val queueError by musicViewModel.queueLoadError.collectAsStateWithLifecycle()
         // The queue does not display the playback clock. Keep its inputs stable
         // while progress updates so visible rows are not rebuilt every tick.
-        val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
-            MusicUiState(isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
+        val queueUiState = remember(uiState.isPlaying, uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
+            MusicUiState(isPlaying = uiState.isPlaying, isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
         }
             Box(Modifier.alpha(if (isAlexa && amazonConnected == false) .4f else 1f)) {
             QueueBottomSheetContent(
@@ -560,7 +560,6 @@ fun PlayerHeader(
     var showMenu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onDismiss) { Icon(Icons.Default.KeyboardArrowDown, "Close player") }
-        Text("Now playing", style = MaterialTheme.typography.labelLarge)
         if (showLyrics) IconButton(onClick = onToggleLyrics) { Icon(Icons.Default.Close, "Hide lyrics") }
         else if (showMenuOption) IconButton(onClick = {
             if (track != null && mediaMenu != null) {

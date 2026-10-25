@@ -80,6 +80,7 @@ class QueueRecoveryRegressionTest {
         compose.onNodeWithText("Retry").performClick(); assertTrue(retried)
         compose.onNodeWithContentDescription("Drag to reorder Queue song 1", useUnmergedTree = true).performTouchInput {
             down(center)
+            advanceEventTime(650)
             val distance = 140 * context.resources.displayMetrics.density
             moveBy(androidx.compose.ui.geometry.Offset(0f, distance / 2)); advanceEventTime(32)
             moveBy(androidx.compose.ui.geometry.Offset(0f, distance / 2)); advanceEventTime(100); up()

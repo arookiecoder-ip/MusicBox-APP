@@ -53,11 +53,14 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
     var offset by remember { mutableFloatStateOf(0f) }
     var width by remember { mutableFloatStateOf(0f) }
     var settling by remember { mutableStateOf<Job?>(null) }
+    var removingRow by remember { mutableStateOf(false) }
     Box(modifier.fillMaxWidth().clipToBounds().onSizeChanged { width = it.width.toFloat() }
         .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
+                if (removingRow) return@awaitEachGesture
                 settling?.cancel(); offset = 0f
+                var committed = false
                 var dx = 0f; var dy = 0f; var horizontal = false
                 try {
                     while (true) {
@@ -78,7 +81,8 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                         if (!change.pressed) {
                             if (horizontal && width > 0 && abs(dx) > width * .35f) {
                                 haptic.confirm()
-                                (if (dx < 0) left else right)?.invoke()
+                                committed = true
+                                if (!removing) (if (dx < 0) left else right)?.invoke()
                             }
                             break
                         }
@@ -86,7 +90,20 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                 } finally {
                     // One release animation; no coroutine is launched per pointer sample.
                     val start = offset
-                    if (start != 0f) settling = scope.launch { animate(start, 0f, animationSpec = tween(140)) { value, _ -> offset = value } }
+                    if (committed && removing) {
+                        removingRow = true
+                        settling = scope.launch {
+                            try {
+                                val edge = if (start < 0) -width else width
+                                animate(start, edge, animationSpec = tween(180)) { value, _ -> offset = value }
+                                (if (start < 0) left else right)?.invoke()
+                                // The queue collapses the fully displaced row. If deletion fails
+                                // or a caller retains it, restore it after that collapse window.
+                                animate(0f, 1f, animationSpec = tween(260)) { _, _ -> }
+                                animate(offset, 0f, animationSpec = tween(140)) { value, _ -> offset = value }
+                            } finally { removingRow = false }
+                        }
+                    } else if (start != 0f) settling = scope.launch { animate(start, 0f, animationSpec = tween(140)) { value, _ -> offset = value } }
                 }
             }
         }) {

@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -150,6 +151,99 @@ class InteractionPolishRegressionTest {
         }
         compose.runOnIdle { assertEquals(0, removals) }
         compose.onNodeWithTag("Queue row s1").assertDoesNotExist()
+    }
+
+    @Test fun queueGripScrollsNormallyAndSlightFingerMotionStillSelectsOnce() {
+        var plays = 0
+        var moves = 0
+        var removals = 0
+        compose.setContent { JUKETheme { QueueBottomSheetContent(songs[0], songs, 0, MusicUiState(), {},
+            { _, _ -> moves++ }, { _, done -> removals++; done(true) }, { plays++ }) } }
+        compose.onNodeWithTag("Queue rows").performTouchInput {
+            swipe(Offset(24.dp.toPx(), height * .8f), Offset(27.dp.toPx(), height * .2f), 400)
+        }
+        compose.onNodeWithTag("Queue row s1").assertDoesNotExist()
+        compose.onNodeWithText("Song 12").performScrollTo().performTouchInput {
+            down(center); moveBy(Offset(1.dp.toPx(), 1.dp.toPx())); up()
+        }
+        compose.runOnIdle { assertEquals(1, plays); assertEquals(0, moves); assertEquals(0, removals) }
+    }
+
+    @Test fun queueGripRequiresHoldToReorderWithoutPlayingTheSong() {
+        var queue by mutableStateOf(songs)
+        var moves = 0
+        var plays = 0
+        compose.setContent { JUKETheme { QueueBottomSheetContent(songs[0], queue, 0, MusicUiState(), {},
+            { from, to -> moves++; queue = queue.toMutableList().apply { add(to, removeAt(from)) } },
+            { _, done -> done(true) }, { plays++ }) } }
+        compose.onNodeWithContentDescription("Drag to reorder Song 2", useUnmergedTree = true).performTouchInput {
+            down(center); advanceEventTime(650)
+            moveBy(Offset(0f, 70.dp.toPx())); advanceEventTime(32)
+            moveBy(Offset(0f, 70.dp.toPx())); up()
+        }
+        compose.runOnIdle { assertEquals(1, moves); assertEquals(0, plays); assertTrue(queue.indexOf(songs[1]) > 1) }
+    }
+
+    @Test fun queuePlayingBarsAnimateAndFreezeAfterPause() {
+        var playing by mutableStateOf(true)
+        compose.mainClock.autoAdvance = false
+        compose.setContent { JUKETheme { QueueBottomSheetContent(songs[0], songs, 0,
+            MusicUiState(isPlaying = playing), {}, { _, _ -> }, { _, _ -> }, {}) } }
+        fun pixels(): List<androidx.compose.ui.graphics.Color> {
+            val image = compose.onNodeWithTag("Queue playing bars", useUnmergedTree = true).captureToImage().toPixelMap()
+            return List(image.width * image.height) { image[it % image.width, it / image.width] }
+        }
+        compose.mainClock.advanceTimeBy(64)
+        val start = pixels()
+        compose.mainClock.advanceTimeBy(450)
+        assertNotEquals(start, pixels())
+        compose.runOnIdle { playing = false }
+        compose.mainClock.advanceTimeBy(32)
+        compose.onNodeWithContentDescription("Paused", useUnmergedTree = true).assertExists()
+        val paused = pixels()
+        compose.mainClock.advanceTimeBy(500)
+        assertEquals(paused, pixels())
+    }
+
+    @Test fun queueDeleteFinishesSlidingOffscreenBeforeCallingRemovalAndCanRecover() {
+        var removals = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent { JUKETheme {
+            `in`.synthora.musicbox.ui.components.SwipeToRemoveQueueRow(true, { removals++ }, Modifier.testTag("Delete fixture")) {
+                Box(Modifier.fillMaxWidth().height(64.dp).testTag("Delete foreground")) { Text("Delete song") }
+            }
+        } }
+        val original = compose.onNodeWithTag("Delete foreground").fetchSemanticsNode().boundsInRoot
+        compose.onNodeWithTag("Delete fixture").performTouchInput {
+            swipe(Offset(width * .9f, centerY), Offset(width * .4f, centerY), 180)
+        }
+        compose.runOnIdle { assertEquals(0, removals) }
+        compose.mainClock.advanceTimeBy(208)
+        compose.runOnIdle { assertEquals(1, removals) }
+        val displaced = compose.onNodeWithTag("Delete foreground").fetchSemanticsNode().boundsInRoot
+        assertTrue("Committed row did not slide fully away", displaced.right <= original.left + 2f)
+        // A retained/rejected row returns to its original position and remains tappable.
+        compose.mainClock.advanceTimeBy(500)
+        val restored = compose.onNodeWithTag("Delete foreground").fetchSemanticsNode().boundsInRoot
+        assertEquals(original.left, restored.left, 2f)
+        compose.runOnIdle { assertEquals(1, removals) }
+    }
+
+    @Test fun cookieControlsStayUsableDuringUnrelatedAccountRefreshAndRecoverAfterFailure() {
+        var state by mutableStateOf(`in`.synthora.musicbox.viewmodels.AccountUiState(checkingStatus = true))
+        var checks = 0
+        var replacements = 0
+        compose.setContent { JUKETheme { Column {
+            `in`.synthora.musicbox.ui.screens.DownloadCookieControls(state, { checks++; state = state.copy(cookieBusy = true) }, { replacements++ })
+        } } }
+        compose.onNodeWithText("Replace cookies").assertIsEnabled().performClick()
+        compose.onNodeWithText("Check again").assertIsEnabled().performClick()
+        compose.onNodeWithText("Checking…").assertIsNotEnabled()
+        compose.onNodeWithText("Replace cookies").assertIsNotEnabled()
+        compose.runOnIdle { state = state.copy(cookieBusy = false, cookieMessage = "Audio check timed out. Try again.") }
+        compose.onNodeWithText("Audio check timed out. Try again.").assertIsDisplayed()
+        compose.onNodeWithText("Check again").assertIsEnabled()
+        compose.runOnIdle { assertEquals(1, checks); assertEquals(1, replacements) }
     }
 
     @Test fun configuredOfflineEchoDoesNotShowConnectionInstructions() {

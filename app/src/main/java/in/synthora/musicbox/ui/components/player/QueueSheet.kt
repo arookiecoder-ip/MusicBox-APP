@@ -4,7 +4,8 @@ import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.testTag
@@ -26,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -131,9 +133,10 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                 val editable = queue.isNotEmpty() && !uiState.isQueueOperationInProgress
                 val dragging = draggedKey == key
                 var hidden by remember(key) { mutableStateOf(false) }
+                val latestIndex by rememberUpdatedState(index)
                 val grip = Modifier.size(width = 36.dp, height = 56.dp).pointerInput(key, editable) {
-                    if (editable) detectDragGestures(onDragStart = {
-                        haptics.gestureStart(); origin = index; draggedKey = key; dragDelta = 0f
+                    if (editable) detectDragGesturesAfterLongPress(onDragStart = {
+                        haptics.gestureStart(); origin = latestIndex; draggedKey = key; dragDelta = 0f
                         initialTop = list.layoutInfo.visibleItemsInfo.firstOrNull { it.key == key }?.offset?.toFloat() ?: 0f
                         dragCenter = initialTop + rowHeight / 2
                     }, onDragCancel = { if (draggedKey == key) { draggedKey = null; order = keys } }, onDragEnd = {
@@ -169,7 +172,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                             remove = if (editable && !active) ({ onRemoveTrack(track.uuid) {} }) else null
                         ))
                     }
-                    QueueWebRow(track, position + 1, active, dragging, grip,
+                    QueueWebRow(track, position + 1, active, uiState.isPlaying && !uiState.isLoading, dragging, grip,
                         onPlay = { if (onPlayEntry != null) onPlayEntry(track, index) else onPlayTrack(track) }, onLongClick = ::songOptions, onOptions = ::songOptions) {}
 
                 }
@@ -182,17 +185,19 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
 }
 
 @Composable
-private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Boolean, grip: Modifier,
+private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boolean, lifted: Boolean, grip: Modifier,
     onPlay: () -> Unit, onLongClick: () -> Unit, onOptions: () -> Unit, options: @Composable BoxScope.() -> Unit) {
     val accent = MaterialTheme.colorScheme.primary
     val divider = MaterialTheme.colorScheme.outlineVariant
-    Row(Modifier.fillMaxWidth().height(64.dp).background(if (active || lifted) MaterialTheme.colorScheme.surfaceContainerHigh else `in`.synthora.musicbox.ui.theme.dockColor())
+    Row(Modifier.fillMaxWidth().height(64.dp).background(if (active) accent.copy(alpha = .16f).compositeOver(`in`.synthora.musicbox.ui.theme.dockColor()) else if (lifted) MaterialTheme.colorScheme.surfaceContainerHigh else `in`.synthora.musicbox.ui.theme.dockColor())
         .drawBehind {
             if (active) drawRect(accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             drawLine(divider, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
-        }.combinedClickable(onClick = onPlay, onLongClick = onLongClick, onLongClickLabel = "Song options").padding(horizontal = 8.dp),
+        }.padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Box(grip, contentAlignment = Alignment.Center) { Icon(Icons.Default.DragHandle, "Drag to reorder ${track.title}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
+        Box(grip.clickable(onClick = onPlay), contentAlignment = Alignment.Center) { Icon(Icons.Default.DragHandle, "Drag to reorder ${track.title}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
+        Row(Modifier.weight(1f).fillMaxHeight().combinedClickable(onClick = onPlay, onLongClick = onLongClick,
+            onLongClickLabel = "Song options"), verticalAlignment = Alignment.CenterVertically) {
         Text("$number", Modifier.width(20.dp), style = MaterialTheme.typography.labelSmall, color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             key(track.uuid, track.ytVideoId, track.thumbnailUri) {
@@ -200,7 +205,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Bool
                     Modifier.fillMaxSize().testTag("Queue artwork ${track.uuid}"))
             }
             if (active) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.Equalizer, "Playing", Modifier.size(24.dp), tint = accent)
+                QueuePlayingBars(playing, accent, Modifier.size(24.dp).testTag("Queue playing bars"))
             }
         }
         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
@@ -212,6 +217,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Bool
         Box {
             IconButton(onClick = onOptions, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.MoreVert, "Options for ${track.title}", tint = Color.White) }
             options()
+        }
         }
     }
 }

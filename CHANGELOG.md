@@ -4,6 +4,15 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.61 (113)
+
+- Separate download-cookie checks from account refresh and bound their total wait; keep replacement available during account checks.
+- Remove the redundant now-playing heading while retaining close and song-option controls.
+
+- Let ordinary queue-grip swipes scroll; hold and drag the grip to reorder without opening song options.
+- Strengthen the active queue-row background and animate its artwork bars only during playback.
+- Complete committed delete swipes off-screen before collapsing the row; retained or failed rows return to position.
+
 ## 2.4.60 (112)
 
 - Update existing remote media notifications in place during track and artwork changes instead of requesting another foreground-service start while backgrounded.

@@ -2,6 +2,7 @@ package `in`.synthora.musicbox.network
 
 import io.ktor.http.HttpMethod
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -13,16 +14,20 @@ class DownloadCookies(
     private val request: suspend (HttpMethod, JsonObject?, Boolean) -> JsonElement =
         { method, body, force -> Backend.downloadCookieRequest(method, body, force) }
 ) {
-    suspend fun check(): DownloadCookieResult = result(requestWithRetry(HttpMethod.Get, null, true).objectOrEmpty())
+    suspend fun check(): DownloadCookieResult = result(boundedRequest(HttpMethod.Get, null, true).objectOrEmpty())
 
     suspend fun replace(export: String): DownloadCookieResult {
         require(export.isNotBlank()) { "Paste a Netscape-format cookies.txt export." }
         require(export.toByteArray(Charsets.UTF_8).size <= 128 * 1024) { "Cookie export must be smaller than 128 KB." }
         val normalized = normalizeExport(export)
-        val response = requestWithRetry(HttpMethod.Post, JsonObject(mapOf("cookies" to JsonPrimitive(normalized))), false).objectOrEmpty()
+        val response = boundedRequest(HttpMethod.Post, JsonObject(mapOf("cookies" to JsonPrimitive(normalized))), false).objectOrEmpty()
         check(response.flag("success") && response.flag("valid")) { "The audio test failed. Existing cookies were kept." }
         return result(response)
     }
+
+    private suspend fun boundedRequest(method: HttpMethod, body: JsonObject?, force: Boolean): JsonElement =
+        withTimeoutOrNull(65_000) { requestWithRetry(method, body, force) }
+            ?: throw IllegalStateException("Audio check timed out. Try again when connected. Existing cookies were kept.")
 
     // Canceling a background client request does not stop an already running server probe.
     private suspend fun requestWithRetry(method: HttpMethod, body: JsonObject?, force: Boolean): JsonElement {

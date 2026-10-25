@@ -411,20 +411,7 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
                 action = if (status?.youtubeLibrary == true) "Change account" else "Sign in",
                 onAction = { account.connectYouTube(retry = status?.youtubeReconnectRequired == true) }
             )
-            AccountRow(
-                icon = Icons.Outlined.Cookie,
-                title = "Download cookies",
-                detail = state.cookieMessage ?: if (status?.youtubeCookies == true) "Audio download passed" else "Test audio access or upload replacement cookies",
-                ok = status?.youtubeCookies,
-                checking = state.cookieBusy || state.checkingStatus,
-                action = null,
-                onAction = {}
-            )
-            Text("Audio server: ${Backend.audioBaseUrl}", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Button(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp), onClick = { account.refreshStatus(checkAudio = true) }, enabled = !state.checkingStatus && !state.cookieBusy) { Text(if (state.checkingStatus) "Checking…" else "Check again") }
-                androidx.compose.material3.FilledTonalButton(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp), onClick = { showCookies = true }, enabled = !state.cookieBusy && !state.checkingStatus) { Text("Replace cookies") }
-            }
+            DownloadCookieControls(state, account::testDownloadCookies, { showCookies = true })
         }
     }
 
@@ -508,6 +495,28 @@ private fun DownloadCookiesDialog(state: AccountUiState, account: AccountViewMod
             enabled = !busy && export.isNotBlank()) { Text("Test and save") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } }
     )
+}
+
+/** Audio access is an explicit action, independent of account-library status refresh. */
+@Composable
+internal fun DownloadCookieControls(state: AccountUiState, onCheck: () -> Unit, onReplace: () -> Unit) {
+    AccountRow(
+        icon = Icons.Outlined.Cookie,
+        title = "Download cookies",
+        detail = state.cookieMessage ?: if (state.status?.youtubeCookies == true) "Audio download passed"
+            else "Test audio access or upload replacement cookies",
+        ok = state.status?.youtubeCookies,
+        checking = state.cookieBusy,
+        action = null,
+        onAction = {}
+    )
+    Text("Audio server: ${Backend.audioBaseUrl}", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.Button(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp),
+            onClick = onCheck, enabled = !state.cookieBusy) { Text(if (state.cookieBusy) "Checking…" else "Check again") }
+        androidx.compose.material3.FilledTonalButton(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp),
+            onClick = onReplace, enabled = !state.cookieBusy) { Text("Replace cookies") }
+    }
 }
 
 @Composable
