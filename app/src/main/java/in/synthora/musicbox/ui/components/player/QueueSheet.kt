@@ -101,11 +101,11 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
     Column(Modifier.fillMaxSize().background(`in`.synthora.musicbox.ui.theme.dockColor()).stableNavigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
                 Text("${rows.size} songs", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Box {
-                IconButton(onClick = { toolsOpen = true }) { Icon(Icons.Default.MoreVert, "Queue options") }
+                IconButton(onClick = { toolsOpen = true }) { Icon(Icons.Default.MoreVert, "Queue options", tint = Color.White) }
                 DropdownMenu(toolsOpen, { toolsOpen = false }) {
                     DropdownMenuItem(text = { Text("Shuffle upcoming") }, enabled = upcoming > 1, onClick = { toolsOpen = false; onShuffleUpcoming() })
                     DropdownMenuItem(text = { Text("Sort upcoming") }, enabled = upcoming > 1, onClick = { toolsOpen = false; onSortUpcoming() })
@@ -113,7 +113,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                     DropdownMenuItem(text = { Text("Save queue to playlist") }, onClick = { toolsOpen = false; onSaveAsPlaylist() })
                 }
             }
-            if (showClose) IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close queue") }
+            if (showClose) IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close queue", tint = Color.White) }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         if (uiState.isQueueOperationInProgress) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -210,7 +210,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, lifted: Bool
         }
         if (track.durationSec > 0) Text("%d:%02d".format(track.durationSec / 60, track.durationSec % 60), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box {
-            IconButton(onClick = onOptions, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.MoreVert, "Options for ${track.title}") }
+            IconButton(onClick = onOptions, modifier = Modifier.size(40.dp)) { Icon(Icons.Default.MoreVert, "Options for ${track.title}", tint = Color.White) }
             options()
         }
     }

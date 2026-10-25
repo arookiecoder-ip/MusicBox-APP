@@ -4,6 +4,10 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.57 (109)
+
+- Make the queue heading, queue options, song options and close icon explicitly white on the dark queue surface.
+
 ## 2.4.56 (108)
 
 - Open account sign-in in the actual app account browser, wait for authenticated cookies before loading, and offer account switching for Amazon and YouTube Music. Use responsive dedicated server sign-in pages instead of the VNC viewer.
