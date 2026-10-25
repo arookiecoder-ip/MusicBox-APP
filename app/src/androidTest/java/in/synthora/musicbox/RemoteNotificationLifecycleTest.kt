@@ -106,7 +106,9 @@ class RemoteNotificationLifecycleTest {
                 SystemClock.sleep(150)
                 send(index, if (index < 3) "phone" else "alexa")
                 SystemClock.sleep(500) // Include asynchronous bitmap completion.
-                assertTrue(notifications.activeNotifications.any { it.id == 1002 })
+                assertEquals("Late artwork restored a previous song", tracks[index].title,
+                    notifications.activeNotifications.singleOrNull { it.id == 1002 }?.notification?.extras
+                        ?.getString(android.app.Notification.EXTRA_TITLE))
             }
             assertEquals("Track/artwork refresh restarted the background foreground service", starts,
                 RemoteNotificationDiagnostics.snapshot().count { it.endsWith(":start_command") })

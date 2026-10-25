@@ -67,7 +67,7 @@ class InteractionPolishRegressionTest {
                     compose.waitUntil(5000) { notifications.activeNotifications.any { it.id == 1002 } }
                     instrumentation.runOnMainSync { service.onUpdateNotification(session, false) }
                     compose.waitForIdle()
-                    android.os.SystemClock.sleep(300)
+                    android.os.SystemClock.sleep(600)
                     val retained = notifications.activeNotifications.singleOrNull { it.id == 1002 }
                     assertNotNull("Local session removed $output notification for $title", retained)
                     assertEquals(title, retained!!.notification.extras.getString(android.app.Notification.EXTRA_TITLE))
