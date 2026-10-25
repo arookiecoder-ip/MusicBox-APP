@@ -428,6 +428,7 @@ class RemotePlaybackService : MediaSessionService() {
             pausedForegroundJob = scope.launch {
                 delay(10_000)
                 pausedForegroundJob = null
+                if (holdDestinationHandoff()) return@launch
                 if (!remote.snapshot.playing && !remote.snapshot.loading && !PlaybackCoordinator.notificationLoading.value) {
                     RemoteNotificationDiagnostics.record("pause_grace_expired")
                     // A real sustained pause releases foreground resources, but
