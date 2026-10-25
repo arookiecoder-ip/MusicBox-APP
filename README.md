@@ -2,7 +2,7 @@
 
 Native Android music playback, offline downloads, lyrics and shared control of phones, browsers and Alexa Echo devices.
 
-**Source snapshot:** 2.4.50 (102), `feat/alexa-backend`, reviewed 2026-10-25. Source versions and verified debug builds are not the same as published GitHub releases.
+**Source snapshot:** 2.4.54 (106), `feat/alexa-backend`, reviewed 2026-10-25. Source versions and verified debug builds are not the same as published GitHub releases.
 
 [Changelog](CHANGELOG.md) · [Architecture](ARCHITECTURE.md) · [Published releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) · [Companion backend](https://github.com/arookiecoder-ip/youtube-music-alexa-skill)
 
@@ -13,9 +13,10 @@ Native Android music playback, offline downloads, lyrics and shared control of p
 - **Queue:** explicit row selection starts playback, including from pause; occurrence-bound metadata and stable gestures avoid old-song artwork flashes and missed taps. Failed requests retain the requested song and Retry instead of silently returning to the old song.
 - **Streaming and offline:** start progressive backend audio without waiting for a complete server download. The phone retains the current stream and can warm the next five locally; explicit downloads and collection manifests remain separate and persistent.
 - **Discovery:** native YouTube Music Home, search/suggestions, Explore, account collections and paginated artist/album/playlist pages. Pasted YouTube links wait for submission and then open Now Playing. Radio can build a fresh queue from the current song on every request.
-- **Artists:** on-demand artist portraits; top songs, releases and music-video songs. Videos show a five-song preview and a separate full-list page. These entries use the music playback path; this is not a video-rendering player.
-- **Lyrics:** LRCLib timed lookup, caption/YouTube Music fallbacks, synchronized Now Playing and mini-player presentation, offsets and optional romanization. Tracks without usable timestamps retain plain lyrics.
-- **Interface:** phone/tablet layouts, speed-dial song menus and labels, compact matching navigation/mini-player surfaces, artwork-derived player blends and a changing Home blend. The status-bar fill clears when scrolling back to the top; expanded artist descriptions keep the banner fixed.
+- **Artists:** on-demand artist portraits; top songs, releases, artist playlists, featured-on collections and music-video songs. Additional provider shelves, such as live performances and items from your library, retain their names and item actions; empty shelves stay hidden. Videos show a five-song preview and a separate full-list page. These entries use the music playback path; this is not a video-rendering player.
+- **Lyrics:** timestamp-preserving romanization with damaged-cache repair; LRCLib timed lookup, caption/YouTube Music fallbacks, synchronized Now Playing and mini-player presentation, offsets and optional romanization. Tracks without usable timestamps retain plain lyrics.
+- **Interface:** consistent queue/navigation surfaces, compact create/rename/delete playlist dialogs, square collection/download buttons, phone/tablet layouts, speed-dial song menus and labels, compact matching navigation/mini-player surfaces, artwork-derived player blends and a changing Home blend. The status-bar fill clears when scrolling back to the top; expanded artist descriptions keep the banner fixed.
+- **Permissions:** microphone access is neither requested nor declared in the installed manifest.
 - **Account and tools:** owner login/TOTP, YouTube account and audio-cookie reconnect flows, likes, playlists, artist subscriptions, listening history, Jam sharing and bounded playback/crash diagnostics. Spotify metadata/import and local-library support remain in the codebase.
 
 ## Install an update-compatible build
@@ -24,9 +25,9 @@ Requires **Android 8.0 / API 26 or later**. Current package: `in.synthora.musicb
 
 For the current feature build, use the signed **app-debug** artifact from [Android Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/workflows/android-feature.yml), on `feat/alexa-backend`, with `stable_release=false`.
 
-The [verified 2.4.50 build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897516) contains a debug APK with version code 102. Actions artifacts have finite retention. For published stable packages, check [GitHub Releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) rather than assuming every source version has a release tag.
+The [verified 2.4.54 build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853198) contains a debug APK with version code 106. Actions artifacts have finite retention. For published stable packages, check [GitHub Releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) rather than assuming every source version has a release tag.
 
-Android updates require the same package, the original signing certificate and a compatible version code. The 2.4.50 artifact was checked against 2.4.49. Earlier `com.example.juke` builds have a different package identity. A disposable-key installation also cannot be updated with a differently signed APK.
+Android updates require the same package, the original signing certificate and a compatible version code. The 2.4.54 artifact was checked against the signed 2.4.51 feature build. Earlier `com.example.juke` builds have a different package identity. A disposable-key installation also cannot be updated with a differently signed APK.
 
 The `music-box-review-apk` from Android CI is a review artifact; it does not establish update compatibility. Preserve the feature branch's signing identity and follow [APK signing](.github/signing/README.md). Never replace the key to solve an installation failure.
 
@@ -73,7 +74,7 @@ Available local audio can recover from network interruptions. A DNS failure or a
 
 [Android CI](.github/workflows/android.yml) runs JVM tests and assembles a review APK. [Android Feature Build](.github/workflows/android-feature.yml) produces the signed debug artifact and runs focused protocol/UI regressions on feature pushes. It also exposes optional broader phone/tablet and performance checks.
 
-Verified functional snapshot: **444 JVM tests and 30 API 35 emulator tests passed** in [Android CI](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897537) and [Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897516). The optional broad tablet suite was not part of that run. Test counts describe that commit, not a permanent minimum.
+Verified functional snapshot: **451 JVM tests and 34 API 35 emulator tests passed** in [Android CI](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853247) and [Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853198). The optional broad tablet suite was not part of that run. Test counts describe that commit, not a permanent minimum.
 
 See [architecture](ARCHITECTURE.md), [performance measurement](docs/PERFORMANCE_MEASUREMENT.md), [feature parity](docs/alexa-web-feature-parity.md) and [release/signing history](CHANGELOG.md).
 

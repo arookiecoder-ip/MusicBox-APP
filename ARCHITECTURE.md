@@ -1,10 +1,10 @@
 # Music Box Android architecture
 
-Verified against `feat/alexa-backend` at `22aa629d15a8d6f362d36b20c3dc81695eb7efb0` (2.4.50 / 102), 2026-10-25. [History and PR provenance](CHANGELOG.md) · [Backend architecture](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/ARCHITECTURE.md).
+Verified against `feat/alexa-backend` at `364ab96ad9d7d2eb75f7c898399fb252cc84e71b` (2.4.54 / 106), 2026-10-25. [History and PR provenance](CHANGELOG.md) · [Backend architecture](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/ARCHITECTURE.md).
 
 ## System boundary
 
-Music Box is a native Kotlin/Compose client for a single-owner, multiple-output system. The backend owns shared output selection and queue revisions; the device selected as renderer owns audible playback. A controller phone can display/control browser or Echo playback without rendering that audio locally.
+Music Box is a native Kotlin/Compose client for a single-owner, multiple-output system. The backend owns shared output selection and queue revisions; the device selected as renderer owns audible playback. A controller phone can display/control browser or Echo playback without rendering that audio locally. The backend now gives API and browser services independent bridge networking, with a private gateway that prefers VPN egress and falls back to direct networking. The Android client uses the same HTTPS server origin and does not require an Android VPN service.
 
 ```mermaid
 flowchart LR
@@ -120,23 +120,25 @@ Search suggestions are debounced, JSON-quoted and fenced against stale responses
 
 The first Search navigation emits a focus request. The header establishes Compose focus without an indefinite window-focus wait, retries IME activation after the input connection exists, and retains a live input session across navigation re-taps. Closing/submitting cancels pending shows; old-field cleanup cannot hide a replacement field's keyboard.
 
-`LyricsApi` uses the official `https://lrclib.net/api/search` query contract, metadata cleanup, bounded/rate-limited lookup and timed-result validation. Caption/YouTube Music fallbacks remain; unavailable timestamps mean plain lyrics. `LrcParser` supports multiple/offset/whole/fractional timestamps and malformed-input bounds. Both players share the playback clock and parser, including pause, backward seek and before-first-line behavior. A delayed old-track lookup cannot overwrite a new song or erase newer timed lyrics.
+`LyricsApi` uses the official `https://lrclib.net/api/search` query contract, metadata cleanup, bounded/rate-limited lookup and timed-result validation. Caption/YouTube Music fallbacks remain; unavailable timestamps mean plain lyrics. `LrcParser` supports multiple/offset/whole/fractional timestamps and malformed-input bounds. Both players share the playback clock and parser, including pause, backward seek and before-first-line behavior. Romanization uses the same LRC timestamp grammar, preserves repeated timestamps/offsets and rejects cached romanizations whose timing differs from the original. A delayed old-track lookup cannot overwrite a new song or erase newer timed lyrics.
 
-Artist portraits load only while the picker is open. Artist music-video songs use a five-row preview and a separate paginated `ArtistSongsScreen` mode. Artist changes cancel/fence pagination. Expanding the description does not resize the banner. Scrolling sets a black status-bar fill and returning to the top removes it; that is the app's status area, not control over Android's expanded notification shade.
+Artist portraits load only while the picker is open. Artist music-video songs use a five-row preview and a separate paginated `ArtistSongsScreen` mode. Artist changes cancel/fence pagination. Optional artist playlists, featured-on collections and additional provider shelves retain their item kinds; empty shelves are omitted. Home uses the expanded backend feed without discarding same-title or single-item shelves. Expanding the description does not resize the banner. Scrolling sets a black status-bar fill and returning to the top removes it; that is the app's status area, not control over Android's expanded notification shade.
 
 ## Authentication, build and diagnostics
 
 The account client uses an owner session scoped to the configured HTTPS origin; optional TOTP stays in that login flow. `ALEXA_API_KEY` is empty in current BuildConfig. Audio-only tokens are issued through `/api/app/audio-token/` (two hours for playback, 24 hours for system downloads), checked against live sessions and kept separate from queue/account mutation permissions. Historical skill/global-key compatibility remains on the backend for rollout.
 
-Build identity is `in.synthora.musicbox`, version 2.4.50 / 102, compile/target SDK 36, minimum SDK 26. The historical package rename means earlier `com.example.juke` APKs are not the same Android application. Signing identity must also match for updates. The verified debug certificate is pinned in [.github/signing/debug-certificate.sha256](.github/signing/debug-certificate.sha256).
+Build identity is `in.synthora.musicbox`, version 2.4.54 / 106, compile/target SDK 36, minimum SDK 26. The historical package rename means earlier `com.example.juke` APKs are not the same Android application. Signing identity must also match for updates. The verified debug certificate is pinned in [.github/signing/debug-certificate.sha256](.github/signing/debug-certificate.sha256).
 
 Use [Android Feature Build](.github/workflows/android-feature.yml) on this branch for update-compatible debug APKs, leaving `stable_release=false`. [Android CI](.github/workflows/android.yml) builds review APKs and JVM results. Keep Android compilation in GitHub Actions for this server deployment. The historical release/optimized variants do not turn a current debug artifact into a published stable release.
+
+The merged manifest excludes microphone permission and MainActivity has no microphone permission prompt. Waveform-based playback diagnostics remain optional when unavailable. Queue sheets and inactive rows use the shared dock surface; playlist-name dialogs trim names, reject blanks, support IME submission and fence duplicate submissions. Delete dialogs require explicit confirmation.
 
 Diagnostics retain bounded timing aggregates, anonymous source IDs, sanitized audio failure information and saved crashes. Aggregate server request time, HTTP acknowledgment, first byte, player readiness and audible playback are different metrics. Never derive phone battery percentages or physical Echo latency guarantees from JVM/emulator success.
 
 ## Validation snapshot and extension rules
 
-At this source snapshot, [444 JVM tests](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897537) and [30 API 35 interaction tests](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40127897516) passed. They include queue intermediate frames/touch continuity, failed selection/retry, badge completion races, timed lyrics, real-service simulated calls, keyboard stress, blends, scroll-to-top and artist-video navigation. Optional broad tablet checks were not run in that build.
+At this source snapshot, [451 JVM tests](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853247) and [34 API 35 interaction tests](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853198) passed. They include queue intermediate frames/touch continuity, failed selection/retry, badge completion races, timed lyrics, real-service simulated calls, keyboard stress, blends, scroll-to-top and artist-video navigation. Optional broad tablet checks were not run in that build.
 
 Physical Samsung Android 17 carrier/Bluetooth, frame timing and battery discharge were not certified. A single live Echo seek probe took about 90 ms for HTTP acknowledgment and 3.7 seconds to server confirmation; its longer boundary probe was interrupted by a separate Pause request. Deterministic backend boundary tests pass, but that probe did not prove an audible device transition.
 
