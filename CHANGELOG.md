@@ -4,6 +4,10 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.54 (106)
+
+- Keep playlist-dialog keyboard requests scoped to the dialog window and prevent dismissal from hiding a subsequently opened search keyboard.
+
 ## 2.4.53 (105)
 
 - Match queue surfaces to the navigation dock, refine create/rename/delete playlist dialogs, and use square collection/download floating buttons.

@@ -35,11 +35,12 @@ fun PlaylistNameDialog(title: String, initialName: String = "", confirmLabel: St
     var name by remember(initialName) { mutableStateOf(TextFieldValue(initialName, TextRange(0, initialName.length))) }
     var submitted by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
-    val keyboard = LocalSoftwareKeyboardController.current
     val trimmed = name.text.trim()
     val enabled = trimmed.isNotEmpty() && !submitted && (initialName.isEmpty() || trimmed != initialName.trim())
-    val submit: () -> Unit = { if (enabled && !submitted) { submitted = true; keyboard?.hide(); onConfirm(trimmed) } }
+    val submit: () -> Unit = { if (enabled && !submitted) { submitted = true; onConfirm(trimmed) } }
     PlaylistDialogSurface(onDismiss) {
+        val keyboard = LocalSoftwareKeyboardController.current
+        val window = androidx.compose.ui.platform.LocalWindowInfo.current
         Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(16.dp))
         TextField(value = name, onValueChange = { name = it }, singleLine = true,
@@ -54,7 +55,9 @@ fun PlaylistNameDialog(title: String, initialName: String = "", confirmLabel: St
             TextButton(onClick = onDismiss) { Text("Cancel") }
             Button(onClick = submit, enabled = enabled, shape = RectangleShape) { Text(confirmLabel) }
         }
-        LaunchedEffect(Unit) { withFrameNanos { }; focus.requestFocus(); keyboard?.show() }
+        LaunchedEffect(window.isWindowFocused) {
+            if (window.isWindowFocused) { withFrameNanos { }; focus.requestFocus(); keyboard?.show() }
+        }
     }
 }
 

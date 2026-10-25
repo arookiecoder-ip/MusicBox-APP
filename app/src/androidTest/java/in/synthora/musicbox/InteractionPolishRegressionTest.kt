@@ -108,19 +108,21 @@ class InteractionPolishRegressionTest {
 
     @Test fun playlistCreationTrimsNameRejectsBlankAndSubmitsOnce() {
         val created = mutableListOf<String>()
-        compose.setContent { JUKETheme { CreatePlaylistDialog(onDismiss = {}, onCreate = { created.add(it) }) } }
+        var open by mutableStateOf(true)
+        compose.setContent { JUKETheme { if (open) CreatePlaylistDialog(onDismiss = { open=false }, onCreate = { created.add(it);open=false }) } }
         compose.onNodeWithText("Create").assertIsNotEnabled()
         compose.onNode(hasSetTextAction()).performTextInput("   ")
         compose.onNodeWithText("Create").assertIsNotEnabled()
         compose.onNode(hasSetTextAction()).performTextReplacement("  Late night  ")
         compose.onNodeWithText("Create").performClick()
-        compose.onNodeWithText("Create").assertIsNotEnabled()
+        compose.onNodeWithText("Create").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf("Late night"), created) }
     }
 
     @Test fun playlistRenameUsesExistingNameAndImeDone() {
         val renamed = mutableListOf<String>()
-        compose.setContent { JUKETheme { PlaylistNameDialog("Rename playlist", "Old name", "Save", {}, { renamed.add(it) }) } }
+        var open by mutableStateOf(true)
+        compose.setContent { JUKETheme { if (open) PlaylistNameDialog("Rename playlist", "Old name", "Save", {open=false}, { renamed.add(it);open=false }) } }
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNode(hasSetTextAction()).performTextReplacement("New name")
         compose.onNode(hasSetTextAction()).performImeAction()
@@ -129,10 +131,32 @@ class InteractionPolishRegressionTest {
 
     @Test fun deletingPlaylistRequiresExplicitConfirmationAndCancelDoesNotDelete() {
         var deletes = 0; var dismissed = 0
-        compose.setContent { JUKETheme { PlaylistDeleteDialog("My playlist", { dismissed++ }, { deletes++ }) } }
+        var open by mutableStateOf(true)
+        compose.setContent { JUKETheme { if (open) PlaylistDeleteDialog("My playlist", { dismissed++;open=false }, { deletes++;open=false }) } }
         compose.onNodeWithText("Cancel").performClick()
-        compose.runOnIdle { assertEquals(1, dismissed); assertEquals(0, deletes) }
+        compose.runOnIdle { assertEquals(1, dismissed); assertEquals(0, deletes);open=true }
         compose.onNodeWithText("Delete", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals(1, deletes) }
+    }
+
+    @Test fun closingPlaylistDialogCannotHideNewSearchKeyboard() {
+        var dialog by mutableStateOf(true)
+        var search by mutableStateOf(false)
+        var query by mutableStateOf("")
+        lateinit var view: android.view.View
+        compose.setContent { JUKETheme {
+            view=androidx.compose.ui.platform.LocalView.current
+            Column {
+                if (!dialog) Button({search=true}) { Text("Search after playlist") }
+                SearchHeader("Search",query,{query=it},search,{search=it},"Find songs")
+            }
+            if (dialog) CreatePlaylistDialog({dialog=false},{dialog=false})
+        } }
+        compose.onNode(hasSetTextAction()).performTextInput("Playlist")
+        compose.onNodeWithText("Create").performClick()
+        compose.onNodeWithText("Search after playlist").performClick()
+        compose.waitUntil(7000) {
+            androidx.core.view.ViewCompat.getRootWindowInsets(view)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())==true
+        }
     }
 }
