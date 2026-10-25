@@ -1672,11 +1672,13 @@ class PlaybackService : MediaLibraryService() {
         // adopts the normal local media notification as soon as audio actually starts.
         if (holdSongPreparationNotification()) return
         if (remoteForegroundBridge) {
-            if (holdNotificationHandoff()) return
+            // RemotePlaybackService owns notification 1002. Local session updates
+            // (including track transitions) must not detach or remove its bridge.
+            if (outputPrefs.getString("playback_output", "PHONE") != "PHONE" || holdNotificationHandoff()) return
             remoteForegroundBridge = false
         }
         if (outputPrefs.getString("playback_output", "PHONE") != "PHONE") {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopForeground(STOP_FOREGROUND_DETACH)
             getSystemService(NotificationManager::class.java).cancel(1)
             return
         }

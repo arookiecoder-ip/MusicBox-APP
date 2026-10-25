@@ -4,6 +4,11 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.59 (111)
+
+- Preserve remote playback notifications when the local media session updates during track changes; local cleanup no longer removes remote-owned controls.
+- Make the floating collection play button circular with an explicit white play icon.
+
 ## 2.4.58 (110)
 
 - Wait for stable post-call audio mode, recover once from a delayed call focus-loss callback, and preserve explicit pause/output/song changes and other apps’ playback.

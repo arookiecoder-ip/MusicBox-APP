@@ -60,7 +60,7 @@ fun AdaptiveDetailLayout(bottomPadding: Dp, spacing: Dp = 0.dp, onFloatingPlay: 
             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = bottomPadding + 16.dp),
             enter = fadeIn(tween(220)) + scaleIn(tween(260), initialScale = .92f),
             exit = fadeOut(tween(180)) + scaleOut(tween(180), targetScale = .92f)) {
-            FloatingActionButton(onClick = { onFloatingPlay?.invoke() }, shape = androidx.compose.ui.graphics.RectangleShape, modifier = Modifier.size(68.dp).testTag("Floating collection play")) {
+            FloatingActionButton(onClick = { onFloatingPlay?.invoke() }, shape = CircleShape, contentColor = androidx.compose.ui.graphics.Color.White, modifier = Modifier.size(68.dp).testTag("Floating collection play")) {
                 Icon(Icons.Rounded.PlayArrow, "Play collection", Modifier.size(36.dp))
             }
         }

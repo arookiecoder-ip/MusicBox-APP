@@ -29,6 +29,59 @@ class InteractionPolishRegressionTest {
     @get:Rule val compose = createComposeRule()
     private val songs = (1..30).map { Track("s$it", "Song $it", "Artist", durationSec = 180, ytVideoId = "video0000$it") }
 
+    @Test fun localSessionUpdatesCannotRemoveRemoteTrackNotifications() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val prefs = context.getSharedPreferences("music_settings_prefs", android.content.Context.MODE_PRIVATE)
+        val savedOutput = prefs.getString("playback_output", null)
+        val notifications = context.getSystemService(android.app.NotificationManager::class.java)
+        val channel = "remote-notification-regression"
+        notifications.createNotificationChannel(android.app.NotificationChannel(channel, "Remote playback test", android.app.NotificationManager.IMPORTANCE_LOW))
+        compose.setContent { Text("Remote notification fixture") }
+        lateinit var future: com.google.common.util.concurrent.ListenableFuture<androidx.media3.session.MediaController>
+        instrumentation.runOnMainSync {
+            future = androidx.media3.session.MediaController.Builder(context, androidx.media3.session.SessionToken(context,
+                android.content.ComponentName(context, `in`.synthora.musicbox.services.PlaybackService::class.java))).buildAsync()
+        }
+        val controller = future.get(20, java.util.concurrent.TimeUnit.SECONDS)
+        try {
+            val serviceClass = `in`.synthora.musicbox.services.PlaybackService::class.java
+            val service = (serviceClass.getDeclaredField("activeService").apply { isAccessible = true }.get(null)
+                as java.lang.ref.WeakReference<*>).get() as `in`.synthora.musicbox.services.PlaybackService
+            val session = serviceClass.getDeclaredField("mediaSession").apply { isAccessible = true }.get(service)
+                as androidx.media3.session.MediaSession
+            for (output in listOf("ALEXA", "REMOTE_PHONE")) {
+                prefs.edit().putString("playback_output", output).commit()
+                for (title in listOf("Song A", "Song B")) {
+                    val notification = androidx.core.app.NotificationCompat.Builder(context, channel)
+                        .setSmallIcon(android.R.drawable.ic_media_play).setContentTitle(title).setOngoing(true).build()
+                    instrumentation.runOnMainSync {
+                        `in`.synthora.musicbox.services.PlaybackService.joinRemoteForeground(notification)
+                    }
+                    compose.waitUntil(5000) { notifications.activeNotifications.any { it.id == 1002 } }
+                    instrumentation.runOnMainSync { service.onUpdateNotification(session, false) }
+                    compose.waitForIdle()
+                    android.os.SystemClock.sleep(300)
+                    val retained = notifications.activeNotifications.singleOrNull { it.id == 1002 }
+                    assertNotNull("Local session removed $output notification for $title", retained)
+                    assertEquals(title, retained!!.notification.extras.getString(android.app.Notification.EXTRA_TITLE))
+                }
+                instrumentation.runOnMainSync {
+                    `in`.synthora.musicbox.services.PlaybackService.leaveRemoteForeground(force = true)
+                }
+                notifications.cancel(1002)
+            }
+        } finally {
+            instrumentation.runOnMainSync {
+                `in`.synthora.musicbox.services.PlaybackService.leaveRemoteForeground(force = true)
+                controller.release()
+            }
+            notifications.cancel(1002)
+            notifications.deleteNotificationChannel(channel)
+            prefs.edit().apply { if (savedOutput == null) remove("playback_output") else putString("playback_output", savedOutput) }.commit()
+        }
+    }
+
     @Test fun loggedOutEchoRemainsVisibleButCannotBeSelectedAndPhoneStillWorks() {
         var echoSelections = 0
         var phoneSelections = 0
