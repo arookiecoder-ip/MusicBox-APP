@@ -57,7 +57,7 @@ fun ArtistDetailScreen(
                 }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
             }
             state.isLoading || artist == null -> MediaDetailSkeleton(modifier = Modifier.stableStatusBarsPadding(), contentPadding = PaddingValues(20.dp), bottomPadding = bottomPadding)
-            else -> AdaptiveDetailLayout(bottomPadding = bottomPadding, spacing = 16.dp, hero = {
+            else -> AdaptiveDetailLayout(bottomPadding = bottomPadding, spacing = 0.dp, hero = {
                     DetailHero(state.imageUrl, artist = true) {
                     Column(Modifier.fillMaxWidth().heightIn(min = LocalDetailPaneHeight.current ?: 380.dp).padding(top = 170.dp, start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.Bottom) {
                         Text(artist.title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
@@ -81,7 +81,7 @@ fun ArtistDetailScreen(
             }) {
                 state.error?.let { error -> item { Text(error, Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.error) } }
                 if (state.topTracks.isNotEmpty()) {
-                    item { Text("Top songs", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge) }
+                    item { Text("Top songs", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge) }
                     itemsIndexed(state.topTracks.take(5), key = { index, track -> "$index-${track.ytVideoId}" }) { index, track ->
                         SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
                             FlatTrackRow(track.thumbnailUri, track.title, track.artist, if (track.durationSec > 0) "%d:%02d".format(track.durationSec / 60, track.durationSec % 60) else "", onClick = { musicViewModel.startRadio(track) }, modifier = Modifier.padding(horizontal = 20.dp), track = track)
@@ -94,7 +94,7 @@ fun ArtistDetailScreen(
                     }
                 }
                 if (state.videos.isNotEmpty()) {
-                    item(key = "videos-heading") { Text("Music videos", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge) }
+                    item(key = "videos-heading") { Text("Music videos", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge) }
                     items(state.videos.take(5), key = { "video-${it.ytVideoId}" }) { track ->
                         SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
                             FlatTrackRow(track.thumbnailUri, track.title, track.artist,
@@ -110,7 +110,7 @@ fun ArtistDetailScreen(
                     if (releases.isEmpty()) return
                     item(key = title) {
                         Column {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                                 IconButton(onClick = { onShowAllReleases(kind) }) {
                                     Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowForward, "Show all $title")
@@ -132,7 +132,7 @@ fun ArtistDetailScreen(
                 releases("Featured on", state.featured, "featured", state.featured.size > 5)
                 if (state.related.isNotEmpty()) item(key = "related") {
                     Column {
-                        Text("Related artists", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge)
+                        Text("Related artists", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(12.dp))
                         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(state.related, key = { it.id }) { related -> ArtistCard(related, onClick = { onNavigateToArtist(related) }) }

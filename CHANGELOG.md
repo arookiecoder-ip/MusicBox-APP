@@ -6,6 +6,7 @@ Entries below distinguish source/debug builds from published releases. Dates fol
 
 ## 2.4.52 (104)
 
+- Reduce extra spacing between artist top-song and video rows.
 - Show playlists by the artist and featured-on collections on artist pages when available, with full collection navigation and empty-shelf handling.
 
 ## 2.4.51 (103)
