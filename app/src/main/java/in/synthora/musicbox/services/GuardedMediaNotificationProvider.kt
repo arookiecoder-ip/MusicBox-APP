@@ -17,14 +17,18 @@ internal class GuardedMediaNotificationProvider(
     private val active: () -> Boolean,
     private val onDenied: () -> Unit,
     private val onRecoveryUpdate: () -> Boolean = { false },
-    private val onUpdated: () -> Unit = {}
+    private val onUpdated: () -> Unit = {},
+    private val publishForegroundUpdate: (MediaNotification) -> Boolean = { false }
 ) : MediaNotification.Provider {
     private val main = Handler(Looper.getMainLooper())
     override fun createNotification(session: MediaSession, buttons: ImmutableList<CommandButton>,
         actions: MediaNotification.ActionFactory, callback: MediaNotification.Provider.Callback): MediaNotification =
         delegate.createNotification(session, buttons, actions) { notification ->
             main.post {
-                deliverNotificationUpdate({ if (!onRecoveryUpdate()) { callback.onNotificationChanged(notification); onUpdated() } },
+                deliverNotificationUpdate({ if (!onRecoveryUpdate()) {
+                        if (!publishForegroundUpdate(notification)) callback.onNotificationChanged(notification)
+                        onUpdated()
+                    } },
                     { Build.VERSION.SDK_INT >= 31 && it is android.app.ForegroundServiceStartNotAllowedException }, onDenied, active)
             }
         }

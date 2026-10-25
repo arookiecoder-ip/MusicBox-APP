@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 111
-        versionName = "2.4.59"
+        versionCode = 112
+        versionName = "2.4.60"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

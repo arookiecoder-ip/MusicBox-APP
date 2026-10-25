@@ -55,6 +55,8 @@ object Diagnostics {
             `in`.synthora.musicbox.services.PlaybackDiagnostics.recentAudioTransfers().forEach { appendLine("  $it") }
             appendLine("Recent playback events (elapsed time, anonymous source IDs, state/reason and cursor):")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.recentPlaybackEvents().forEach { appendLine("  $it") }
+            appendLine("Remote notification lifecycle:")
+            `in`.synthora.musicbox.services.RemoteNotificationDiagnostics.snapshot().forEach { appendLine("  $it") }
             appendLine("Playback timings:")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.snapshot().forEach { (stage, value) ->
                 appendLine("  $stage: $value")
