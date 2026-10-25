@@ -171,6 +171,8 @@ class InteractionPolishRegressionTest {
             down(center); moveBy(Offset(1.dp.toPx(), 1.dp.toPx())); up()
         }
         compose.runOnIdle { assertEquals(1, plays); assertEquals(0, moves); assertEquals(0, removals) }
+        compose.onNodeWithTag("Queue row s12").performTouchInput { click(Offset(2.dp.toPx(), centerY)) }
+        compose.runOnIdle { assertEquals(2, plays); assertEquals(0, moves); assertEquals(0, removals) }
     }
 
     @Test fun queueGripRequiresHoldToReorderWithoutPlayingTheSong() {

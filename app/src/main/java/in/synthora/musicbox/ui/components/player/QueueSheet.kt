@@ -193,7 +193,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boo
         .drawBehind {
             if (active) drawRect(accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             drawLine(divider, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())
-        }.padding(horizontal = 8.dp),
+        }.clickable(onClick = onPlay).padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(grip.clickable(onClick = onPlay), contentAlignment = Alignment.Center) { Icon(Icons.Default.DragHandle, "Drag to reorder ${track.title}", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) }
         Row(Modifier.weight(1f).fillMaxHeight().combinedClickable(onClick = onPlay, onLongClick = onLongClick,
