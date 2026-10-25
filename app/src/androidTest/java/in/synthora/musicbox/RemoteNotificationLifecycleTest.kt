@@ -137,6 +137,11 @@ class RemoteNotificationLifecycleTest {
             send(4, "alexa")
             SystemClock.sleep(300)
             assertTrue("Background resume removed retained controls", notifications.activeNotifications.any { it.id == 1002 })
+            instrumentation.runOnMainSync {
+                apply.invoke(service, EchoState(track = tracks.last(), queue = tracks, index = 4,
+                    playing = false, confirmed = true, durationMs = 180_000,
+                    sharedOutput = SharedPlaybackOutput(mode = "alexa", owner = "fixture", token = "fixture", epoch = "fixture")))
+            }
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             val mediaIntent = Intent(context, RemotePlaybackService::class.java).setAction(Intent.ACTION_MEDIA_BUTTON)
                 .putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_UNKNOWN))
@@ -149,6 +154,13 @@ class RemoteNotificationLifecycleTest {
                 ongoing
             }
             assertTrue(RemoteNotificationDiagnostics.snapshot().any { it.endsWith(":user_media_promotion") })
+            SystemClock.sleep(10_500)
+            until("Unfulfilled media action retained foreground indefinitely") {
+                var ongoing = true
+                instrumentation.runOnMainSync { ongoing = service.isPlaybackOngoing }
+                !ongoing
+            }
+            assertTrue(notifications.activeNotifications.any { it.id == 1002 })
         } finally {
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             context.stopService(intent)

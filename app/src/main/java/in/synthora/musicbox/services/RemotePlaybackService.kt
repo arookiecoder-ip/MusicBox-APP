@@ -165,7 +165,10 @@ class RemotePlaybackService : MediaSessionService() {
             // Media3's paused Play action uses PendingIntent.getForegroundService.
             // Fulfil that user-authorized start before its network command runs.
             RemoteNotificationDiagnostics.record("user_media_promotion")
-            try { session?.let { super.onUpdateNotification(it, true) } }
+            try {
+                session?.let { super.onUpdateNotification(it, true) }
+                if (isPlaybackOngoing) retainForegroundAcrossReceiverPause()
+            }
             catch (error: Exception) {
                 if (android.os.Build.VERSION.SDK_INT >= 31 && error is android.app.ForegroundServiceStartNotAllowedException)
                     onRemoteForegroundDenied()
