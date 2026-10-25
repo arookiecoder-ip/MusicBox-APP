@@ -313,19 +313,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-                val visualizerPermission = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-                val playingFlow = remember(musicViewModel) { musicViewModel.uiState.map { it.isPlaying }.distinctUntilChanged() }
-                val watchdogPlaying by playingFlow.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.isPlaying)
-                LaunchedEffect(watchdogPlaying) {
-                    if (watchdogPlaying && musicViewModel.output.value == `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE &&
-                        ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                        val prefs = getSharedPreferences("audio_visualizer_permission", MODE_PRIVATE)
-                        if (!prefs.getBoolean("requested", false)) {
-                            prefs.edit().putBoolean("requested", true).apply()
-                            visualizerPermission.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    }
-                }
                 val activeDownloads by musicViewModel.downloads.status.collectAsStateWithLifecycle()
                 val currentOutput by musicViewModel.output.collectAsStateWithLifecycle()
                 LaunchedEffect(activeDownloads.active > 0, currentOutput) {
