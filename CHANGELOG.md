@@ -7,6 +7,7 @@ Entries below distinguish source/debug builds from published releases. Dates fol
 ## 2.4.59 (111)
 
 - Preserve remote playback notifications when the local media session updates during track changes; local cleanup no longer removes remote-owned controls.
+- Keep remote controls buffering through unconfirmed track changes, with a bounded timeout; confirmed pause, stop and receiver changes remain authoritative.
 - Make the floating collection play button circular with an explicit white play icon.
 
 ## 2.4.58 (110)

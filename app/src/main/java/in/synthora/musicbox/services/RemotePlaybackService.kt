@@ -47,6 +47,7 @@ class RemotePlaybackService : MediaSessionService() {
     private var boundaryPreview: RemoteTrackEndPreview? = null
     private var attemptedBoundary: String? = null
     private var authoritativeSnapshot: EchoState? = null
+    private val notificationTransition = RemoteNotificationTransition()
     private var boundaryArtworkJob: Job? = null
     private var boundaryArtworkKey: String? = null
     private var localServiceAnchor: ListenableFuture<androidx.media3.session.MediaController>? = null
@@ -192,7 +193,7 @@ class RemotePlaybackService : MediaSessionService() {
             boundaryPreview = null
             boundaryConfirmationJob?.cancel(); boundaryConfirmationJob = null
         }
-        remote.snapshot = boundaryPreview?.present(state) ?: state
+        remote.snapshot = notificationTransition.present(boundaryPreview?.present(state) ?: state, now)
         remote.refresh(); updateLike()
         boundaryJob?.cancel(); boundaryJob = null
         if (boundaryPreview != null || PlaybackCoordinator.notificationLoading.value) return
