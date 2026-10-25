@@ -276,7 +276,9 @@ fun PlayerScreen(
         // times; successful lines are cached in memory, so a retry only re-asks for the failures.
         for (attempt in 0..3) {
             if (attempt > 0) delay(5_000L * attempt)
-            val romanizedSynced = currentTrack.romanizedSyncedLyrics?.takeIf(complete)
+            val romanizedSynced = currentTrack.romanizedSyncedLyrics?.takeIf {
+                LyricsRomanizer.isValidSyncedRomanization(currentTrack.syncedLyrics.orEmpty(), it)
+            }
                 ?: currentTrack.syncedLyrics?.let { LyricsRomanizer.romanizeSyncedLyrics(it) }
             val romanizedPlain = currentTrack.romanizedPlainLyrics?.takeIf(complete)
                 ?: currentTrack.plainLyrics?.let { LyricsRomanizer.romanizeText(it) }
