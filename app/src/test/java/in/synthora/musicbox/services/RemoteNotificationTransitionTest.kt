@@ -5,8 +5,8 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RemoteNotificationTransitionTest {
-    private val first = Track("a", "Song A", "Artist")
-    private val second = Track("b", "Song B", "Artist")
+    private val first = Track("a", "Song A", "Artist", durationSec = 180)
+    private val second = Track("b", "Song B", "Artist", durationSec = 200)
     private fun active(mode: String) = EchoState(track = first, playing = true, confirmed = true,
         sharedOutput = SharedPlaybackOutput(mode = mode, owner = "receiver", token = "lease", serial = "echo", epoch = "server"))
 
