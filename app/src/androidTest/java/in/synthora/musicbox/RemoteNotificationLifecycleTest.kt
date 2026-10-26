@@ -22,6 +22,8 @@ import org.junit.Rule
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.*
+import kotlinx.serialization.json.*
 
 @UnstableApi
 class RemoteNotificationLifecycleTest {
@@ -175,6 +177,95 @@ class RemoteNotificationLifecycleTest {
                     else -> remove(key)
                 } }
             }.commit()
+        }
+    }
+
+    @Test fun backgroundPollingUpdatesAndroidMediaSessionAndNotificationWithoutReopeningApp() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val prefs = context.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE)
+        val saved = listOf("playback_output", "echo_serial", "remote_controls_dismissed").associateWith { prefs.all[it] }
+        prefs.edit().putString("playback_output", "ALEXA").putString("echo_serial", "poll-fixture")
+            .putBoolean("remote_controls_dismissed", false).commit()
+        val fixtureScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val stage = java.util.concurrent.atomic.AtomicInteger(0)
+        val reads = java.util.concurrent.atomic.AtomicInteger(0)
+        fun snapshot(): JsonObject {
+            val index = stage.get()
+            return buildJsonObject {
+                put("video_id", "poll-$index"); put("title", "Poll song $index"); put("artist", "Fixture artist")
+                put("playing", true); put("playback_confirmed", true); put("playback_processing", false)
+                put("duration_ms", 180_000); put("position_ms", 1000); put("queue_index", 0)
+                put("queue_version", index + 1); put("playback_revision", index + 1)
+                put("playback_output", "alexa"); put("output_serial", "poll-fixture")
+                put("output_epoch", "poll-fixture"); put("output_token", "fixture"); put("output_revision", 1)
+                putJsonArray("queue") { add(buildJsonObject {
+                    put("video_id", "poll-$index"); put("title", "Poll song $index"); put("artist", "Fixture artist")
+                    put("entry_id", "poll-entry-$index"); put("duration_ms", 180_000)
+                }) }
+            }
+        }
+        val fake = EchoController(fixtureScope, prefs, {}, { error("Fixture unexpectedly signed out") },
+            read = { path, _ ->
+                if (path == "/alexa/now_playing/") { reads.incrementAndGet(); snapshot() }
+                else buildJsonObject { put("volume", 40) }
+            }, write = { _, _ -> error("The poll fixture must never send playback commands") })
+        val controllerField = PlaybackCoordinator::class.java.getDeclaredField("controller").apply { isAccessible = true }
+        val savedController = controllerField.get(null)
+        instrumentation.runOnMainSync {
+            (savedController as? EchoController)?.stopPolling()
+            controllerField.set(null, fake)
+        }
+        compose.setContent { Text("Background polling fixture") }
+        val connected = CountDownLatch(1)
+        lateinit var service: RemotePlaybackService
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+                service = (binder.javaClass.getDeclaredField("serviceReference").apply { isAccessible = true }.get(binder)
+                    as java.lang.ref.WeakReference<*>).get() as RemotePlaybackService
+                connected.countDown()
+            }
+            override fun onServiceDisconnected(name: ComponentName) {}
+        }
+        val intent = Intent(context, RemotePlaybackService::class.java).setAction(MediaSessionService.SERVICE_INTERFACE)
+        assertTrue(context.bindService(intent, connection, Context.BIND_AUTO_CREATE))
+        fun until(message: String, condition: () -> Boolean) {
+            val deadline = SystemClock.elapsedRealtime() + 15_000
+            while (SystemClock.elapsedRealtime() < deadline) {
+                if (condition()) return
+                SystemClock.sleep(50)
+            }
+            fail("$message; reads=${reads.get()}; lifecycle=${RemoteNotificationDiagnostics.snapshot()}")
+        }
+        try {
+            assertTrue(connected.await(10, TimeUnit.SECONDS))
+            val notifications = context.getSystemService(NotificationManager::class.java)
+            fun note() = notifications.activeNotifications.singleOrNull { it.id == 1002 }?.notification
+            until("Initial polled notification missing") { note()?.extras?.getString(android.app.Notification.EXTRA_TITLE) == "Poll song 0" }
+            compose.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
+            until("Fixture did not enter background") { !ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) }
+            stage.set(1)
+            until("Background receiver was not polled") { fake.state.value.track?.title == "Poll song 1" }
+            until("New polled metadata never reached the notification") { note()?.extras?.getString(android.app.Notification.EXTRA_TITLE) == "Poll song 1" }
+            val token = note()!!.extras.getParcelable<android.media.session.MediaSession.Token>(android.app.Notification.EXTRA_MEDIA_SESSION)
+            assertNotNull("Notification lost its Android media-session token", token)
+            val platform = android.media.session.MediaController(context, token!!)
+            until("Android's media card still points at the previous song") {
+                platform.metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE) == "Poll song 1"
+            }
+            assertTrue(reads.get() >= 2)
+        } finally {
+            compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+            instrumentation.runOnMainSync { PlaybackCoordinator.observe(context, "notification", false); fake.stopPolling() }
+            context.stopService(intent); context.unbindService(connection)
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync { controllerField.set(null, savedController) }
+            fixtureScope.cancel()
+            prefs.edit().apply { saved.forEach { (key, value) -> when (value) {
+                is String -> putString(key, value)
+                is Boolean -> putBoolean(key, value)
+                else -> remove(key)
+            } } }.commit()
         }
     }
 
