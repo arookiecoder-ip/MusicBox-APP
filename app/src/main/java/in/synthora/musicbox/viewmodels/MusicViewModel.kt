@@ -1066,7 +1066,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             updatePolling()
-        } else if (output.mode == "alexa" && !isAlexa && echo.serial.value.isNotBlank()) adoptRemoteAlexa(output)
+        } else if (`in`.synthora.musicbox.services.shouldFollowAlexa(output, echo.serial.value, isAlexa)) adoptRemoteAlexa(output)
     }
 
     private suspend fun onMobileCommand(action: String, payload: JsonObject) {

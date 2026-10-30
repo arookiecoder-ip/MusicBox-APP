@@ -31,3 +31,10 @@ internal fun canRetryPhoneCommand(previous: SharedPlaybackOutput, current: Share
 /** Closing a task must not interpret its still-live server token as a new transfer. */
 internal fun dismissedPhoneOutput(output: SharedPlaybackOutput, ownerId: String, dismissedToken: String): Boolean =
     output.mode == "phone" && output.owner == ownerId && output.token.isNotBlank() && output.token == dismissedToken
+
+/** Follow an externally selected Echo even when the app was already in Alexa mode. */
+internal fun shouldFollowAlexa(output: SharedPlaybackOutput, currentSerial: String, alreadyAlexa: Boolean): Boolean {
+    if (output.mode != "alexa") return false
+    if (!alreadyAlexa) return output.serial.isNotBlank() || currentSerial.isNotBlank()
+    return output.serial.isNotBlank() && output.serial != currentSerial
+}

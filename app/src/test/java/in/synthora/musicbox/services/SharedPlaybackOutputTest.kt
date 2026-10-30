@@ -6,6 +6,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SharedPlaybackOutputTest {
+    @Test fun externalEchoSwitchChangesTheControlTargetWithoutReplayingOnTheOldEcho() {
+        val active = SharedPlaybackOutput(mode = "alexa", serial = "echo-b")
+        assertTrue(shouldFollowAlexa(active, "echo-a", alreadyAlexa = true))
+        assertFalse(shouldFollowAlexa(active, "echo-b", alreadyAlexa = true))
+        assertTrue(shouldFollowAlexa(active, "", alreadyAlexa = false))
+        assertFalse(shouldFollowAlexa(active.copy(mode = "phone"), "echo-a", alreadyAlexa = true))
+        assertFalse(shouldFollowAlexa(active.copy(serial = ""), "echo-a", alreadyAlexa = true))
+        assertTrue(shouldFollowAlexa(active.copy(serial = ""), "echo-a", alreadyAlexa = false))
+    }
+
     @org.junit.Test fun renewedSongTokenRetriesOnlyExplicitIntentsOnTheSamePhone() {
         val old = SharedPlaybackOutput(mode = "phone", owner = "two", token = "old")
         val renewed = old.copy(token = "new")
