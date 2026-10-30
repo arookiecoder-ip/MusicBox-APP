@@ -11,6 +11,17 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class PlaybackEventStreamTest {
+    @Test fun conflatedDeltasKeepTheQueueAndTransfersRequireNewFullState() {
+        val accumulator = PlaybackEventAccumulator()
+        fun event(state: String) = kotlinx.serialization.json.Json.parseToJsonElement(
+            "{\"state\":$state}").objectOrEmpty()
+        accumulator.accept(event("""{"queue":[{"entry_id":"first"},{"entry_id":"second"}],"queue_version":1,"output_token":"one","event_epoch":"server"}"""))
+        val delta = accumulator.accept(event("""{"queue_version":1,"output_token":"one","event_epoch":"server","position_ms":2000}"""))
+        assertEquals(2, delta["state"].objectOrEmpty().array("queue").size)
+        val missing = runCatching { accumulator.accept(event("""{"queue_version":1,"output_token":"two","event_epoch":"server"}""")) }.exceptionOrNull()
+        assertTrue(missing is java.io.IOException)
+    }
+
     @Test fun realSocketReceivesSnapshotAndCancellationClosesIt() = runBlocking {
         val server = MockWebServer()
         val disconnected = CountDownLatch(1)
