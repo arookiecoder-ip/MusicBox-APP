@@ -124,7 +124,7 @@ object Backend {
                         webSocket.close(code, null)
                     }
                 })
-            kotlinx.coroutines.channels.awaitClose { socket.cancel() }
+            awaitClose { socket.cancel() }
         }.buffer(kotlinx.coroutines.channels.Channel.CONFLATED)
 
     /** True while a web-session cookie is stored (it may still have been revoked server-side). */
