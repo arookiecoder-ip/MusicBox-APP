@@ -21,7 +21,7 @@ object PlaybackCoordinator {
     fun echo(context: Context): EchoController = controller ?: EchoController(scope,
         context.applicationContext.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE),
         onError = { _errors.tryEmit(it) }, onSignedOut = {
-            consumers.clear(); controller?.stopPolling(); _signedOut.tryEmit(Unit)
+            consumers.clear(); controller?.observeEvents(false); controller?.stopPolling(); _signedOut.tryEmit(Unit)
         }).also { controller = it }
 
     fun observe(context: Context, consumer: String, active: Boolean, foreground: Boolean = false) {

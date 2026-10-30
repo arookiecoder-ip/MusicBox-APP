@@ -51,7 +51,8 @@ class EchoController(
     private val onSignedOut: () -> Unit,
     private val read: suspend (String, Map<String, String>) -> JsonElement = Backend::get,
     private val write: suspend (String, JsonObject) -> JsonElement = Backend::post,
-    private val snapshotDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
+    private val snapshotDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
+    private val events: (String) -> kotlinx.coroutines.flow.Flow<JsonObject> = Backend::playbackEvents
 ) {
     private val _devices = MutableStateFlow<List<EchoDevice>>(emptyList())
     val devices: StateFlow<List<EchoDevice>> = _devices.asStateFlow()
@@ -67,6 +68,71 @@ class EchoController(
     val state: StateFlow<EchoState> = _state.asStateFlow()
 
     private var pollJob: Job? = null
+    private var eventJob: Job? = null
+    private var eventGeneration = 0L
+    private val snapshotLock = Mutex()
+    private var eventConnected = false
+    private var retainEvents = false
+    internal fun hasLiveEvents(): Boolean = eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000
+    internal fun observeEvents(active: Boolean) {
+        retainEvents = active
+        if (active) startEvents()
+        else if (pollJob?.isActive != true) { eventJob?.cancel(); eventJob = null; eventConnected = false }
+    }
+    private var lastEventAt = 0L
+    private val eventOrder = PlaybackEventOrder()
+    private var lastErrorId = ""
+
+    private fun startEvents() {
+        if (eventJob?.isActive == true) return
+        val generation = ++eventGeneration
+        eventJob = scope.launch {
+            var failures = 0
+            while (isActive) {
+                val selected = _serial.value
+                var retryAfter = 0L
+                var unsupported = false
+                try {
+                    events(selected).collect { envelope ->
+                        if (generation != eventGeneration || selected != _serial.value) return@collect
+                        val snapshot = envelope["state"] as? JsonObject ?: return@collect
+                        if (selected == _serial.value && apply(snapshot)) {
+                            eventConnected = true
+                            lastEventAt = SystemClock.elapsedRealtime()
+                            failures = 0
+                            MobileDeviceConnection.acceptPlaybackEvent(snapshot)
+                            handleStateSideEffects(snapshot)
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: BackendAuthException) { onSignedOut(); return@launch }
+                catch (e: Exception) {
+                    val http = e as? `in`.synthora.musicbox.network.BackendHttpException
+                    unsupported = http?.statusCode in listOf(404, 405, 426)
+                    retryAfter = http?.retryAfterMs ?: 0
+                } finally { if (generation == eventGeneration) eventConnected = false }
+                failures++
+                delay(eventReconnectDelay(failures, unsupported, retryAfter) + kotlin.random.Random.nextLong(0, 500))
+            }
+        }
+    }
+
+    private fun handleStateSideEffects(np: JsonObject) {
+        val message = np["playback_error"].objectOrEmpty().text("message")
+        val errorId = np.text("playback_error_id")
+        if (message.isNotBlank() && (errorId.isBlank() || errorId != lastErrorId)) {
+            lastErrorId = errorId
+            onError(message)
+        }
+        if (np["liked_version"] is JsonPrimitive) {
+            val version = np.number("liked_version")
+            if (version != likedVersion) {
+                likedVersion = version
+                scope.launch { safely { AccountRepository.refreshLiked() } }
+            }
+        }
+    }
+
     private var pollingForeground = false
     private val pollLock = Mutex()
     private val transportLock = Mutex()
@@ -149,13 +215,19 @@ class EchoController(
         volumeSeq++
         volumeGraceUntil = 0L
         lastVolumeRefresh = 0L
+        eventJob?.cancel(); eventJob = null; eventConnected = false
+        eventOrder.reset()
         _serial.value = serial
+        if (retainEvents || pollJob?.isActive == true) startEvents()
         prefs.edit().putString(KEY_SERIAL, serial).apply()
     }
 
     /** Poll now-playing while the app is visible ([foreground]) or slower in the background. */
     fun startPolling(foreground: Boolean) {
+        val resumed = foreground && !pollingForeground
         pollingForeground = foreground
+        if (resumed && pollJob?.isActive == true) scope.launch { safely { refresh(force = true) } }
+        startEvents()
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
             val changes=kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
@@ -166,7 +238,8 @@ class EchoController(
             while (isActive) {
                 changes.tryReceive()
                 try {
-                    refresh()
+                    val liveEvents = eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000
+                    if (!liveEvents) refresh()
                     val presenceNow = android.os.SystemClock.elapsedRealtime()
                     val presenceInterval = if (selectedDevice?.online == false) 5_000L else 30_000L
                     if (pollingForeground && presenceNow - lastPresenceRefresh >= presenceInterval) {
@@ -183,7 +256,7 @@ class EchoController(
                     failures++
                     Log.w(TAG, "Now-playing poll failed")
                 }
-                val interval=remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures,MobileDeviceConnection.hasLivePresence())
+                val interval=if (eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000) 30_000L else remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures,MobileDeviceConnection.hasLivePresence())
                 if(failures>0) delay(interval) else withTimeoutOrNull(interval) { changes.receive() }
             }
             } finally { presence.cancel();changes.close() }
@@ -191,6 +264,7 @@ class EchoController(
     }
 
     fun stopPolling() {
+        if (!retainEvents) { eventJob?.cancel(); eventJob = null; eventConnected = false }
         pollJob?.cancel()
         pollJob = null
         pollingForeground = false
@@ -213,15 +287,8 @@ class EchoController(
             }
         } ?: return
         if (serial != _serial.value) return
-        np["playback_error"].objectOrEmpty().text("message").takeIf { it.isNotBlank() }?.let(onError)
+        if (!stateOnly) handleStateSideEffects(np)
         if (stateOnly) return
-        if (np["liked_version"] is JsonPrimitive) {
-            val version = np.number("liked_version")
-            if (version != likedVersion) {
-                likedVersion = version
-                scope.launch { safely { AccountRepository.refreshLiked() } }
-            }
-        }
         val now = SystemClock.elapsedRealtime()
         if (force || now - lastVolumeRefresh > (if (_state.value.playing && pollingForeground) 15_000 else 60_000)) {
             lastVolumeRefresh = now
@@ -238,15 +305,20 @@ class EchoController(
         }
     }
 
-    private suspend fun apply(np: JsonObject): Boolean {
+    private suspend fun apply(np: JsonObject): Boolean = snapshotLock.withLock { applySnapshot(np) }
+
+    private suspend fun applySnapshot(np: JsonObject): Boolean {
         val epoch = mutationEpoch
+        val serverEpoch = np.text("event_epoch")
+        val serverRevision = np.number("event_revision")
+        if (!eventOrder.accepts(serverEpoch, serverRevision)) return false
         val now = SystemClock.elapsedRealtime()
         val previous = _state.value
         val preserveVolume = now < volumeGraceUntil
         val parsed = kotlinx.coroutines.withContext(snapshotDispatcher) {
             parseEchoSnapshot(np, now, previous.volume, preserveVolume, previous.queue, previous)
         }
-        if (epoch != mutationEpoch) return false
+        if (epoch != mutationEpoch || !eventOrder.accepts(serverEpoch, serverRevision)) return false
         if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return false
         if (!parsed.supersedes(previous)) return false
         // A pause, close or volume preview during decoding wins over this response.
@@ -254,6 +326,7 @@ class EchoController(
         val reconciled = preview?.reconcile(parsed, now) ?: parsed
         val accepted = _state.compareAndSet(previous, reconciled)
         if (accepted) {
+            eventOrder.accepted(serverEpoch, serverRevision)
             np["amazon_connected"]?.let { if (it.toString() != "null") _amazonConnected.value = np.flag("amazon_connected") }
             val shared = parsed.sharedOutput
             if (shared.mode == "alexa" && np["remote_control_available"]?.toString() == "false" && parsed.playing && shared.serial.isNotBlank()) {
@@ -587,6 +660,7 @@ class EchoController(
     fun clear() {
         mutationEpoch++
         refreshedAt = 0L
+        retainEvents = false
         stopPolling()
         pendingSeek = null
         seekIntent++
@@ -597,6 +671,8 @@ class EchoController(
         volumeGraceUntil = 0
         lastVolumeRefresh = 0
         likedVersion = null
+        lastErrorId = ""
+        eventOrder.reset()
         _devices.value = emptyList()
         _amazonConnected.value = null
         _state.value = EchoState()

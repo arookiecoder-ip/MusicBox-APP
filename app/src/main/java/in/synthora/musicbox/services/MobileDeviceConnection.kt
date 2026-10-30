@@ -34,6 +34,21 @@ object MobileDeviceConnection {
     private var foregroundOverride: Boolean? = null
     private val handled = linkedSetOf<String>()
     private val acknowledgments = CommandAcknowledgments()
+    private val presenceWake = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private var eventRevision = -1L
+    private var eventDelivery: ((SharedPlaybackOutput) -> Unit)? = null
+    internal fun acceptPlaybackEvent(snapshot: JsonObject) {
+        if (job?.isActive != true) return
+        val output = sharedPlaybackOutput(snapshot).let {
+            it.copy(nowPlaying = snapshot.takeIf { value -> value["queue"] is JsonArray })
+        }
+        if (!output.olderThan(latestOutput)) {
+            rememberOutput(output)
+            val revision = snapshot.number("presence_revision")
+            if (revision != eventRevision) { eventRevision = revision; presenceWake.trySend(Unit) }
+            eventDelivery?.invoke(output)
+        }
+    }
     private var latestOutput = SharedPlaybackOutput()
     private val _output = MutableStateFlow(latestOutput)
     val output = _output.asStateFlow()
@@ -52,6 +67,7 @@ object MobileDeviceConnection {
               onCommand: suspend (String, JsonObject) -> Unit) {
         appContext = context.applicationContext
         DeviceConnectionService.stop(context)
+        PlaybackCoordinator.echo(context).observeEvents(true)
         if (job?.isActive == true) return
         presenceReplyAt=Long.MIN_VALUE
         presenceRevision=Long.MIN_VALUE
@@ -83,12 +99,14 @@ object MobileDeviceConnection {
                     while (handled.size > 100) handled.remove(handled.first())
                 }
             }
+            eventDelivery = { output -> delivery.offerState(output) }
             var revision = -1L
             var outputToken = ""
             var supportsWait = false
             var supportsLongWait = false
             var failures = 0
             var retryAfterMs = 0L
+            var serverRetryMs = 100L
             while (isActive && activeGeneration == generation) {
                 if (!NetworkFeedback.online.value) {
                     NetworkFeedback.online.first { it }
@@ -100,7 +118,7 @@ object MobileDeviceConnection {
                         put("foreground", foregroundOverride ?: androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
                         put("visibility_revision", ++visibilityRevision)
                         put("include_handoff_state", true); put("accepted_token", PhonePlaybackOwnership.token)
-                        put("wait", true); put("wait_seconds", 8); put("revision", revision); put("output_token", outputToken)
+                        put("wait", !PlaybackCoordinator.echo(context).hasLiveEvents()); put("bounded_wait", true); put("wait_seconds", 2); put("revision", revision); put("output_token", outputToken)
                         put("volume", (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
                         put("volume_steps", audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1))
                         put("name", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -118,6 +136,7 @@ object MobileDeviceConnection {
                             if (pending != null && (reported == pending.value || android.os.SystemClock.elapsedRealtime() >= pending.until)) pendingVolumes.remove(id)
                             MobileAudioDevice(id, it.text("name"), pendingVolumes[id]?.value ?: reported, (it["volume_steps"] as? JsonPrimitive)?.intOrNull)
                         }
+                    serverRetryMs = reply.number("presence_retry_ms").coerceIn(100, 5_000)
                     supportsWait = reply.containsKey("revision")
                     supportsLongWait = reply.number("presence_wait_seconds") >= 8
                     revision = reply.number("revision")
@@ -152,7 +171,11 @@ object MobileDeviceConnection {
                 // Server waits wake immediately on commands; no background gap.
                 val visible = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
                 val activeOutput = latestOutput.mode == "phone" && latestOutput.owner == PhonePlaybackOwnership.ownerId
-                delay(if (supportsWait && (supportsLongWait || visible || activeOutput)) 100 else 3_000)
+                if (PlaybackCoordinator.echo(context).hasLiveEvents()) {
+                    withTimeoutOrNull(8_000) { presenceWake.receive() }
+                    continue
+                }
+                delay(if (supportsWait && (supportsLongWait || visible || activeOutput)) serverRetryMs + kotlin.random.Random.nextLong(0, 150) else 3_000)
             }
         }
     }
@@ -173,6 +196,8 @@ object MobileDeviceConnection {
         val closingSession = session
         val wasOwner = PhonePlaybackOwnership.token.isNotBlank()
         ++generation
+        eventDelivery = null
+        appContext?.let { PlaybackCoordinator.echo(it).observeEvents(false) }
         job?.cancel(); job = null
         _devices.value = emptyList()
         pendingVolumes.clear()

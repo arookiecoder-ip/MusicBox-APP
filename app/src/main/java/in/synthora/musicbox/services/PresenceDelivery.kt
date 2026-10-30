@@ -58,5 +58,6 @@ internal class PlaybackPresenceDelivery<S, C>(scope: CoroutineScope,
     onCommands: suspend (S, C) -> Unit) {
     private val states = PresenceDelivery<S>(scope, onFailure, onState)
     private val commands = PresenceDelivery<Pair<S, C>>(scope, onFailure) { (state, queued) -> onCommands(state, queued) }
+    fun offerState(state: S) { states.offer(state) }
     fun offer(state: S, queued: C) { states.offer(state); commands.offer(state to queued) }
 }

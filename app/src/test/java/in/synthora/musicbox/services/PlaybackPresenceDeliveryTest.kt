@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackPresenceDeliveryTest {
+    @Test fun stateOnlyEventDoesNotEraseQueuedCommands() = runBlocking {
+        val owner = CoroutineScope(coroutineContext + Job())
+        val commands = mutableListOf<String>()
+        val delivered = CompletableDeferred<Unit>()
+        val delivery = PlaybackPresenceDelivery<Int, String>(owner,
+            onState = {}, onCommands = { _, command -> commands += command; delivered.complete(Unit) })
+        try {
+            delivery.offer(1, "pause")
+            delivery.offerState(2)
+            withTimeout(1_000) { delivered.await() }
+            assertEquals(listOf("pause"), commands)
+        } finally { owner.cancel() }
+    }
     @Test fun switchDoesNotWaitForAnEarlierSongCommandToFinishLoading() = runBlocking {
         val owner = CoroutineScope(coroutineContext + Job())
         val loading = CompletableDeferred<Unit>()
