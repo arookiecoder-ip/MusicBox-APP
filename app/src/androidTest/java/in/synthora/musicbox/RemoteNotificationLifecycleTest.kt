@@ -209,7 +209,8 @@ class RemoteNotificationLifecycleTest {
             read = { path, _ ->
                 if (path == "/alexa/now_playing/") { reads.incrementAndGet(); snapshot() }
                 else buildJsonObject { put("volume", 40) }
-            }, write = { _, _ -> error("The poll fixture must never send playback commands") })
+            }, write = { _, _ -> error("The poll fixture must never send playback commands") },
+            events = { kotlinx.coroutines.flow.emptyFlow() })
         val controllerField = PlaybackCoordinator::class.java.getDeclaredField("controller").apply { isAccessible = true }
         val savedController = controllerField.get(null)
         instrumentation.runOnMainSync {
