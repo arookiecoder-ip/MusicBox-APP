@@ -6,36 +6,33 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.*
-import androidx.media3.session.MediaController
-import androidx.media3.session.SessionToken
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
 class UntrustedControllerProbeService : Service() {
-    private var controller: MediaController? = null
+    // The standalone test APK does not package the target app's Media3 classes.
+    // Use Android's supported legacy browser protocol from this separate UID.
+    private var browser: android.media.browse.MediaBrowser? = null
     override fun onBind(intent: Intent): IBinder {
         @Suppress("DEPRECATION") val receiver = intent.getParcelableExtra<ResultReceiver>("result") ?: return Binder()
-        val token = SessionToken(this, ComponentName("in.synthora.musicbox", "in.synthora.musicbox.services.PlaybackService"))
-        val future = MediaController.Builder(this, token).buildAsync()
-        future.addListener({
-            val report = Bundle().apply { putInt("uid", Process.myUid()) }
-            try {
-                controller = future.get()
-                report.putBoolean("rejected", false)
-            } catch (error: Exception) {
-                val cause = if (error is ExecutionException) error.cause else error
-                report.putBoolean("rejected", cause is SecurityException)
-                report.putString("errorType", cause?.javaClass?.simpleName)
-            }
-            receiver.send(0, report)
-        }, androidx.core.content.ContextCompat.getMainExecutor(this))
+        browser = android.media.browse.MediaBrowser(this,
+            ComponentName("in.synthora.musicbox", "in.synthora.musicbox.services.PlaybackService"),
+            object : android.media.browse.MediaBrowser.ConnectionCallback() {
+                override fun onConnected() { report(false) }
+                override fun onConnectionFailed() { report(true) }
+                override fun onConnectionSuspended() { report(false) }
+                private fun report(rejected: Boolean) {
+                    receiver.send(0, Bundle().apply { putInt("uid", Process.myUid()); putBoolean("rejected", rejected) })
+                    browser?.disconnect()
+                }
+            }, Bundle.EMPTY)
+        browser?.connect()
         return Binder()
     }
-    override fun onDestroy() { controller?.release(); super.onDestroy() }
+    override fun onDestroy() { browser?.disconnect(); super.onDestroy() }
 }
 
 class MediaControllerSecurityTest {
