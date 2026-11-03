@@ -12,29 +12,6 @@ import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
-class UntrustedControllerProbeService : Service() {
-    // The standalone test APK does not package the target app's Media3 classes.
-    // Use Android's supported legacy browser protocol from this separate UID.
-    private var browser: android.media.browse.MediaBrowser? = null
-    override fun onBind(intent: Intent): IBinder {
-        @Suppress("DEPRECATION") val receiver = intent.getParcelableExtra<ResultReceiver>("result") ?: return Binder()
-        browser = android.media.browse.MediaBrowser(this,
-            ComponentName("in.synthora.musicbox", "in.synthora.musicbox.services.PlaybackService"),
-            object : android.media.browse.MediaBrowser.ConnectionCallback() {
-                override fun onConnected() { report(false) }
-                override fun onConnectionFailed() { report(true) }
-                override fun onConnectionSuspended() { report(false) }
-                private fun report(rejected: Boolean) {
-                    receiver.send(0, Bundle().apply { putInt("uid", Process.myUid()); putBoolean("rejected", rejected) })
-                    browser?.disconnect()
-                }
-            }, Bundle.EMPTY)
-        browser?.connect()
-        return Binder()
-    }
-    override fun onDestroy() { browser?.disconnect(); super.onDestroy() }
-}
-
 class MediaControllerSecurityTest {
     @Test fun anotherInstalledUidCannotConnectToTheOwnerMediaSession() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
