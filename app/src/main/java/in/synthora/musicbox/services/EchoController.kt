@@ -105,7 +105,16 @@ class EchoController(
                         }
                     }
                 } catch (e: CancellationException) { throw e }
-                catch (e: BackendAuthException) { onSignedOut(); return@launch }
+                catch (e: BackendAuthException) {
+                    // Older servers reject unknown event routes with 401, even
+                    // for a valid owner cookie. An optional channel cannot
+                    // establish that the account session itself has expired.
+                    if (eventSessionExpired(generation)) {
+                        onSignedOut()
+                        return@launch
+                    }
+                    unsupported = true
+                }
                 catch (e: Exception) {
                     val http = e as? `in`.synthora.musicbox.network.BackendHttpException
                     unsupported = http?.statusCode in listOf(404, 405, 426)
@@ -114,6 +123,21 @@ class EchoController(
                 failures++
                 delay(eventReconnectDelay(failures, unsupported, retryAfter) + kotlin.random.Random.nextLong(0, 500))
             }
+        }
+    }
+
+    private suspend fun eventSessionExpired(generation: Long): Boolean {
+        val epoch = mutationEpoch
+        return try {
+            withTimeoutOrNull(5_000) { read("/alexa/status/", emptyMap()) }
+            false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BackendAuthException) {
+            generation == eventGeneration && epoch == mutationEpoch
+        } catch (_: Exception) {
+            // Offline, proxy errors and timeouts do not revoke a saved login.
+            false
         }
     }
 

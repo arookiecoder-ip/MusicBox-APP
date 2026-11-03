@@ -4,6 +4,11 @@ Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
 
+## 2.4.62 (114)
+
+- Keep owner login intact when older backends reject the optional playback event endpoint. Verify session expiry through the established status endpoint before signing out, and retain polling when events are unavailable.
+- Cover real socket rejection with a valid persisted cookie, confirmed expiry, offline validation and stale authentication responses.
+
 ## 2.4.61 (113)
 
 - Coalesce remote notification metadata/artwork posts and avoid redundant foreground-bridge reposts so Android does not shed rapid updates.
