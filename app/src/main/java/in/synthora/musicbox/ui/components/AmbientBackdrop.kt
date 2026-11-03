@@ -11,6 +11,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -33,40 +34,57 @@ internal fun AnimatedAmbientBackdrop(palette: List<Color>, modifier: Modifier = 
     extent: Float = 1f, baseColor: Color = MaterialTheme.colorScheme.background) {
     val fallback=listOf(Color(0xFF9276DF),Color(0xFF457FB8),Color(0xFFB45986))
     val colors=palette.takeIf { it.size>=3 } ?: fallback
-    val first by animateColorAsState(colors[0],tween(1100,easing=FastOutSlowInEasing),label="ambient-first")
-    val second by animateColorAsState(colors[1],tween(1100,easing=FastOutSlowInEasing),label="ambient-second")
-    val third by animateColorAsState(colors[2],tween(1100,easing=FastOutSlowInEasing),label="ambient-third")
-    Box(modifier.background(baseColor).testTag("Ambient backdrop")) {
-        Canvas(Modifier.fillMaxSize().drawWithCache {
-            val height = size.height * extent.coerceIn(0f, 1f)
-            val strength = if (baseColor.luminance() < .5f) .27f else .16f
-            val horizontal = android.graphics.LinearGradient(0f, 0f, size.width.coerceAtLeast(1f), 0f,
-                intArrayOf(first.copy(alpha = strength).toArgb(), second.copy(alpha = strength).toArgb(), third.copy(alpha = strength).toArgb()),
-                null, android.graphics.Shader.TileMode.CLAMP)
-            val left = android.graphics.RadialGradient(size.width * .18f, height * .08f,
-                maxOf(1f, size.width * .7f, height * .8f),
-                intArrayOf(second.copy(alpha = strength).toArgb(), android.graphics.Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
-            val right = android.graphics.RadialGradient(size.width * .88f, height * .1f,
-                maxOf(1f, size.width * .65f, height * .7f),
-                intArrayOf(third.copy(alpha = strength * .8f).toArgb(), android.graphics.Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP)
-            val fade = android.graphics.LinearGradient(0f, 0f, 0f, height.coerceAtLeast(1f),
-                intArrayOf(android.graphics.Color.TRANSPARENT, baseColor.toArgb()), null, android.graphics.Shader.TileMode.CLAMP)
-            fun over(bottom: android.graphics.Shader, top: android.graphics.Shader) =
-                android.graphics.ComposeShader(bottom, top, android.graphics.PorterDuff.Mode.SRC_OVER)
-            val paint = android.graphics.Paint().apply { shader = over(over(over(horizontal, left), right), fade) }
-            // Fuse the layers into one shader draw. Avoid four full-area fills on tablet GPUs.
-            onDrawBehind { if (size.width > 0 && height > 0) {
-                drawIntoCanvas { canvas ->
-                    if (android.os.Build.VERSION.SDK_INT >= 28) canvas.nativeCanvas.drawRect(0f, 0f, size.width, height, paint)
-                    else for (layer in listOf(horizontal, left, right, fade)) {
-                        paint.shader = layer
-                        canvas.nativeCanvas.drawRect(0f, 0f, size.width, height, paint)
-                    }
-                }
-            } }
-        }) {}
+    var dimensions by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    var previous by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var current by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val blend = remember { androidx.compose.animation.core.Animatable(1f) }
+    LaunchedEffect(colors, dimensions, baseColor, extent) {
+        if (dimensions.width <= 0 || dimensions.height <= 0) return@LaunchedEffect
+        val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            ambientRaster(colors, baseColor, dimensions.width,
+                (dimensions.height * extent.coerceIn(0f, 1f)).toInt().coerceAtLeast(1))
+        }
+        val old = current
+        blend.snapTo(if (old == null) 1f else 0f)
+        previous = old; current = next
+        if (old != null) blend.animateTo(1f, tween(1100, easing = FastOutSlowInEasing))
+        previous = null
+    }
+    Canvas(modifier.background(baseColor).testTag("Ambient backdrop").onSizeChanged { dimensions = it }) {
+        val destination = androidx.compose.ui.unit.IntSize(size.width.toInt(), (size.height * extent.coerceIn(0f, 1f)).toInt())
+        if (destination.width > 0 && destination.height > 0) {
+            previous?.let { drawImage(it.asImageBitmap(), dstSize = destination, filterQuality = FilterQuality.Low) }
+            current?.let { drawImage(it.asImageBitmap(), dstSize = destination, alpha = blend.value, filterQuality = FilterQuality.Low) }
+        }
     }
 }
+
+/** Decorative gradients have no sharp detail: rasterize at bounded resolution off Main,
+ * then upload a small texture once. Scrolling never re-evaluates radial gradients per pixel. */
+internal fun ambientRaster(colors: List<Color>, base: Color, width: Int, height: Int): android.graphics.Bitmap {
+    val factor = minOf(1f, 512f / maxOf(width, height).coerceAtLeast(1))
+    val w = (width * factor).toInt().coerceAtLeast(1)
+    val h = (height * factor).toInt().coerceAtLeast(1)
+    val result = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(result)
+    canvas.drawColor(base.toArgb())
+    val strength = if (base.luminance() < .5f) .27f else .16f
+    val layers = listOf(
+        android.graphics.LinearGradient(0f, 0f, w.toFloat(), 0f,
+            intArrayOf(colors[0].copy(alpha = strength).toArgb(), colors[1].copy(alpha = strength).toArgb(), colors[2].copy(alpha = strength).toArgb()),
+            null, android.graphics.Shader.TileMode.CLAMP),
+        android.graphics.RadialGradient(w * .18f, h * .08f, maxOf(1f, w * .7f, h * .8f),
+            intArrayOf(colors[1].copy(alpha = strength).toArgb(), android.graphics.Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP),
+        android.graphics.RadialGradient(w * .88f, h * .1f, maxOf(1f, w * .65f, h * .7f),
+            intArrayOf(colors[2].copy(alpha = strength * .8f).toArgb(), android.graphics.Color.TRANSPARENT), null, android.graphics.Shader.TileMode.CLAMP),
+        android.graphics.LinearGradient(0f, 0f, 0f, h.toFloat(), intArrayOf(android.graphics.Color.TRANSPARENT, base.toArgb()),
+            null, android.graphics.Shader.TileMode.CLAMP)
+    )
+    val paint = android.graphics.Paint()
+    for (layer in layers) { paint.shader = layer; canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint) }
+    return result
+}
+
 
 @Composable
 internal fun HomeAmbientBackdrop(modifier: Modifier = Modifier) {

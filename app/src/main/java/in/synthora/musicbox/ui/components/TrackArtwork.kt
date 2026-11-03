@@ -35,7 +35,8 @@ fun TrackArtwork(track: Track, modifier: Modifier = Modifier, large: Boolean = f
         }
     }
     val image = bitmap
-    if (image != null && large) FadedArtwork(image, modifier.semantics { contentDescription = track.title })
-    else if (image != null) Image(image.asImageBitmap(), track.title, modifier, contentScale = ContentScale.Crop)
+    val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
+    if (image != null && large && tablet) FadedArtwork(image, modifier.semantics { contentDescription = track.title })
+    else if (image != null) Image(image.asImageBitmap(), track.title, if (large) modifier.artworkBottomFade() else modifier, contentScale = ContentScale.Crop)
     else Box(modifier) { Box(Modifier.fillMaxSize()) }
 }

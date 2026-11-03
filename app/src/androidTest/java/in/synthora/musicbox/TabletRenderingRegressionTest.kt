@@ -91,6 +91,16 @@ class TabletRenderingRegressionTest {
         }
     }
 
+    @Test fun ambientRasterMemoryIsBoundedAtTabletResolution() {
+        val bitmap = `in`.synthora.musicbox.ui.components.ambientRaster(
+            listOf(Color.Red, Color.Green, Color.Blue), Color.Black, 2800, 1752)
+        try {
+            assertTrue(bitmap.width <= 512 && bitmap.height <= 512)
+            assertTrue(bitmap.allocationByteCount <= 512 * 512 * 4)
+            assertEquals(255, android.graphics.Color.alpha(bitmap.getPixel(bitmap.width / 2, bitmap.height / 2)))
+        } finally { bitmap.recycle() }
+    }
+
     @Test fun playerFadeKeepsTheArtworkAndRevealsTheBackdropWithoutAnOffscreenLayer() {
         val bitmap = Bitmap.createBitmap(1000, 1000, Bitmap.Config.ARGB_8888).apply { eraseColor(android.graphics.Color.RED) }
         compose.setContent { Box(Modifier.fillMaxSize().background(Color.Blue)) { FadedArtwork(bitmap, Modifier.fillMaxSize().testTag("faded-artwork")) } }
