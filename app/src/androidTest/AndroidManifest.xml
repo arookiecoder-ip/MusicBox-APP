@@ -1,4 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries><package android:name="in.synthora.musicbox" /></queries>
     <application>
         <!-- Test APK only: runs under its own UID to exercise the exported media boundary. -->
         <service android:name="in.synthora.musicbox.UntrustedControllerProbeService" android:exported="true" />
