@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.withPermit
 
 /** One HD verification, fallback order and retry budget for all playback surfaces. */
 object ArtworkRepository {
-    private val cache = object : LruCache<String, Bitmap>(24 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Bitmap>(minOf(24 * 1024 * 1024L, Runtime.getRuntime().maxMemory() / 16).coerceAtLeast(1024 * 1024L).toInt()) {
         override fun sizeOf(key: String, value: Bitmap) = value.allocationByteCount
     }
     private data class Flight(val mutex: Mutex = Mutex(), var users: Int = 0)

@@ -62,6 +62,20 @@ class PlaybackEventStreamTest {
         }
     }
 
+    @Test fun serverBackoffFramePreservesRetryDelay() = runBlocking {
+        val server = MockWebServer(); val client = OkHttpClient()
+        server.enqueue(MockResponse().withWebSocketUpgrade(object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                webSocket.send("""{"type":"backoff","retry_after_ms":60000}""")
+            }
+        }))
+        try {
+            val error = runCatching { withTimeout(5_000) { playbackEventStream(client, server.url("/api/app/events/")).first() } }.exceptionOrNull()
+            assertTrue(error is BackendHttpException)
+            assertEquals(60_000L, (error as BackendHttpException).retryAfterMs)
+        } finally { server.shutdown(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
+    }
+
     @Test fun malformedFramesFailInsteadOfReplacingPlaybackWithEmptyState() = runBlocking {
         val server = MockWebServer()
         val client = OkHttpClient()

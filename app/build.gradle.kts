@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 114
-        versionName = "2.4.62"
+        versionCode = 115
+        versionName = "2.4.63"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -177,6 +177,7 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.datasource)
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.0")
 
     // Coil
     implementation(libs.coil.compose)

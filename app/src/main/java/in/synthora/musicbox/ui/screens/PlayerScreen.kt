@@ -377,7 +377,6 @@ fun PlayerScreen(
     ) {
         JUKETheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll().graphicsLayer {
-            alpha = entrance.value
             translationY = (1f - entrance.value) * 48.dp.toPx()
         }) {
             // Plain black backdrop; the artwork is the only color on the screen.

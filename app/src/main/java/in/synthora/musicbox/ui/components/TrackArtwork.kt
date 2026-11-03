@@ -7,6 +7,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -33,6 +35,7 @@ fun TrackArtwork(track: Track, modifier: Modifier = Modifier, large: Boolean = f
         }
     }
     val image = bitmap
-    if (image != null) Image(image.asImageBitmap(), track.title, modifier, contentScale = ContentScale.Crop)
+    if (image != null && large) FadedArtwork(image, modifier.semantics { contentDescription = track.title })
+    else if (image != null) Image(image.asImageBitmap(), track.title, modifier, contentScale = ContentScale.Crop)
     else Box(modifier) { Box(Modifier.fillMaxSize()) }
 }

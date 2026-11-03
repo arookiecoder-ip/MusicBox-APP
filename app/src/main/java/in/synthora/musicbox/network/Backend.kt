@@ -225,10 +225,14 @@ object Backend {
     }
 
     /** Cookie headers for the account sign-in browser, so it opens with the same session. */
-    fun cookieHeaders(): List<String> = jar.all().map { cookie ->
-        // Path "/" so a staging base path still sends the session to every sign-in page.
-        "${cookie.name}=${cookie.value}; Path=/; Secure"
-    }
+    fun cookieHeaders(): List<String> = browserCookieHeaders(baseUrl, jar.all())
+}
+
+/** Preserve HttpOnly, SameSite (when supplied) and scope; never export another host's cookies. */
+internal fun browserCookieHeaders(destination: String, cookies: List<Cookie>): List<String> {
+    val url = destination.toHttpUrlOrNull() ?: return emptyList()
+    return cookies.filter { it.matches(url) && it.expiresAt > System.currentTimeMillis() }
+        .map { cookie -> cookie.toString() + "; SameSite=Lax" }
 }
 
 /** Keeps the web session across app restarts. */

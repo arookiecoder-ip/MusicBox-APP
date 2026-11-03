@@ -43,6 +43,12 @@ internal fun playbackEventStream(client: OkHttpClient, url: HttpUrl): Flow<JsonO
             private val accumulator = PlaybackEventAccumulator()
             override fun onMessage(webSocket: okhttp3.WebSocket, text: String) {
                 val payload = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+                if (payload?.text("type") == "backoff") {
+                    close(BackendHttpException(429, "Playback events paused briefly.",
+                        payload.number("retry_after_ms").coerceIn(1_000, 300_000)))
+                    webSocket.cancel()
+                    return
+                }
                 if (payload == null || payload.text("type") != "playback_state" || payload["state"] !is JsonObject) {
                     close(java.io.IOException("Invalid playback event")); webSocket.cancel()
                 } else {

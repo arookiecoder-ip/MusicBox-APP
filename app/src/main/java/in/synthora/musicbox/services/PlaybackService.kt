@@ -1844,15 +1844,16 @@ class PlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
+            val ownerController = controller.uid == android.os.Process.myUid()
             val sessionCommands =
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                    .add(
+                    .apply { if (ownerController) add(
                         SessionCommand(
                             CUSTOM_COMMAND_TOGGLE_FAVORITE_ACTION_ID,
                             Bundle.EMPTY
                         )
-                    )
-                    .add(SessionCommand(NotificationRadio.ACTION, Bundle.EMPTY))
+                    ) }
+                    .apply { if (ownerController) add(SessionCommand(NotificationRadio.ACTION, Bundle.EMPTY)) }
                     .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
@@ -1868,6 +1869,8 @@ class PlaybackService : MediaLibraryService() {
             customCommand: SessionCommand,
             args: Bundle
         ): ListenableFuture<SessionResult> {
+            if (controller.uid != android.os.Process.myUid()) return Futures.immediateFuture(
+                SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
             if (customCommand.customAction == NotificationRadio.ACTION) return Futures.immediateFuture(
                 SessionResult(if (NotificationRadio.start(this@PlaybackService)) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_INVALID_STATE))
             if (customCommand.customAction == CUSTOM_COMMAND_TOGGLE_FAVORITE_ACTION_ID) {

@@ -166,6 +166,8 @@ internal fun HomeContent(
     val shortcuts = remember(uiState.shelves, uiState.recentTracks) {
         `in`.synthora.musicbox.services.speedDialItems(uiState.shelves, uiState.recentTracks)
     }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val availableWidth = maxWidth
     PullToRefreshBox(
         isRefreshing = uiState.isRefreshing,
         onRefresh = { onRefresh() },
@@ -181,7 +183,7 @@ internal fun HomeContent(
             }
             if (shortcuts.isNotEmpty()) {
                 item(key = "speed-dial", contentType = "speed-dial") {
-                    SpeedDial(shortcuts, uiState.shelves.any { it.tracks.isNotEmpty() } || uiState.recentTracks.isNotEmpty(),
+                    SpeedDial(shortcuts, availableWidth, uiState.shelves.any { it.tracks.isNotEmpty() } || uiState.recentTracks.isNotEmpty(),
                         onPlaySomething, onOpenItem) { item ->
                         val track = uiState.recentTracks.firstOrNull { it.ytVideoId == item.videoId }
                             ?: uiState.shelves.asSequence().flatMap { it.tracks.asSequence() }
@@ -208,7 +210,7 @@ internal fun HomeContent(
                 }) {
                     when {
                         shelf.tracks.isNotEmpty() && shelf.items.all { it.kind == "track" } -> SongOnlyShelf(
-                            title = shelf.title, tracks = shelf.tracks,
+                            title = shelf.title, tracks = shelf.tracks, availableWidth = availableWidth,
                             onTrackClick = { onPlayTracks(shelf.tracks, it) }
                         )
                         shelf.items.all { it.kind == "artist" } -> ArtistShelf(shelf.title, shelf.items, onOpenItem)
@@ -222,12 +224,13 @@ internal fun HomeContent(
             }
         }
     }
+    }
 }
 
 /** Bounded rows inside Home's single scrolling list; no nested vertical scroll. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlaySomething: () -> Unit,
+private fun SpeedDial(items: List<BrowseItem>, availableWidth: Dp, canPlaySomething: Boolean, onPlaySomething: () -> Unit,
     onOpen: (BrowseItem) -> Unit, onPlayTrack: (BrowseItem) -> Unit) {
     val menu = LocalMediaMenu.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -239,11 +242,11 @@ private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlay
                 Text("Play something", Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelLarge)
             }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth()) {
             val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
             val columns = if (tablet) 4 else 3
             val rows = remember(items, columns) { items.take(columns * 3).chunked(columns) }
-            val artworkSize = (maxWidth - 6.dp * (columns - 1)) / columns
+            val artworkSize = (availableWidth - 32.dp - 6.dp * (columns - 1)) / columns
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 rows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -305,7 +308,9 @@ private fun HomeHeader(
 
 /** Four compact songs per horizontally scrolling column, matching web Home shelves. */
 @Composable
-internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (Int) -> Unit) {
+internal fun SongOnlyShelf(title: String, tracks: List<Track>,
+    availableWidth: Dp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp,
+    onTrackClick: (Int) -> Unit) {
     val menu = LocalMediaMenu.current
     val columns = remember(tracks) { tracks.chunked(4) }
     Column(Modifier.padding(top = 16.dp)) {
@@ -315,8 +320,8 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (In
             androidx.compose.material3.OutlinedButton(onClick = { onTrackClick(0) }, enabled = tracks.isNotEmpty(),
                 modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Play all") }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val columnWidth = (if (maxWidth >= 600.dp && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) (maxWidth - 64.dp) / 2 else maxWidth - 48.dp).coerceAtLeast(240.dp)
+        Box(Modifier.fillMaxWidth()) {
+            val columnWidth = (if (availableWidth >= 600.dp && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) (availableWidth - 64.dp) / 2 else availableWidth - 48.dp).coerceAtLeast(240.dp)
             LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 itemsIndexed(columns, key = { index, songs -> "$index:${songs.firstOrNull()?.uuid}" }) { columnIndex, songs ->
                     Column(Modifier.width(columnWidth)) {

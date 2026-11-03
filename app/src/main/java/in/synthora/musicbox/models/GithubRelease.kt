@@ -17,5 +17,6 @@ data class GithubRelease(
 data class GithubReleaseAsset(
     @SerialName("name") val name: String,
     @SerialName("browser_download_url") val browserDownloadUrl: String,
-    @SerialName("content_type") val contentType: String? = null
+    @SerialName("content_type") val contentType: String? = null,
+    @SerialName("digest") val digest: String? = null
 )

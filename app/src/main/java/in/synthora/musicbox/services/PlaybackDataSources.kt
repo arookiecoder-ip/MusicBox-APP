@@ -11,13 +11,11 @@ import `in`.synthora.musicbox.network.Backend
 @UnstableApi
 fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = Backend.audioBaseUrl,
     apiKey: String = Backend.apiKey, transferListener: TransferListener? = null, prefetch: Boolean = false, cacheWarm: Boolean = false, readOnlyCache: Boolean = false): DataSource.Factory {
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(`in`.synthora.musicbox.network.DEVICE_AUDIO_READ_TIMEOUT_MS)
-            .setAllowCrossProtocolRedirects(true)
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playbackHttpClient)
+        val redirectSafeFactory = DataSource.Factory { SafeAudioRedirectDataSource(httpDataSourceFactory.createDataSource()) }
         transferListener?.let(httpDataSourceFactory::setTransferListener)
         // Keep credentials out of media URIs (including Media3/system error logs).
-        val authenticatedAudio = androidx.media3.datasource.ResolvingDataSource.Factory(httpDataSourceFactory) { spec ->
+        val authenticatedAudio = androidx.media3.datasource.ResolvingDataSource.Factory(redirectSafeFactory) { spec ->
             if (`in`.synthora.musicbox.network.isBackendAudioRequest(audioBaseUrl, spec.uri.toString())) {
                 val credential = if (apiKey.isNotBlank()) "X-Api-Key" to apiKey else
                     kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { `in`.synthora.musicbox.network.AudioCredentials.header() }
@@ -41,4 +39,11 @@ fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = B
         if (cacheWarm) cacheDataSourceFactory.setCacheWriteDataSinkFactory(
             androidx.media3.datasource.cache.CacheDataSink.Factory().setCache(cache).setFragmentSize(256 * 1024L))
         return cacheDataSourceFactory
+}
+
+private val playbackHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(`in`.synthora.musicbox.network.DEVICE_AUDIO_READ_TIMEOUT_MS.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
 }
