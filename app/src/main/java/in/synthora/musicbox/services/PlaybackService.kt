@@ -1845,6 +1845,7 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
             val ownerController = controller.uid == android.os.Process.myUid()
+            if (!ownerController && !controller.isTrusted) return MediaSession.ConnectionResult.reject()
             val sessionCommands =
                 MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                     .apply { if (ownerController) add(
