@@ -196,6 +196,11 @@ class KeyboardArtistPresentationTest {
         var palette by mutableStateOf(listOf(Color.Red,Color.Green,Color.Blue))
         var extent by mutableFloatStateOf(.3f)
         compose.setContent { JUKETheme { AnimatedAmbientBackdrop(palette,Modifier.size(240.dp,400.dp),extent,Color.Black) } }
+        compose.waitUntil(5000) {
+            val pixels=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()
+            val a=pixels[pixels.width/8,5];val b=pixels[pixels.width*7/8,5]
+            kotlin.math.abs(a.red-b.red)>.02f || kotlin.math.abs(a.blue-b.blue)>.02f
+        }
         val home=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()
         val left=home[home.width/8,5]
         val right=home[home.width*7/8,5]
@@ -204,9 +209,19 @@ class KeyboardArtistPresentationTest {
         assertTrue(below.red<.01f && below.green<.01f && below.blue<.01f)
         compose.runOnIdle { palette=List(3){Color.Red};extent=1f }
         compose.mainClock.advanceTimeBy(1200)
+        compose.waitUntil(5000) {
+            val pixel=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15,15]
+            pixel.red>.1f && pixel.blue<.005f && pixel.green<.005f
+        }
         compose.mainClock.autoAdvance=false
         compose.runOnIdle { palette=List(3){Color.Blue} }
-        compose.mainClock.advanceTimeByFrame()
+        // Rasterization is asynchronous. Observe the first rendered blue frame
+        // before measuring the animation, keeping the actual color assertions.
+        compose.waitUntil(5000) {
+            compose.mainClock.advanceTimeByFrame()
+            val pixel=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15,15]
+            pixel.blue>.005f && pixel.red>.02f
+        }
         compose.mainClock.advanceTimeBy(550)
         val middle=compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15,15]
         assertTrue("Both artwork colors should be visible during the blend",middle.red>.02f && middle.blue>.02f)
