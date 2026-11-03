@@ -203,6 +203,7 @@ class MainActivity : ComponentActivity() {
         handlePlayerIntent(intent)
 
         setContent {
+            `in`.synthora.musicbox.utils.ObserveWindowFrameTimings("main")
             val themeColorsFlow = remember(musicViewModel) {
                 musicViewModel.uiState.map { it.extractedColors }.distinctUntilChanged()
             }

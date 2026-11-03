@@ -38,8 +38,11 @@ internal fun verifyUpdateApk(context: Context, file: File, digest: String?) {
     val nextVersion = if (Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
     check(nextVersion > currentVersion) { "Update is not newer than the installed app" }
     val trusted = if (Build.VERSION.SDK_INT >= 28) {
-        val signers = candidate.signingInfo?.apkContentsSigners.orEmpty()
-        signers.isNotEmpty() && signers.all { manager.hasSigningCertificate(context.packageName,
+        val info = candidate.signingInfo
+        if (info == null) false
+        else if (info.hasMultipleSigners()) info.apkContentsSigners.orEmpty().toSet() ==
+            installed.signingInfo?.apkContentsSigners.orEmpty().toSet()
+        else info.signingCertificateHistory.orEmpty().any { manager.hasSigningCertificate(context.packageName,
             MessageDigest.getInstance("SHA-256").digest(it.toByteArray()), PackageManager.CERT_INPUT_SHA256) }
     } else {
         val signatures = candidate.signatures.orEmpty()

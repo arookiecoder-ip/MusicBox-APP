@@ -375,6 +375,7 @@ fun PlayerScreen(
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = null
     ) {
+        `in`.synthora.musicbox.utils.ObserveWindowFrameTimings("player")
         JUKETheme(darkTheme = true) {
         Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll().graphicsLayer {
             translationY = (1f - entrance.value) * 48.dp.toPx()

@@ -228,7 +228,7 @@ object Backend {
     fun cookieHeaders(): List<String> = browserCookieHeaders(baseUrl, jar.all())
 }
 
-/** Preserve HttpOnly, SameSite (when supplied) and scope; never export another host's cookies. */
+/** Preserve HttpOnly and URL scope, using the server session's Lax policy. */
 internal fun browserCookieHeaders(destination: String, cookies: List<Cookie>): List<String> {
     val url = destination.toHttpUrlOrNull() ?: return emptyList()
     return cookies.filter { it.matches(url) && it.expiresAt > System.currentTimeMillis() }

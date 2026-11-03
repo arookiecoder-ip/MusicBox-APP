@@ -104,7 +104,8 @@ class DownloadRepository private constructor(private val context: Context) {
             pending.addAll(restored.pending)
             completed.addAll(restored.completed)
             restored.queued.forEach { queued.putIfAbsent(it.ytVideoId.orEmpty(), it) }
-            savedCollections.addAll(restored.collections)
+            val existingCollections = savedCollections.map { it.key }.toSet()
+            savedCollections.addAll(restored.collections.filter { it.key !in existingCollections })
             unavailable.putAll(restored.unavailable.associateBy { it.key })
             initialized = true
             batchTotal = pending.size + queued.size

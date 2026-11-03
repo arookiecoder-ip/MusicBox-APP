@@ -57,6 +57,8 @@ object Diagnostics {
             `in`.synthora.musicbox.services.PlaybackDiagnostics.recentPlaybackEvents().forEach { appendLine("  $it") }
             appendLine("Remote notification lifecycle:")
             `in`.synthora.musicbox.services.RemoteNotificationDiagnostics.snapshot().forEach { appendLine("  $it") }
+            appendLine("Foreground UI frame timings (per-process, display-budget aware):")
+            appendLine(FrameTimings.report())
             appendLine("Playback timings:")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.snapshot().forEach { (stage, value) ->
                 appendLine("  $stage: $value")
