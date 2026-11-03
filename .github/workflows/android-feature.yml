@@ -41,6 +41,7 @@ on:
 
 jobs:
   verify-connect:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,6 +61,7 @@ jobs:
           path: app/build/test-results/testDebugUnitTest
 
   build:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -222,6 +224,7 @@ jobs:
         run: rm -f "$HOME/.android/music-box-debug.keystore"
 
   ui-tests:
+    timeout-minutes: 20
     if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
     needs: build
     runs-on: ubuntu-latest
@@ -260,12 +263,18 @@ jobs:
           script: |
             adb install apk/app-debug.apk
             adb install test-apk/app-debug-androidTest.apk
-            adb shell am instrument -w -e class ${{ inputs.local_ui_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest#uncachedHttpAudioPlaysThroughProductionPipeline,in.synthora.musicbox.PlaybackStreamRegressionTest#configuredAudioPathPrefixStillAuthenticatesAndPlays,in.synthora.musicbox.PlaybackStreamRegressionTest#largeQueueShuffleAndReorderPreserveEverySongAndCurrentItem,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }} in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > ui-results.txt
+            timeout 480 adb shell am instrument -w -e class ${{ inputs.local_ui_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest#uncachedHttpAudioPlaysThroughProductionPipeline,in.synthora.musicbox.PlaybackStreamRegressionTest#configuredAudioPathPrefixStillAuthenticatesAndPlays,in.synthora.musicbox.PlaybackStreamRegressionTest#largeQueueShuffleAndReorderPreserveEverySongAndCurrentItem,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }} in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > ui-results.txt
             adb pull /sdcard/Android/data/in.synthora.musicbox/files/performance performance-results || true
             [ "${{ inputs.full_ui_tests }}" != "true" ] || adb pull /sdcard/Android/data/in.synthora.musicbox/files/screenshots screenshots
             cat ui-results.txt
             ! grep -E 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' ui-results.txt
             grep -E 'OK \([0-9]+ tests?\)' ui-results.txt
+
+      - name: Collect emulator failure diagnostics
+        if: failure()
+        run: |
+          timeout 15 adb logcat -d -t 1000 > emulator-logcat.txt || true
+          timeout 15 adb shell dumpsys activity activities > emulator-activities.txt || true
 
       - name: Upload UI results and screenshots
         if: always()
@@ -274,10 +283,13 @@ jobs:
           name: native-ui-results-${{ matrix.profile }}
           path: |
             performance-results/
+            emulator-logcat.txt
+            emulator-activities.txt
             ui-results.txt
             screenshots
 
   interaction-regressions:
+    timeout-minutes: 20
     if: ${{ github.event_name == 'push' && inputs.stable_release != true }}
     needs: build
     runs-on: ubuntu-latest
