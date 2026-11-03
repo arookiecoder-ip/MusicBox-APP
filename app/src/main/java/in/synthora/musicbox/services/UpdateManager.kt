@@ -221,7 +221,11 @@ object UpdateManager {
 
                 if (preparing) return
                 preparing = true
-                scope.launch { handleDownloadComplete(context, completedDownloadId) }
+                val pending = goAsync()
+                scope.launch {
+                    try { handleDownloadComplete(context, completedDownloadId) }
+                    finally { pending.finish() }
+                }
             }
         }
 
