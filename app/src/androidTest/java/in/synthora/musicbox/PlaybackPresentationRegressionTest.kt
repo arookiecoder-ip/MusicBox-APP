@@ -46,18 +46,19 @@ class PlaybackPresentationRegressionTest {
         fun row(id: String) = compose.onNodeWithTag("Queue row surface $id", useUnmergedTree = true)
             .captureToImage().toPixelMap()[15, 5]
         compose.waitUntil(5000) { backdrop().let { it.red > it.blue + .1f } }
+        val oldBackdrop = backdrop()
         val oldRow = row("red-song")
         compose.onNodeWithTag("Queue row red-song").assertIsSelected()
         compose.mainClock.autoAdvance = false
         compose.runOnIdle { state = state.copy(currentTrack = songs[1], queueIndex = 1, extractedColors = palette(Color.Blue)) }
         compose.waitUntil(5000) {
             compose.mainClock.advanceTimeByFrame()
-            backdrop().let { it.blue > .025f && it.red > .05f }
+            backdrop().let { it.blue > oldBackdrop.blue + .005f && it.red > .05f }
         }
         compose.mainClock.advanceTimeBy(300)
         val middle = backdrop()
         assertTrue("Previous artwork remains visible during the transition", middle.red > .02f)
-        assertTrue("New artwork is blended during the transition", middle.blue > .02f)
+        assertTrue("New artwork is blended during the transition", middle.blue > oldBackdrop.blue + .02f)
         compose.mainClock.advanceTimeBy(1800)
         val end = backdrop()
         assertTrue("Queue follows the new blue artwork", end.blue > end.red + .1f)
