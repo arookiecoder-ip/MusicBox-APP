@@ -194,13 +194,21 @@ class QueueSelectionRegressionTest {
             QueueBottomSheetContent(songs[selected],songs,selected,MusicUiState(isQueueOperationInProgress=busy),{}, {_,_->}, {_,_->}, {},
                 onPlayEntry={_,index->selected=index;clicks++})
         } } }
-        repeat(6) { attempt ->
-            val row=compose.onNodeWithTag("Queue row song1")
-            row.performTouchInput { down(center) }
-            compose.runOnIdle { busy=!busy;selected=if(attempt%2==0) 1 else 0 }
-            row.performTouchInput { moveBy(Offset(1f,1f));up() }
-            compose.runOnIdle { assertEquals(attempt+1,clicks); assertEquals(1,selected) }
-        }
+        // State must change during a short tap. Auto-advancing until the new
+        // 700ms palette animation is idle would turn the held finger into a long press.
+        compose.mainClock.autoAdvance=false
+        try {
+            repeat(6) { attempt ->
+                val row=compose.onNodeWithTag("Queue row song1")
+                row.performTouchInput { down(center) }
+                compose.runOnIdle { busy=!busy;selected=if(attempt%2==0) 1 else 0 }
+                compose.mainClock.advanceTimeByFrame()
+                row.performTouchInput { moveBy(Offset(1f,1f));up() }
+                compose.mainClock.advanceTimeByFrame()
+                compose.runOnIdle { assertEquals(attempt+1,clicks); assertEquals(1,selected) }
+                compose.mainClock.advanceTimeBy(800)
+            }
+        } finally { compose.mainClock.autoAdvance=true }
     }
 
     @Test fun playlistDownloadBadgeSurvivesCompletionCancellationAndRestartBetweenFrames() {
