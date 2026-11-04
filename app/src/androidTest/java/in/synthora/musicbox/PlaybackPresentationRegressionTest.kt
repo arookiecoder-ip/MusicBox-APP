@@ -6,6 +6,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -65,4 +67,23 @@ class PlaybackPresentationRegressionTest {
         compose.onNodeWithTag("Queue row blue-song").assertIsSelected()
         compose.onNodeWithTag("Queue row red-song").assertIsNotSelected()
     }
+    @Test fun selectedQueueTitleRemainsReadableWithWhiteArtwork() {
+        val song = Track("white-song", "White song", "Artist")
+        val white = ExtractedColors(primary = Color.White, secondary = Color.White,
+            tertiary = Color.White, background = Color.White)
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(500.dp)) {
+            QueueBottomSheetContent(song, listOf(song), 0, MusicUiState(extractedColors = white),
+                {}, { _, _ -> }, { _, _ -> }, {})
+        } } }
+        compose.waitUntil(5000) {
+            compose.onNodeWithTag("Ambient backdrop").captureToImage().toPixelMap()[15, 15].red > .15f
+        }
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        compose.onNodeWithText("White song").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val text = layouts.single().layoutInput.style.color.luminance()
+        val background = compose.onNodeWithTag("Queue row surface white-song", useUnmergedTree = true)
+            .captureToImage().toPixelMap()[15, 5].luminance()
+        assertTrue("Selected title contrast must stay readable on bright artwork", (text + .05f) / (background + .05f) >= 4.5f)
+    }
+
 }
