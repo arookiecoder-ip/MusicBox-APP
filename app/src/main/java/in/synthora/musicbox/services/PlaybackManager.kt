@@ -124,8 +124,8 @@ class PlaybackManager private constructor(private val context: Context) {
     private var userQueueRequested = false
     private var pausedAtMs = android.os.SystemClock.elapsedRealtime()
     private fun publishSnapshot(ctrl: MediaController) {
-        _cursorRevision.value++
         _snapshot.value = phonePlaybackSnapshot(ctrl)
+        _cursorRevision.value++
     }
 
     // Flow to emit current track UUID changes
@@ -246,7 +246,10 @@ class PlaybackManager private constructor(private val context: Context) {
                         override fun onEvents(player: Player, events: Player.Events) {
                             if (events.contains(Player.EVENT_POSITION_DISCONTINUITY) ||
                                 events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
-                                events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED)) _cursorRevision.value++
+                                events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED) ||
+                                events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
+                                events.contains(Player.EVENT_IS_PLAYING_CHANGED) ||
+                                events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) _cursorRevision.value++
                             if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED))
                                 controller?.let(::publishSnapshot)
                         }
@@ -278,6 +281,7 @@ class PlaybackManager private constructor(private val context: Context) {
 
                         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                             if (!playWhenReady) _isPlaying.value = false
+                            if (!playWhenReady) savePlaybackState()
                             if (playWhenReady) pausedAtMs = 0L
                             else if (pausedAtMs == 0L) pausedAtMs = android.os.SystemClock.elapsedRealtime()
                         }
@@ -364,6 +368,7 @@ class PlaybackManager private constructor(private val context: Context) {
                     }
                     try {
                         controller?.addListener(playerListener!!)
+                        controller?.let(::publishSnapshot)
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to add player listener: ${e.message}")
                     }
@@ -1047,8 +1052,10 @@ class PlaybackManager private constructor(private val context: Context) {
 
     private fun savePlaybackState() {
         try {
-            val position = controller?.currentPosition ?: 0L
-            val currentIndex = controller?.currentMediaItemIndex ?: -1
+            val current = controller ?: return
+            val currentIndex = current.currentMediaItemIndex
+            if (currentIndex < 0 || current.currentMediaItem == null) return
+            val position = current.currentPosition.coerceAtLeast(0)
 
             prefs.edit().apply {
                 putLong("playback_position", position)

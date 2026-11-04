@@ -9,7 +9,9 @@ internal data class EchoSeekPreview(val previous: EchoState, val position: Long,
             snapshot.sharedOutput.serial != previous.sharedOutput.serial
         val confirmed = snapshot.playbackRevision > previous.playbackRevision && snapshot.confirmed &&
             !snapshot.processing && kotlin.math.abs(snapshot.positionMs - position) <= 2_000
-        if (changed || confirmed || now >= until) return snapshot
+        val failed = snapshot.playbackRevision > previous.playbackRevision && !snapshot.playing &&
+            !snapshot.processing
+        if (changed || confirmed || failed || now >= until) return snapshot
         return snapshot.copy(positionMs = position, anchoredAt = now,
             playing = previous.playing, processing = previous.playing, confirmed = !previous.playing)
     }

@@ -525,7 +525,9 @@ class PlaybackService : MediaLibraryService() {
         override fun run() {
             if (!callGuard.resumePending) return
             if (outputPrefs.getString("playback_output", "PHONE") != "PHONE" ||
-                player.currentMediaItem?.mediaId != callResumeMediaId || PhonePlaybackOwnership.token != callResumeToken) {
+                player.currentMediaItem?.mediaId != callResumeMediaId ||
+                !canRecoverCallLease(callResumeToken, PhonePlaybackOwnership.token,
+                    MobileDeviceConnection.output.value, PhonePlaybackOwnership.ownerId)) {
                 callGuard.explicitPause()
                 return
             }
@@ -539,8 +541,8 @@ class PlaybackService : MediaLibraryService() {
             }
             // Do not take playback back from another music app selected during
             // the call or during Android's final focus handoff.
-            if (audioManager.isMusicActive && !player.isPlaying) {
-                callGuard.explicitPause()
+            if (callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
+                if (callGuard.resumePending) mainHandler.postDelayed(this, 250)
                 return
             }
             callGuard.resumeConsumed()

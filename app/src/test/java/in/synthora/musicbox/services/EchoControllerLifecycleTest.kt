@@ -113,4 +113,37 @@ class EchoControllerLifecycleTest {
         assertEquals("stale response must not launch volume or account reads", 1, reads)
         controller.clear()
     }
+    @Test fun seekPreviewIsImmediateAndQueuedScrubsOnlySendTheLatestIntent() = runBlocking {
+        val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("coalesced-seek", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("echo_serial", "device").commit()
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val writes = mutableListOf<JsonObject>()
+        val controller = EchoController(this, prefs, { fail(it) }, {},
+            read = { _, _ -> buildJsonObject {
+                put("video_id", "AAAAAAAAAAA"); put("title", "Current song"); put("duration_ms", 200_000)
+                put("position_ms", 5_000); put("playing", true); put("playback_confirmed", true)
+                put("playback_output", "alexa"); put("playback_revision", 1)
+            } }, write = { path, body ->
+                assertEquals("/alexa/seek/", path)
+                writes += body
+                if (writes.size == 1) { started.complete(Unit); release.await() }
+                buildJsonObject { put("ok", true) }
+            })
+        try {
+            controller.refresh(force = true, stateOnly = true)
+            val first = launch { controller.seek(20_000, refreshAfter = false) }
+            withTimeout(5_000) { started.await() }
+            assertEquals(20_000L, controller.state.value.positionMs)
+            val second = launch { controller.seek(40_000, refreshAfter = false) }; yield()
+            val third = launch { controller.seek(60_000, refreshAfter = false) }; yield()
+            assertEquals("The preview cannot wait for the outstanding HTTP request", 60_000L, controller.state.value.positionMs)
+            assertEquals(1, writes.size)
+            release.complete(Unit)
+            withTimeout(5_000) { joinAll(first, second, third) }
+            assertEquals(listOf(20_000L, 60_000L), writes.map { it.getValue("position_ms").jsonPrimitive.long })
+            assertTrue(writes.all { it.getValue("async").jsonPrimitive.boolean })
+        } finally { release.complete(Unit); controller.clear() }
+    }
+
 }

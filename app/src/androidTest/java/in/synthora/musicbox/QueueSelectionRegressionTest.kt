@@ -26,6 +26,7 @@ import `in`.synthora.musicbox.ui.theme.JUKETheme
 import `in`.synthora.musicbox.viewmodels.HomeUiState
 import `in`.synthora.musicbox.viewmodels.MusicUiState
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -309,6 +310,24 @@ class QueueSelectionRegressionTest {
                             `in`.synthora.musicbox.network.NetworkFeedback.refresh(context)
                             !`in`.synthora.musicbox.network.NetworkFeedback.online.value
                         }
+                        // A paused seek and a new subscriber must retain the real cursor
+                        // without resuming audio or adding a paused/background timer.
+                        val clockScope=CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+                        try {
+                            var clockJob=clockScope.launch { model.playbackProgress.collect {} }
+                            instrumentation.runOnMainSync { manager.seekTo(1_200);controller.pause() }
+                            waitForState("Paused seek did not update progress") {
+                                model.playbackProgress.value.positionMs in 1_100L..1_350L && !model.uiState.value.isPlaying
+                            }
+                            kotlinx.coroutines.runBlocking { clockJob.cancelAndJoin() }
+                            android.os.SystemClock.sleep(350)
+                            val reopened=java.util.concurrent.CopyOnWriteArrayList<PlaybackProgress>()
+                            clockJob=clockScope.launch { model.playbackProgress.collect { reopened += it } }
+                            waitForState("Paused progress was lost when reopening") { reopened.isNotEmpty() }
+                            assertTrue("Reopened paused player briefly reset to zero",reopened.all { it.positionMs in 1_100L..1_350L })
+                            instrumentation.runOnMainSync { assertFalse(controller.isPlaying) }
+                            kotlinx.coroutines.runBlocking { clockJob.cancelAndJoin() }
+                        } finally { clockScope.cancel() }
                         val audioManager=context.getSystemService(android.media.AudioManager::class.java)
                         fun mode(value:Int) {
                             instrumentation.runOnMainSync { audioManager.mode=value }

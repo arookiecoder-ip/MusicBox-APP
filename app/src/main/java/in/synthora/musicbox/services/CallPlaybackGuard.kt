@@ -23,6 +23,7 @@ internal class CallPlaybackGuard(
     private var normalSince: Long? = null
     private var settlingUntil = 0L
     private var settlingRetryUsed = false
+    private var otherAudioSince: Long? = null
     val isSettlingRetry get() = settlingRetryUsed && resumePending
     fun readyToResume(): Boolean {
         if (!resumePending || isInCall()) { normalSince = null; return false }
@@ -37,7 +38,17 @@ internal class CallPlaybackGuard(
     val needsModePolling get() = resumePending || manualDuringCall || focusLossAt?.let { nowMs()-it in 0..10_000 } == true
     val blocksAutomaticPlayback get() = isInCall() && !manualDuringCall
 
+    /** Call audio/focus can linger briefly after NORMAL; a different music app wins. */
+    fun waitForAudioRelease(otherAudioActive: Boolean): Boolean {
+        if (!otherAudioActive) { otherAudioSince = null; return false }
+        val now = nowMs()
+        val since = otherAudioSince ?: now.also { otherAudioSince = it }
+        if (now - since >= 2_500) explicitPause()
+        return true
+    }
+
     fun explicitPlay() {
+        otherAudioSince=null
         resumePending=false
         focusLossAt=null
         settlingUntil=0L
@@ -48,6 +59,7 @@ internal class CallPlaybackGuard(
         updateManualFocus(manualDuringCall)
     }
     fun explicitPause() {
+        otherAudioSince=null
         resumePending=false
         focusLossAt=null
         settlingUntil=0L
@@ -61,6 +73,7 @@ internal class CallPlaybackGuard(
         if(!isInCall()) updateManualFocus(false)
     }
     fun resumeConsumed() {
+        otherAudioSince=null
         val now=nowMs()
         if (now > settlingUntil || settlingUntil == 0L) settlingRetryUsed=false
         settlingUntil=now+2_000
@@ -118,3 +131,9 @@ internal class CallPlaybackGuard(
         }
     }
 }
+
+/** A lost/renewed local lease can be recovered after a long call; a handoff cannot. */
+internal fun canRecoverCallLease(expected: String, current: String,
+    output: SharedPlaybackOutput, ownId: String): Boolean = current == expected ||
+    (!blocksLocalResumption(output, ownId) && !output.isRemotePhoneOutput(ownId) &&
+        (current.isBlank() || (output.owner == ownId && output.token == current)))

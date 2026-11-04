@@ -2380,7 +2380,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
-    private fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
+    internal fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
         val state = uiState.value
         if (isAlexa || isRemotePhone) {
             val echoState = echo.state.value
@@ -2395,9 +2395,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val matches = !`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff &&
             playbackManager.snapshot.value.currentId == state.currentTrack?.uuid && !idlePhoneSelection
         return `in`.synthora.musicbox.services.PlaybackProgress(
-            if (matches) playbackManager.getCurrentPosition() else state.position,
+            if (matches && state.currentTrack != null) playbackManager.getResumePosition(state.currentTrack.uuid, state.position) else state.position,
             if (matches) playbackManager.getDuration().takeIf { it > 0 } ?: state.duration else state.duration)
     }
+
+    internal fun visiblePlaybackProgress(progress: `in`.synthora.musicbox.services.PlaybackProgress) =
+        if (progress.trackId == uiState.value.currentTrack?.uuid && progress.output == _output.value.name) progress
+        else currentPlaybackProgress()
 
     val playbackProgress = `in`.synthora.musicbox.services.playbackClock(viewModelScope,
         combine(uiState, _output, playbackManager.cursorRevision) { state, output, revision ->

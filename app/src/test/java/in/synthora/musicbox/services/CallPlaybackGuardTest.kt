@@ -145,4 +145,36 @@ class CallPlaybackGuardTest {
         assertEquals(listOf(true,false),updates)
     }
 
+    @Test fun lingeringCallAudioDefersRatherThanCancelsAndThenResumes() {
+        var calling = true; var now = 1_000L
+        val guard = CallPlaybackGuard({ calling }, {}, {}, {}, nowMs = { now })
+        guard.modeChanged(true); calling = false; guard.modeChanged(false)
+        now += 800; assertTrue(guard.readyToResume())
+        assertTrue(guard.waitForAudioRelease(true)); assertTrue(guard.resumePending)
+        now += 1_000; assertTrue(guard.waitForAudioRelease(true)); assertTrue(guard.resumePending)
+        assertFalse(guard.waitForAudioRelease(false)); assertTrue(guard.resumePending)
+        guard.resumeConsumed(); assertFalse(guard.resumePending)
+    }
+    @Test fun sustainedOtherMusicCancelsRecoveryAndExplicitPauseClearsItsWindow() {
+        var calling = true; var now = 1_000L
+        val guard = CallPlaybackGuard({ calling }, {}, {}, {}, nowMs = { now })
+        guard.modeChanged(true); calling = false; guard.modeChanged(false)
+        assertTrue(guard.waitForAudioRelease(true))
+        now += 2_500; assertTrue(guard.waitForAudioRelease(true)); assertFalse(guard.resumePending)
+        calling = true; guard.modeChanged(true); guard.explicitPause()
+        now += 5_000; calling = false; guard.modeChanged(false)
+        assertFalse(guard.resumePending)
+    }
+    @Test fun expiredAndRenewedOwnLeasesCanRecoverButRemoteHandoffsCannot() {
+        val own = SharedPlaybackOutput(mode = "phone", owner = "self", token = "new", leaseMs = 12_000)
+        assertTrue(canRecoverCallLease("old", "", own, "self"))
+        assertTrue(canRecoverCallLease("old", "new", own, "self"))
+        assertFalse(canRecoverCallLease("old", "unrelated", own, "self"))
+        assertFalse(canRecoverCallLease("old", "", own.copy(owner = "other"), "self"))
+        assertFalse(canRecoverCallLease("old", "", own.copy(owner = "other", leaseMs = 0), "self"))
+        assertFalse(canRecoverCallLease("old", "", own.copy(mode = "alexa"), "self"))
+        assertFalse(canRecoverCallLease("old", "new", own.copy(handoffPending = true), "self"))
+        assertTrue(canRecoverCallLease("old", "", own.copy(owner = "", token = "", leaseMs = 0), "self"))
+    }
+
 }

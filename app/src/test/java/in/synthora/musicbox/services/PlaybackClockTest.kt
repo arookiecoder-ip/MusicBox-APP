@@ -73,4 +73,35 @@ class PlaybackClockTest {
         assertEquals(PlaybackProgress(0, 0), PlaybackProgress(-1, -1).bounded())
         assertEquals(0f, PlaybackProgress(200, 0).fraction)
     }
+    @Test fun closingAndReopeningPausedPlayerRetainsCursorWithoutBackgroundReads() = runTest {
+        var reads = 0
+        val source = MutableStateFlow(state(false, 8_000))
+        val clock = playbackClock(backgroundScope, source, { reads++; PlaybackProgress(it.anchor, it.duration) })
+        val first = backgroundScope.launch { clock.collect {} }; runCurrent()
+        assertEquals(8_000L, clock.value.positionMs)
+        first.cancel(); runCurrent()
+        advanceTimeBy(60_000); runCurrent()
+        assertEquals(1, reads)
+        assertEquals("A paused timeline must not reset when the screen closes", 8_000L, clock.value.positionMs)
+        val again = backgroundScope.launch { clock.collect {} }
+        assertEquals(8_000L, clock.value.positionMs)
+        runCurrent(); assertEquals(2, reads)
+        assertEquals("song", clock.value.trackId)
+        assertEquals("PHONE", clock.value.output)
+        again.cancel()
+    }
+    @Test fun cachedProgressCarriesIdentitySoANewSongCannotReuseItsPosition() = runTest {
+        val source = MutableStateFlow(state(false, 8_000))
+        val clock = playbackClock(backgroundScope, source, { PlaybackProgress(it.anchor, it.duration) })
+        val first = backgroundScope.launch { clock.collect {} }; runCurrent()
+        first.cancel(); runCurrent()
+        source.value = state(false).copy(trackId = "next", output = "ALEXA")
+        assertEquals("song", clock.value.trackId) // Consumers can reject this cached source immediately.
+        val second = backgroundScope.launch { clock.collect {} }; runCurrent()
+        assertEquals("next", clock.value.trackId)
+        assertEquals("ALEXA", clock.value.output)
+        assertEquals(0L, clock.value.positionMs)
+        second.cancel()
+    }
+
 }

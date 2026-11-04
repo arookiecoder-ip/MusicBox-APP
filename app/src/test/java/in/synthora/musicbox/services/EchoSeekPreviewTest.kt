@@ -36,4 +36,13 @@ class EchoSeekPreviewTest {
         assertSame(output, preview.reconcile(output, 2_000))
         assertEquals(50_000L, preview.reconcile(before.copy(sharedOutput = before.sharedOutput.copy(leaseMs = 100)), 2_000).positionMs)
     }
+    @Test fun asynchronousDispatchFailureStopsThePreviewImmediately() {
+        val preview = EchoSeekPreview(before, 50_000, 9_000)
+        val failed = before.copy(playing = false, processing = false, confirmed = false,
+            positionMs = 10_000, playbackRevision = 6)
+        assertSame(failed, preview.reconcile(failed, 2_000))
+        // An older paused poll must still not cancel the pending seek.
+        assertEquals(50_000L, preview.reconcile(failed.copy(playbackRevision = 3), 2_000).positionMs)
+    }
+
 }

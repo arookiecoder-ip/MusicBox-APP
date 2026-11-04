@@ -220,7 +220,7 @@ fun MiniPlayer(
 
         val lyricFlow = remember(musicViewModel, parsedLyrics, gapThreshold, uiState.isLoading, isMiniPlayerLyricsEnabled) {
             musicViewModel.playbackProgress.map { progress ->
-                val currentPosition = progress.positionMs
+                val currentPosition = musicViewModel.visiblePlaybackProgress(progress).positionMs
                 if (!isMiniPlayerLyricsEnabled || uiState.isLoading || parsedLyrics.isEmpty()) {
                     null
                 } else {
@@ -493,6 +493,6 @@ private fun MiniPlayerProgress(music: MusicViewModel, modifier: Modifier) {
     val foreground = MaterialTheme.colorScheme.primary
     androidx.compose.foundation.Canvas(modifier) {
         drawRect(background)
-        drawRect(foreground, size = androidx.compose.ui.geometry.Size(size.width * progress.value.fraction, size.height))
+        drawRect(foreground, size = androidx.compose.ui.geometry.Size(size.width * music.visiblePlaybackProgress(progress.value).fraction, size.height))
     }
 }

@@ -449,6 +449,9 @@ class EchoController(
             try {
                 send("/alexa/seek/", buildJsonObject {
                     put("serial", serial); put("position_ms", position)
+                    // New servers acknowledge the fenced/coalesced intent without
+                    // holding later scrubs behind Amazon's spoken-command round trip.
+                    put("async", true)
                     previous.track?.ytVideoId?.let { put("video_id", it) }
                     if (previous.index >= 0) put("expected_queue_index", previous.index)
                     if (expectedPhoneToken != null) {

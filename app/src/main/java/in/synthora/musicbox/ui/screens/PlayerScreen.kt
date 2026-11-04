@@ -840,6 +840,7 @@ private fun ClockedPlayerArtwork(state: MusicUiState, track: Track, lyrics: Bool
 
 @Composable
 private fun ClockedPlayerProgress(state: MusicUiState, music: MusicViewModel, modifier: Modifier) {
-    val progress by music.playbackProgress.collectAsStateWithLifecycle()
+    val cachedProgress by music.playbackProgress.collectAsStateWithLifecycle()
+    val progress = music.visiblePlaybackProgress(cachedProgress)
     PlayerProgress(currentPosition = progress.positionMs, uiState = state.copy(position = progress.positionMs, duration = progress.durationMs.takeIf { it > 0 } ?: state.duration), musicViewModel = music, modifier = modifier)
 }
