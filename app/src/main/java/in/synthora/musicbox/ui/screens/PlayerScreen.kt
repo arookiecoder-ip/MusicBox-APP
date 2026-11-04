@@ -321,8 +321,8 @@ fun PlayerScreen(
         val queueError by musicViewModel.queueLoadError.collectAsStateWithLifecycle()
         // The queue does not display the playback clock. Keep its inputs stable
         // while progress updates so visible rows are not rebuilt every tick.
-        val queueUiState = remember(uiState.isPlaying, uiState.isLoading, uiState.isQueueOperationInProgress, preparingRows) {
-            MusicUiState(isPlaying = uiState.isPlaying, isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
+        val queueUiState = remember(uiState.isPlaying, uiState.isLoading, uiState.isQueueOperationInProgress, uiState.extractedColors, preparingRows) {
+            MusicUiState(isPlaying = uiState.isPlaying, isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress, extractedColors = uiState.extractedColors)
         }
             Box(Modifier.alpha(if (isAlexa && amazonConnected == false) .4f else 1f)) {
             QueueBottomSheetContent(
@@ -463,7 +463,7 @@ fun PlayerScreen(
         }
         ModalBottomSheet(
             shape = androidx.compose.ui.graphics.RectangleShape,
-            containerColor = `in`.synthora.musicbox.ui.theme.dockColor(),
+            containerColor = Color.Transparent,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
             onDismissRequest = { showQueue = false },
             sheetState = queueSheet,

@@ -2,6 +2,9 @@ package `in`.synthora.musicbox.ui.components.player
 
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -27,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -100,7 +102,14 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             delay(16)
         }
     }
-    Column(Modifier.fillMaxSize().background(`in`.synthora.musicbox.ui.theme.dockColor()).stableNavigationBarsPadding()) {
+    val colors = uiState.extractedColors
+    // Lighten the artwork accent for readable titles on the dark ambient backdrop.
+    val accent by animateColorAsState(colors?.primary?.let { lerp(it, Color.White, .45f) }
+        ?: MaterialTheme.colorScheme.primary, tween(700), label = "Queue accent")
+    val palette = remember(colors) { colors?.let { listOf(it.background, it.secondary, it.tertiary) }.orEmpty() }
+    Box(Modifier.fillMaxSize().testTag("Queue palette background")) {
+    `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(palette, Modifier.matchParentSize(), baseColor = Color(0xFF101015))
+    Column(Modifier.fillMaxSize().stableNavigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Queue", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color.White)
@@ -172,7 +181,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                             remove = if (editable && !active) ({ onRemoveTrack(track.uuid) {} }) else null
                         ))
                     }
-                    QueueWebRow(track, position + 1, active, uiState.isPlaying && !uiState.isLoading, dragging, grip,
+                    QueueWebRow(track, position + 1, active, uiState.isPlaying && !uiState.isLoading, dragging, grip, accent,
                         onPlay = { if (onPlayEntry != null) onPlayEntry(track, index) else onPlayTrack(track) }, onLongClick = ::songOptions, onOptions = ::songOptions) {}
 
                 }
@@ -182,14 +191,17 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             if (upcoming == 0 && !uiState.isLoading) item { Text("No upcoming songs", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
     }
+    }
 }
 
 @Composable
-private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boolean, lifted: Boolean, grip: Modifier,
+private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boolean, lifted: Boolean, grip: Modifier, accent: Color,
     onPlay: () -> Unit, onLongClick: () -> Unit, onOptions: () -> Unit, options: @Composable BoxScope.() -> Unit) {
-    val accent = MaterialTheme.colorScheme.primary
+    val rowColor by animateColorAsState(if (active) accent.copy(alpha = .24f)
+        else if (lifted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
+        tween(700), label = "Queue selected row")
     val divider = MaterialTheme.colorScheme.outlineVariant
-    Row(Modifier.fillMaxWidth().height(64.dp).background(if (active) accent.copy(alpha = .16f).compositeOver(`in`.synthora.musicbox.ui.theme.dockColor()) else if (lifted) MaterialTheme.colorScheme.surfaceContainerHigh else `in`.synthora.musicbox.ui.theme.dockColor())
+    Row(Modifier.fillMaxWidth().height(64.dp).background(rowColor).testTag("Queue row surface ${track.uuid}")
         .drawBehind {
             if (active) drawRect(accent, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             drawLine(divider, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, size.height), 1.dp.toPx())

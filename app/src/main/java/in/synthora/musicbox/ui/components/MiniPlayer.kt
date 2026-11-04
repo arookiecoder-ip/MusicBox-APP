@@ -131,6 +131,7 @@ fun MiniPlayer(
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoName = echoDevices.firstOrNull { it.serial == echoSerial }?.name
     val currentTrack = uiState.currentTrack
+    val restoringPlayback by musicViewModel.restoringPlayback.collectAsStateWithLifecycle()
     val isPlaying = uiState.isPlaying && !uiState.isLoading
     val isRomanizedLyricsEnabled by musicViewModel.isRomanizedLyricsEnabled.collectAsStateWithLifecycle()
     val isMiniPlayerLyricsEnabled by musicViewModel.isMiniPlayerLyricsEnabled.collectAsStateWithLifecycle()
@@ -141,6 +142,9 @@ fun MiniPlayer(
     val gesturePrefs = remember { context.getSharedPreferences("power_prefs", android.content.Context.MODE_PRIVATE) }
 
 
+    if (currentTrack == null && (restoringPlayback || uiState.isLoading)) {
+        MiniPlayerSkeleton(modifier)
+    }
     if (currentTrack != null) {
         // Live drag offset of the card; animates off-screen on a committed swipe and back on a cancel.
         val offsetX = remember { Animatable(0f) }

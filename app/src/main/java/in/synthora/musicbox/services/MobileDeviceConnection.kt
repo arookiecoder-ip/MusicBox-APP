@@ -252,6 +252,9 @@ object MobileDeviceConnection {
         })))
 
     suspend fun control(output: SharedPlaybackOutput, action: String, payload: JsonObject = buildJsonObject {}) {
+        require(output.isRemotePhoneOutput(PhonePlaybackOwnership.ownerId) && output.token.isNotBlank() && !output.handoffPending) {
+            "The playback device is reconnecting. Please select a device and try again."
+        }
         val commandId = UUID.randomUUID().toString()
         suspend fun send(current: SharedPlaybackOutput) = request("command", buildJsonObject {
             put("target_id", current.owner); put("output_token", current.token)
