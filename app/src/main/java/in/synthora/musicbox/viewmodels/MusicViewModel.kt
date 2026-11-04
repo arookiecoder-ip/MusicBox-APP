@@ -136,7 +136,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val remoteMobileOutput = _remoteMobileOutput.asStateFlow()
     private val outputChosen get() = settingsPrefs.contains(KEY_OUTPUT)
     private val playbackTargetRestoration = `in`.synthora.musicbox.services.PlaybackTargetRestoration()
-    val restoringPlayback = playbackTargetRestoration.loading
+    private val restoringSavedQueue = MutableStateFlow(true)
+    val restoringPlayback = combine(playbackTargetRestoration.loading, restoringSavedQueue) { target, queue -> target || queue }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
     private var deferredPlaybackJob: Job? = null
 
     private suspend fun restorePlaybackTarget() = playbackTargetRestoration.ensure {
@@ -418,6 +420,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        // Metadata does not need to wait for Media3, stream resolution, or downloads.
+        // Keep the skeleton until this read and device reconciliation both finish.
+        viewModelScope.launch {
+            try { loadRestoredQueue() }
+            finally { restoringSavedQueue.value = false }
+        }
         playbackManager.initialize()
         viewModelScope.launch {
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.queueNeedsSync.collect {
@@ -2680,28 +2688,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadRestoredQueue() {
+        val request = playbackRequestId
         try {
             val prefs = getApplication<Application>().getSharedPreferences(
                 "playback_state_prefs",
                 android.content.Context.MODE_PRIVATE
             )
+            if (!prefs.getBoolean("has_saved_state", false)) return
             val trackIds = prefs.getString("queue_track_ids", "") ?: ""
             val savedIndex = prefs.getInt("queue_start_index", 0)
+            val savedPosition = prefs.getLong("playback_position", 0L).coerceAtLeast(0)
             if (trackIds.isEmpty()) return
 
             val tracks = withContext(Dispatchers.IO) {
-                trackIds.split(",").mapNotNull { id ->
-                    runCatching { trackDao.getTrackByUuid(id)?.toTrack() }.getOrNull()
-                }
+                val ids = trackIds.split(",")
+                val found = ids.distinct().chunked(500).flatMap { trackDao.getTracksByUuids(it) }
+                    .associate { it.uuid to it.toTrack() }
+                ids.mapNotNull(found::get)
             }
-            if (tracks.isNotEmpty()) {
-                val currentTrack = tracks.getOrNull(savedIndex)
+            if (tracks.isNotEmpty() && request == playbackRequestId && _uiState.value.queue.isEmpty()) {
+                val index = savedIndex.coerceIn(tracks.indices)
+                val currentTrack = tracks[index]
                 _uiState.update {
                     it.copy(
                         queue = tracks,
-                        queueIndex = savedIndex,
+                        queueIndex = index,
                         currentTrack = currentTrack,
-                        duration = currentTrack?.durationSec?.toLong()?.times(1000) ?: 0L
+                        position = savedPosition,
+                        duration = currentTrack.durationSec * 1000L
                     )
                 }
             }
