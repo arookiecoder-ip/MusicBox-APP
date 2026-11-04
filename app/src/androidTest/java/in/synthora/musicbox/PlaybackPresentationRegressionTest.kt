@@ -34,7 +34,7 @@ class PlaybackPresentationRegressionTest {
     }
 
     @Test fun queueUsesArtworkColorsAndBlendsThemWhenTheSelectedSongChanges() {
-        val songs = listOf(Track("red-song", "Red song", "Artist"), Track("blue-song", "Blue song", "Artist"))
+        val songs = listOf(Track("red-song", "Red song", "Artist", durationSec = 180), Track("blue-song", "Blue song", "Artist", durationSec = 180))
         fun palette(color: Color) = ExtractedColors(primary = color, secondary = color, tertiary = color, background = color)
         var state by mutableStateOf(MusicUiState(currentTrack = songs[0], queue = songs, queueIndex = 0,
             extractedColors = palette(Color.Red)))
@@ -69,7 +69,7 @@ class PlaybackPresentationRegressionTest {
         compose.onNodeWithTag("Queue row red-song").assertIsNotSelected()
     }
     @Test fun selectedQueueTitleRemainsReadableWithWhiteArtwork() {
-        val song = Track("white-song", "White song", "Artist")
+        val song = Track("white-song", "White song", "Artist", durationSec = 180)
         val white = ExtractedColors(primary = Color.White, secondary = Color.White,
             tertiary = Color.White, background = Color.White)
         compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(500.dp)) {
