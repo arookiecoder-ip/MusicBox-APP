@@ -23,6 +23,14 @@ object PhonePlaybackOwnership {
     @Volatile private var relinquishing = false
     @Volatile private var handingOff = false
     private val preparation = PhonePreparationGuard()
+    private val serverHealth = OwnershipServerHealth()
+    val serverUnavailable: Boolean get() = serverHealth.unavailable(token)
+    val checkingServer: Boolean get() = serverHealth.checking(token, SystemClock.elapsedRealtime())
+    fun checkingOwnership(expectedToken: String) = serverHealth.checking(expectedToken, token, SystemClock.elapsedRealtime())
+    fun ownershipRequestFailed(expectedToken: String, unavailable: Boolean) =
+        serverHealth.failed(expectedToken, token, unavailable)
+    fun permitsLocalContinuation(expectedToken: String = token): Boolean =
+        !relinquishing && expectedToken == token && !remoteControlled && !localHandoff
     var localHandoff: Boolean
         get() = handingOff || preparation.active
         set(value) { handingOff = value }
@@ -56,6 +64,7 @@ object PhonePlaybackOwnership {
         check(output.mode == "phone" && output.owner == ownerId && output.token.isNotBlank() && !output.handoffPending)
         val current = MobileDeviceConnection.rememberOutput(output)
         check(current.token == output.token && !output.olderThan(current)) { "A newer device switch superseded this lease." }
+        serverHealth.clear()
         token = output.token
         remoteControlled = output.controller.isNotBlank() && output.controller != ownerId
         relinquishing = false
@@ -65,8 +74,15 @@ object PhonePlaybackOwnership {
         remote.value = null
     }
 
+    fun taskDismissed() {
+        if (token.isNotBlank()) prefs.edit().putString("dismissed_token", token).remove("last_token").commit()
+    }
+
+    fun dismissed(output: SharedPlaybackOutput): Boolean =
+        dismissedPhoneOutput(output, ownerId, prefs.getString("dismissed_token", "").orEmpty())
+
     fun restoreIfCurrent(output: SharedPlaybackOutput): Boolean {
-        if (output.mode != "phone" || output.owner != ownerId || output.token != prefs.getString("last_token", "") || output.leaseMs <= 0 || output.handoffPending) return false
+        if (dismissed(output) || output.mode != "phone" || output.owner != ownerId || output.token != prefs.getString("last_token", "") || output.leaseMs <= 0 || output.handoffPending) return false
         val latest = MobileDeviceConnection.rememberOutput(output)
         if (latest.token != output.token || output.olderThan(latest)) return false
         accept(output)
@@ -75,6 +91,7 @@ object PhonePlaybackOwnership {
 
     suspend fun releaseTo(output: SharedPlaybackOutput, positionMs: Long? = null, playing: Boolean? = null) {
         relinquishing = true
+        serverHealth.clear()
         token = ""
         leaseUntilMs = 0
         // Call only after the actual Media3 player has paused.
@@ -104,6 +121,7 @@ object PhonePlaybackOwnership {
         canStartPhonePlayback(expectedToken, token, relinquishing, leaseUntilMs, SystemClock.elapsedRealtime())
 
     fun forget(allowOffline: Boolean = false) {
+        serverHealth.clear()
         relinquishing = !allowOffline
         remoteControlled = false
         token = ""

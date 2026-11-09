@@ -4,6 +4,95 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class BackgroundPlaybackRecoveryTest {
+    @Test fun anInFlightOwnershipCheckHasABoundedTokenFencedGrace() {
+        val health = OwnershipServerHealth()
+        health.checking("lease", "lease", 1000)
+        assertTrue(health.checking("lease", 4999))
+        assertFalse(health.checking("lease", 5000))
+        assertFalse(health.checking("other lease", 2000))
+        health.checking("old lease", "lease", 2000)
+        assertFalse(health.checking("lease", 5000))
+        health.checking("lease", "lease", 6000)
+        health.failed("lease", "lease", true)
+        assertFalse(health.checking("lease", 6001))
+        assertTrue(health.unavailable("lease"))
+        health.checking("lease", "lease", 7000)
+        health.clear()
+        assertFalse(health.checking("lease", 7001))
+        assertFalse(health.unavailable("lease"))
+    }
+
+    @Test fun serverOutagesAreFencedToTheFailedTokenAndResetOnReconciliation() {
+        val health = OwnershipServerHealth()
+        assertFalse(health.unavailable("lease"))
+        health.failed("lease", "lease", true)
+        assertTrue(health.unavailable("lease"))
+        assertFalse(health.unavailable("new lease"))
+        health.failed("old lease", "lease", false)
+        assertTrue(health.unavailable("lease"))
+        health.failed("lease", "lease", false)
+        assertFalse(health.unavailable("lease"))
+        health.failed("lease", "lease", true)
+        health.clear()
+        assertFalse(health.unavailable("lease"))
+        health.failed("", "", true)
+        assertFalse(health.unavailable(""))
+    }
+
+    @Test fun ownershipOutagesIncludeTransportTimeoutAndTemporaryServerErrorsButNotAuthOrConflict() {
+        assertTrue(ownershipServerUnavailable(java.io.IOException("Disconnected")))
+        assertTrue(ownershipServerUnavailable(IllegalStateException("Wrapped", java.net.SocketTimeoutException())))
+        for (code in listOf(429, 500, 502, 503, 504))
+            assertTrue(ownershipServerUnavailable(`in`.synthora.musicbox.network.BackendHttpException(code, "Unavailable")))
+        for (code in listOf(400, 401, 403, 404, 409))
+            assertFalse(ownershipServerUnavailable(`in`.synthora.musicbox.network.BackendHttpException(code, "Rejected")))
+        assertFalse(ownershipServerUnavailable(IllegalArgumentException("Invalid action")))
+    }
+
+    @Test fun reconnectGraceIsBoundedAndEndsOnConfirmedOwnership() {
+        val window = OfflineReconciliationWindow()
+        assertFalse(window.active(true, 0))
+        window.update(false, 100)
+        assertTrue(window.active(false, 10000))
+        window.update(true, 10000)
+        assertTrue(window.active(true, 13999))
+        window.update(true, 13000)
+        assertFalse(window.active(true, 14000))
+        window.update(false, 15000)
+        window.update(true, 16000)
+        window.reconciled()
+        assertFalse(window.active(true, 16001))
+    }
+
+    @Test fun interruptedHttpReadsPreserveCacheButDamagedFilesAndParserErrorsAreRepaired() {
+        assertFalse(shouldInvalidateAudio(2000, true, false, true))
+        assertTrue(shouldInvalidateAudio(2000, true, false, true, completedCache = true))
+        assertFalse(shouldInvalidateAudio(2000, true, false, true, completedCache = true, incompleteTransfer = true))
+        assertTrue(shouldInvalidateAudio(2000, true, false, false))
+        assertTrue(shouldInvalidateAudio(3003, false, false, true))
+        assertTrue(shouldInvalidateAudio(2000, false, true, true))
+    }
+
+    @Test fun reconnectPreservesHealthyAndStillBufferedAudio() {
+        assertFalse(needsNetworkSourceRecovery(false, false, false, 1000, 2000))
+        assertFalse(needsNetworkSourceRecovery(false, false, true, 1000, 2000))
+        assertTrue(needsNetworkSourceRecovery(false, false, true, 1000, 1000))
+        assertTrue(needsNetworkSourceRecovery(true, false, false, 1000, 2000))
+        assertTrue(needsNetworkSourceRecovery(false, true, false, 1000, 2000))
+    }
+
+    @Test fun offlineCacheExemptionCannotBypassRemoteControlOrHandoffs() {
+        assertTrue(canContinueCachedOffline(false, false, false, true, false))
+        assertTrue(canContinueCachedOffline(false, false, true, false, false))
+        assertTrue(canContinueCachedOffline(false, false, false, false, false, true))
+        assertFalse(canContinueCachedOffline(false, true, false, false, false, true))
+        assertFalse(canContinueCachedOffline(false, false, false, false, true, true))
+        assertFalse(canContinueCachedOffline(false, false, false, false, false))
+        assertFalse(canContinueCachedOffline(false, true, false, true, false))
+        assertFalse(canContinueCachedOffline(false, false, false, true, true))
+        assertFalse(canContinueCachedOffline(true, false, false, true, false))
+    }
+
     @Test fun cursorPublishingSkipsIdleAndNormalProgressButReportsSeeksAndStateChanges() {
         val paused = PublishedCursor("lease", "song", false, false, 4000, 0)
         assertFalse(paused.copy(at = 60000).needsPublication(paused))
@@ -219,4 +308,10 @@ class BackgroundPlaybackRecoveryTest {
         assertFalse(canJoinRemoteForeground(false, false, false, false))
         assertFalse(canJoinRemoteForeground(true, true, true, true))
     }
+    @Test fun callInterruptionRetainsOnlyAnAlreadyForegroundLocalSession() {
+        assertTrue(retainRecoveryNotification(true,true,false,false,false,false,false,callPending=true))
+        assertFalse(retainRecoveryNotification(true,false,false,false,false,false,false,callPending=true))
+        assertFalse(retainRecoveryNotification(false,true,false,false,false,false,false,callPending=true))
+    }
+
 }

@@ -8,6 +8,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -20,6 +21,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -42,6 +46,17 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
     val server = Backend.baseUrl
     var browser by remember { mutableStateOf<WebView?>(null) }
     val manager = CookieManager.getInstance()
+    val closeScope = rememberCoroutineScope()
+    fun requestClose() {
+        val web = browser
+        if (web == null) { onClose(); return }
+        // Let the leased page revoke its browser before destroying the WebView.
+        // A failed/offline page must never trap the Android back/close action.
+        closeScope.launch { delay(2_000); onClose() }
+        web.evaluateJavascript("(function(){const cancel=document.getElementById('cancel');if(cancel){cancel.click();return true;}return false;})()") { handled ->
+            if (handled != "true") onClose()
+        }
+    }
     fun clearCookies() {
         listOf(server, "$server/youtube-login/").forEach { scope ->
             manager.getCookie(scope).orEmpty().split(";").forEach { part ->
@@ -54,39 +69,55 @@ fun AccountBrowser(url: String, onClose: () -> Unit) {
         }
     }
     DisposableEffect(Unit) { onDispose { browser?.stopLoading(); browser?.destroy(); clearCookies() } }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())).stableNavigationBarsPadding()) {
+    Dialog(onDismissRequest = ::requestClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())).stableNavigationBarsPadding().imePadding()) {
             GlassTopAppBar(
                 title = { Text("Account sign-in") },
                 navigationIcon = {
-                    IconButton(onClick = onClose) { Icon(Icons.Default.Close, "Close") }
+                    IconButton(onClick = ::requestClose) { Icon(Icons.Default.Close, "Close") }
                 }
             )
             AndroidView(modifier = Modifier.weight(1f), factory = { context ->
                 WebView(context).apply {
                     browser = this
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                    )
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.setSupportZoom(false)
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
                     manager.setAcceptCookie(true)
+                    manager.setAcceptThirdPartyCookies(this, true)
                     clearCookies()
-                    Backend.cookieHeaders().forEach { manager.setCookie(server, it) }
+                    val authCookies = Backend.cookieHeaders()
                     webViewClient = object : WebViewClient() {
                         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                             val target = request.url.toString()
                             // Amazon's own pages are proxied through the server, so every page is on it.
-                            if (!AlexaRemotePolicy.trusted(server, target)) return true
+                            if (!AlexaRemotePolicy.trusted(server, target)) {
+                                return request.isForMainFrame || !`in`.synthora.musicbox.network.amazonVerificationFrame(target)
+                            }
                             val prefix = java.net.URI(server).path.orEmpty().trimEnd('/')
                             val path = request.url.path.orEmpty().removePrefix(prefix)
-                            val allowed = path.startsWith("/alexa/proxy/") || path.startsWith("/youtube-login/")
+                            val allowed = path.startsWith("/alexa/proxy/") || path.startsWith("/youtube-login/") || path == "/accounts/amazon" || path == "/accounts/youtube"
                             // Leaving the sign-in pages means it finished.
                             if (!allowed && request.isForMainFrame) onClose()
                             return !allowed
                         }
                     }
-                    loadUrl(url)
+                    fun installCookie(index: Int) {
+                        if (index >= authCookies.size) {
+                            manager.flush()
+                            loadUrl(url)
+                        } else manager.setCookie(server, authCookies[index]) { installCookie(index + 1) }
+                    }
+                    installCookie(0)
                 }
             })
         }

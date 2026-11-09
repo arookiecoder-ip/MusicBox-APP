@@ -3,7 +3,6 @@ package `in`.synthora.musicbox.network
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.io.IOException
 import android.content.Context
 import android.content.SharedPreferences
@@ -86,6 +85,21 @@ object Backend {
         }
     }
 
+    private val eventClient by lazy {
+        okhttp3.OkHttpClient.Builder().cookieJar(jar)
+            .followRedirects(false).followSslRedirects(false)
+            .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(0, java.util.concurrent.TimeUnit.SECONDS)
+            .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build()
+    }
+
+    /** One owner-authenticated read-only event stream; cancellation closes its socket. */
+    fun playbackEvents(serial: String): kotlinx.coroutines.flow.Flow<JsonObject> {
+        val url = (baseUrl + "/api/app/events/").toHttpUrlOrNull()!!.newBuilder()
+            .addQueryParameter("serial", serial.ifBlank { "phone" }).build()
+        return playbackEventStream(eventClient, url)
+    }
+
     /** True while a web-session cookie is stored (it may still have been revoked server-side). */
     fun hasSession(): Boolean = jar.hasCookies()
 
@@ -136,14 +150,8 @@ object Backend {
     }
 
     private suspend fun call(method: HttpMethod, path: String, query: Map<String, String>, body: JsonObject?): JsonElement = coroutineScope {
-        // Only nag about slowness while the app is visible; background polls (Doze-throttled)
-        // routinely exceed 8s and must stay silent.
-        val slowNotice = launch {
-            delay(8_000)
-            if (NetworkFeedback.isForeground) {
-                NetworkFeedback.notify("Taking longer than usual to load. Please wait…")
-            }
-        }
+        // Background presence/queue polls share this client with browsing. A slow
+        // request is not a user-visible failure; feature loaders show pending work.
         try {
             try { performCall(method, path, query, body) }
             catch (error: BackendHttpException) {
@@ -160,8 +168,6 @@ object Backend {
                 throw IOException(message, error)
             }
             throw error
-        } finally {
-            slowNotice.cancel()
         }
     }
 
@@ -219,10 +225,14 @@ object Backend {
     }
 
     /** Cookie headers for the account sign-in browser, so it opens with the same session. */
-    fun cookieHeaders(): List<String> = jar.all().map { cookie ->
-        // Path "/" so a staging base path still sends the session to every sign-in page.
-        "${cookie.name}=${cookie.value}; Path=/; Secure"
-    }
+    fun cookieHeaders(): List<String> = browserCookieHeaders(baseUrl, jar.all())
+}
+
+/** Preserve HttpOnly and URL scope, using the server session's Lax policy. */
+internal fun browserCookieHeaders(destination: String, cookies: List<Cookie>): List<String> {
+    val url = destination.toHttpUrlOrNull() ?: return emptyList()
+    return cookies.filter { it.matches(url) && it.expiresAt > System.currentTimeMillis() }
+        .map { cookie -> cookie.toString() + "; SameSite=Lax" }
 }
 
 /** Keeps the web session across app restarts. */

@@ -11,6 +11,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +53,8 @@ fun VerticalEqualizerSlider(
     trackColor: Color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
 ) {
     val haptic = `in`.synthora.musicbox.utils.rememberJukeHaptics()
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentValue by rememberUpdatedState(value)
 
     Box(
         modifier = modifier
@@ -79,7 +83,7 @@ fun VerticalEqualizerSlider(
                     if (newValue != value) {
                         // haptic.tick() // Too frequent?
                     }
-                    onValueChange(newValue)
+                    currentOnValueChange(newValue)
                 }
             }
     ) {
@@ -129,7 +133,10 @@ fun CircularBooster(
     maxBoost: Float = 100f
 ) {
     val haptic = `in`.synthora.musicbox.utils.rememberJukeHaptics()
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentValue by rememberUpdatedState(value)
 
+    val currentMaxBoost by rememberUpdatedState(maxBoost)
     // Map value (0..maxBoost) to angle (135..405 degrees)
     // 0 -> 135 deg (Bottom Left)
     // max -> 405 deg (Bottom Right)
@@ -153,11 +160,11 @@ fun CircularBooster(
                     // Let's use simple vertical/horizontal component for now
                     val sensitivity = 1.0f
                     val dragVal = (dragAmount.x - dragAmount.y) * sensitivity
-                    val newValue = (value + dragVal).coerceIn(0f, maxBoost)
+                    val newValue = (currentValue + dragVal).coerceIn(0f, currentMaxBoost)
                     if (newValue != value) {
                         // haptic.tick()
                     }
-                    onValueChange(newValue)
+                    currentOnValueChange(newValue)
                 }
             },
         contentAlignment = Alignment.Center

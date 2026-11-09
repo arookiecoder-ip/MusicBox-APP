@@ -29,7 +29,7 @@ fun HeroTrackCard(track: Track, onClick: () -> Unit, modifier: Modifier = Modifi
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(84.dp).testTag("Search song artwork").background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             AsyncImage(track.thumbnailUri, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-            Icon(Icons.Filled.PlayArrow, null, Modifier.size(32.dp), tint = Color.White)
+            ArtworkPlayIndicator(32.dp)
         }
         Column(Modifier.weight(1f).padding(start = 12.dp)) {
             Text(track.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)

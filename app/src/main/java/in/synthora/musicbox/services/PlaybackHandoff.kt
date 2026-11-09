@@ -51,3 +51,17 @@ internal fun shouldRestorePhoneSource(originalToken: String, currentToken: Strin
 /** In-flight phone reports cannot apply inside a handoff or after a replacement lease. */
 internal fun canApplyPhoneOwnershipPoll(capturedToken: String, currentToken: String, handoff: Boolean): Boolean =
     capturedToken.isNotBlank() && capturedToken == currentToken && !handoff
+
+/** One frozen cursor + self-pause acknowledgment; never infer a resume for a paused song. */
+internal fun pausedEchoHandoff(owner: String, token: String, serial: String, video: String,
+    entry: String, position: Long, playing: Boolean) = kotlinx.serialization.json.buildJsonObject {
+    put("action", kotlinx.serialization.json.JsonPrimitive("alexa_handoff"))
+    put("device_id", kotlinx.serialization.json.JsonPrimitive(owner))
+    put("output_token", kotlinx.serialization.json.JsonPrimitive(token))
+    put("serial", kotlinx.serialization.json.JsonPrimitive(serial))
+    put("video_id", kotlinx.serialization.json.JsonPrimitive(video))
+    put("current_entry_id", kotlinx.serialization.json.JsonPrimitive(entry))
+    put("position_ms", kotlinx.serialization.json.JsonPrimitive(position.coerceAtLeast(0)))
+    put("playing", kotlinx.serialization.json.JsonPrimitive(playing))
+    put("source_paused", kotlinx.serialization.json.JsonPrimitive(true))
+}

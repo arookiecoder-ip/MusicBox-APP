@@ -1,11 +1,14 @@
 package `in`.synthora.musicbox
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -24,6 +27,68 @@ import org.junit.Test
 
 class CollectionParityRegressionTest {
     @get:Rule val compose = createComposeRule()
+    @Test fun playlistPlayFloatsOnlyAfterDetailsScrollAway() {
+        var played = 0
+        compose.setContent { JUKETheme {
+            val portrait = android.content.res.Configuration(LocalConfiguration.current).apply {
+                orientation = android.content.res.Configuration.ORIENTATION_PORTRAIT
+                smallestScreenWidthDp = 390
+            }
+            CompositionLocalProvider(LocalConfiguration provides portrait) {
+                AdaptiveDetailLayout(bottomPadding = 0.dp, title = "Playlist title", onFloatingPlay = { played++ },
+                    hero = { Text("Playlist details", Modifier.height(260.dp)) }) {
+                    items(50) { Text("Track $it", Modifier.fillMaxWidth().height(56.dp)) }
+                }
+            }
+        } }
+        compose.onNodeWithTag("Floating collection play").assertDoesNotExist()
+        compose.onNodeWithTag("Collection tracks").performScrollToIndex(10)
+        compose.onNodeWithTag("Floating collection play").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Playlist title").assertIsDisplayed()
+        compose.onNodeWithTag("Floating collection play").assertWidthIsEqualTo(68.dp).assertHeightIsEqualTo(68.dp)
+        assertEquals(1, played)
+        compose.onNodeWithTag("Collection tracks").performScrollToIndex(0)
+        compose.onNodeWithTag("Floating collection play").assertDoesNotExist()
+    }
+
+    @Test fun longPlaylistDescriptionCanExpandAndCollapse() {
+        val item = BrowseParser.item(buildJsonObject { put("playlistId", "PLfixture"); put("title", "Playlist") })
+        compose.setContent { JUKETheme {
+            CompositionLocalProvider(LocalMediaMenu provides MediaMenuController()) {
+                Box(Modifier.width(320.dp).verticalScroll(rememberScrollState())) {
+                    CollectionDetailHero(item, "Playlist", "", "Artist", "50 tracks",
+                        description = "A long description with links and useful playlist information. ".repeat(20),
+                        onPlay = {}, onShuffle = {}, onQueue = {})
+                }
+            }
+        } }
+        compose.onNodeWithText("Read more").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Back").performClick()
+        compose.onNodeWithText("Read more").performScrollTo().assertIsDisplayed()
+    }
+    @Test fun closingTaskPreventsOldLeaseFromBeingRestoredButAllowsNewTransfer() {
+        val context = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val ownership = `in`.synthora.musicbox.services.PhonePlaybackOwnership
+        ownership.init(context)
+        val prefs = context.getSharedPreferences("shared_playback_output", android.content.Context.MODE_PRIVATE)
+        val saved = listOf("last_token", "dismissed_token").associateWith { prefs.getString(it, null) }
+        val output = `in`.synthora.musicbox.services.SharedPlaybackOutput(mode = "phone", owner = ownership.ownerId,
+            token = "dismissed-fixture", leaseMs = 12000, epoch = java.util.UUID.randomUUID().toString(), revision = 1)
+        try {
+            ownership.accept(output)
+            ownership.taskDismissed()
+            ownership.forget()
+            assertTrue(ownership.dismissed(output))
+            assertFalse(ownership.restoreIfCurrent(output))
+            val transferred = output.copy(token = "explicit-new-transfer", revision = 2)
+            assertFalse(ownership.dismissed(transferred))
+            ownership.accept(transferred)
+            assertTrue(ownership.permitsPlayback())
+        } finally {
+            ownership.forget(allowOffline = true)
+            prefs.edit().apply { saved.forEach { (key, value) -> if (value == null) remove(key) else putString(key, value) } }.commit()
+        }
+    }
     @Test fun downloadedAndAccountCollectionsKeepSameHeroAndActions() {
         val menu = MediaMenuController()
         val online = BrowseParser.item(buildJsonObject { put("kind", "album"); put("browseId", "MPREfixture"); put("title", "Album") })
@@ -36,10 +101,15 @@ class CollectionParityRegressionTest {
                 options = if (downloaded) listOf(ExtraSongOption(Icons.Default.CheckBoxOutlineBlank, "Select songs") {}) else emptyList()) }
         } } }
         val originalBounds = compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot
+        // The hero tag covers padded content, not the parent's available width.
+        // Preserve the chosen adaptive size and verify square artwork/parity.
+        val artworkBounds = compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val artworkSize = artworkBounds.right - artworkBounds.left
+        assertTrue(kotlin.math.abs(artworkSize.value - 200f) <= 0.5f || kotlin.math.abs(artworkSize.value - 220f) <= 0.5f)
         for (local in listOf(false, true)) {
             compose.runOnIdle { downloaded = local }
             assertEquals(originalBounds, compose.onNodeWithTag("Collection hero").fetchSemanticsNode().boundsInRoot)
-            compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).assertWidthIsEqualTo(200.dp).assertHeightIsEqualTo(200.dp)
+            compose.onNodeWithTag("Collection artwork", useUnmergedTree = true).assertWidthIsEqualTo(artworkSize).assertHeightIsEqualTo(artworkSize)
             compose.onNodeWithContentDescription("Play collection").performClick()
             compose.onNodeWithContentDescription("Shuffle collection").performClick()
             compose.onNodeWithContentDescription("Add collection to queue").performClick()

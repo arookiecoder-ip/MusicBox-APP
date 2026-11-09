@@ -1,6 +1,7 @@
 package `in`.synthora.musicbox.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,14 +45,7 @@ fun CompactTrackCard(
     Column(
         modifier = modifier
             .width(120.dp)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { 
-                        haptic.click()
-                        onClick() 
-                    }
-                )
-            }
+            .clickable { haptic.click(); onClick() }
     ) {
         // Thumbnail Box
         Box(

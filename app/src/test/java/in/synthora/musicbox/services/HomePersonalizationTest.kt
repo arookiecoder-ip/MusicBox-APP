@@ -2,6 +2,7 @@ package `in`.synthora.musicbox.services
 
 import `in`.synthora.musicbox.models.Track
 import `in`.synthora.musicbox.network.BrowseParser
+import `in`.synthora.musicbox.network.toTrack
 import `in`.synthora.musicbox.viewmodels.HomeShelf
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
@@ -47,4 +48,14 @@ class HomePersonalizationTest {
         assertNull(chooseHomeRadioSeed(emptyList(), listOf(track("local").copy(ytVideoId = null)), emptySet(), null))
         assertEquals("only", chooseHomeRadioSeed(emptyList(), listOf(track("only")), emptySet(), "only")?.ytVideoId)
     }
+    @Test fun dialRetainsArtistAndAlbumMetadataForTheFullSongMenu() {
+        val song = track("song").copy(artistId="artist-id", albumId="album-id",
+            artists=listOf(`in`.synthora.musicbox.models.ArtistCredit("Guest", "guest-id")))
+        val item = speedDialItems(emptyList(), listOf(song)).single()
+        val restored = item.toTrack()
+        assertEquals("artist-id", item.artistId)
+        assertEquals("album-id", item.albumId)
+        assertEquals(song.artists, restored.artists)
+    }
+
 }

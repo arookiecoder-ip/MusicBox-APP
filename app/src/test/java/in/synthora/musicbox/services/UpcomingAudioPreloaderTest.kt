@@ -21,6 +21,68 @@ import java.util.concurrent.atomic.AtomicBoolean
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class UpcomingAudioPreloaderTest {
+    @Test fun demandCompletionStartsLazyTailWithoutMaintenanceTick() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "completion-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val current = "https://audio.example/current"
+        val next = "https://audio.example/next"
+        lateinit var preloader: UpcomingAudioPreloader
+        preloader = UpcomingAudioPreloader(CacheDataSource.Factory().setCache(cache)
+            .setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }, childScope,
+            policyOverride = { PreloadPolicy(1, -1) }, onCacheCompleted = {
+                preloader.update(listOf(next), currentUrl = current)
+            })
+        try {
+            preloader.update(listOf(next), currentUrl = current)
+            withTimeout(5_000) {
+                while (!cache.isCached(next, 0, 8_192)) delay(10)
+            }
+            assertTrue(cache.isCached(current, 0, 8_192))
+        } finally {
+            preloader.clearAndAwait(); childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
+    @Test fun powerConstraintsPreserveCurrentCacheAndResumeAllFiveLazySongsAfterRecovery() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "power-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val acquired = AtomicInteger()
+        val released = AtomicInteger()
+        var power = PreloadPowerState(batterySaver = true)
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val preloader = UpcomingAudioPreloader(CacheDataSource.Factory().setCache(cache)
+            .setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }, childScope,
+            policyOverride = { preloadPolicy(true, false, true, false, power) }, guardFactory = {
+                acquired.incrementAndGet()
+                object : AudioDownloadGuard {
+                    override fun progress() {}
+                    override fun close() { released.incrementAndGet() }
+                }
+            })
+        val current = "https://audio.example/current"
+        val next = (1..5).map { "https://audio.example/next$it" }
+        suspend fun finish() { withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } } }
+        try {
+            preloader.update(next, currentUrl = current); finish()
+            assertTrue(cache.isCached(current, 0, 8_192))
+            preloader.update(next, currentUrl = current); finish()
+            next.forEach { assertFalse(cache.isCached(it, 0, 8_192)) }
+            assertEquals(1, acquired.get()); assertEquals(1, released.get())
+            power = PreloadPowerState()
+            preloader.update(next, currentUrl = current); finish()
+            next.forEach { assertTrue(cache.isCached(it, 0, 8_192)) }
+            cache.removeResource(current)
+            power = PreloadPowerState(thermalStatus = 4)
+            preloader.update(next, currentUrl = current); finish()
+            assertTrue(cache.isCached(current, 0, 8_192))
+            assertEquals(2, acquired.get()); assertEquals(2, released.get())
+        } finally {
+            preloader.clearAndAwait(); childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
+
     @Test fun lazyFailureDoesNotDelaySelectedSongButServerRateLimitStillApplies() = runBlocking {
         for (limited in listOf(false, true)) {
             val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "retry-promotion-${System.nanoTime()}")
@@ -49,6 +111,7 @@ class UpcomingAudioPreloaderTest {
             try {
                 preloader.update(listOf(url)); finish()
                 assertFalse(cache.isCached(url, 0, 8_192))
+                preloader.networkRestored()
                 preloader.update(emptyList(), currentUrl = url); finish()
                 assertEquals(!limited, cache.isCached(url, 0, 8_192))
                 if (limited) {
@@ -228,9 +291,7 @@ class UpcomingAudioPreloaderTest {
         val cache = SimpleCache(directory, NoOpCacheEvictor())
         val url = "https://audio.example/current"
         val bytes = ByteArray(8_192) { 7 }
-        val reader = playbackDataSources(RuntimeEnvironment.getApplication(), cache,
-            readOnlyCache = true).let { it as CacheDataSource.Factory }
-            .setUpstreamDataSourceFactory { ByteArrayDataSource(bytes) }.createDataSource()
+        val reader = ReadOnlyPlaybackDataSource(ByteArrayDataSource(bytes), cache)
         val writer = CacheDataSource.Factory().setCache(cache)
             .setFlags(CacheDataSource.FLAG_BLOCK_ON_CACHE)
             .setUpstreamDataSourceFactory { ByteArrayDataSource(bytes) }.createDataSource()
@@ -242,15 +303,13 @@ class UpcomingAudioPreloaderTest {
             } }
             assertTrue(cache.isCached(url, 0, bytes.size.toLong()))
             reader.close()
-            val offline = playbackDataSources(RuntimeEnvironment.getApplication(), cache,
-                readOnlyCache = true).let { it as CacheDataSource.Factory }
-                .setUpstreamDataSourceFactory { object : DataSource {
+            val offline = ReadOnlyPlaybackDataSource(object : DataSource {
                     override fun addTransferListener(listener: TransferListener) {}
                     override fun open(spec: DataSpec): Long = throw IOException("Offline")
                     override fun read(buffer: ByteArray, offset: Int, length: Int): Int = throw IOException("Offline")
                     override fun getUri(): Uri? = null
                     override fun close() {}
-                } }.createDataSource()
+                }, cache)
             try {
                 offline.open(DataSpec.Builder().setUri(url).build())
                 val result = java.io.ByteArrayOutputStream()
@@ -400,4 +459,28 @@ class UpcomingAudioPreloaderTest {
             directory.deleteRecursively()
         }
     }
+    @Test fun rollingWindowDeletesPlayedAudioAndKeepsCurrentPlusFiveEvenWhenPausedOffline() = runBlocking {
+        val directory = java.io.File(RuntimeEnvironment.getApplication().cacheDir, "rolling-${System.nanoTime()}")
+        val cache = SimpleCache(directory, NoOpCacheEvictor())
+        val childScope = CoroutineScope(coroutineContext + SupervisorJob(coroutineContext[Job]))
+        val factory = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory { ByteArrayDataSource(ByteArray(8_192)) }
+        val urls = (0..7).map { "https://audio.example/song$it" }
+        urls.forEach { url -> withContext(Dispatchers.IO) { CacheWriter(factory.createDataSource(), DataSpec(Uri.parse(url)), null, null).cache() } }
+        val preloader = UpcomingAudioPreloader(factory, childScope, policyOverride = { PreloadPolicy(5, -1) })
+        try {
+            preloader.update(urls.drop(2).take(5), currentUrl=urls[1], active=false)
+            withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } }
+            assertFalse(cache.isCached(urls[0], 0, 8_192))
+            assertFalse(cache.isCached(urls[7], 0, 8_192))
+            urls.subList(1,7).forEach { assertTrue(cache.isCached(it, 0, 8_192)) }
+            preloader.update(urls.drop(3).take(5), currentUrl=urls[2], active=false)
+            withTimeout(5_000) { childScope.coroutineContext[Job]!!.children.toList().forEach { it.join() } }
+            assertFalse(cache.isCached(urls[1],0,8_192))
+            assertTrue(cache.isCached(urls[2],0,8_192))
+        } finally {
+            preloader.clearAndAwait();childScope.coroutineContext[Job]?.cancelAndJoin()
+            cache.release(); directory.deleteRecursively()
+        }
+    }
+
 }

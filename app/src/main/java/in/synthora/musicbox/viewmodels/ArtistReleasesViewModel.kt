@@ -38,7 +38,7 @@ class ArtistReleasesViewModel : ViewModel() {
                 val data = Backend.get("/api/artist/$artist/releases", mapOf("kind" to kind,
                     "offset" to before.offset.toString(), "limit" to "30")).objectOrEmpty()
                 val page = data.array("items").mapNotNull { (it as? JsonObject)?.let { row ->
-                    BrowseParser.item(row, if (kind == "playlists") "" else "albums")
+                    BrowseParser.item(row, if (kind in listOf("albums", "singles")) "albums" else "playlists")
                 } }.filter { it.id.isNotBlank() }
                 _state.value = before.copy(items = (before.items + page).distinctBy { it.id },
                     offset = data.number("next_offset"), hasMore = data.flag("has_more") && page.isNotEmpty(), loading = false)

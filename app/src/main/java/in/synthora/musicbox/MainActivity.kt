@@ -2,6 +2,8 @@
 
 package `in`.synthora.musicbox
 
+import `in`.synthora.musicbox.ui.components.blackStatusBarOnScroll
+
 import androidx.activity.viewModels
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
@@ -201,6 +203,7 @@ class MainActivity : ComponentActivity() {
         handlePlayerIntent(intent)
 
         setContent {
+            `in`.synthora.musicbox.utils.ObserveWindowFrameTimings("main")
             val themeColorsFlow = remember(musicViewModel) {
                 musicViewModel.uiState.map { it.extractedColors }.distinctUntilChanged()
             }
@@ -235,6 +238,9 @@ class MainActivity : ComponentActivity() {
             JUKETheme(
                 extractedColors = themeColors
             ) {
+                accountState.browserUrl?.let { url ->
+                    `in`.synthora.musicbox.ui.screens.AccountBrowser(url, account::browserClosed)
+                }
                 LaunchedEffect(accountState.stage) {
                     when (accountState.stage) {
                         AuthStage.SIGNED_IN -> musicViewModel.onSignedIn()
@@ -311,19 +317,6 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-                val visualizerPermission = androidx.activity.compose.rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-                val playingFlow = remember(musicViewModel) { musicViewModel.uiState.map { it.isPlaying }.distinctUntilChanged() }
-                val watchdogPlaying by playingFlow.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.isPlaying)
-                LaunchedEffect(watchdogPlaying) {
-                    if (watchdogPlaying && musicViewModel.output.value == `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE &&
-                        ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                        val prefs = getSharedPreferences("audio_visualizer_permission", MODE_PRIVATE)
-                        if (!prefs.getBoolean("requested", false)) {
-                            prefs.edit().putBoolean("requested", true).apply()
-                            visualizerPermission.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    }
-                }
                 val activeDownloads by musicViewModel.downloads.status.collectAsStateWithLifecycle()
                 val currentOutput by musicViewModel.output.collectAsStateWithLifecycle()
                 LaunchedEffect(activeDownloads.active > 0, currentOutput) {
@@ -531,9 +524,10 @@ class MainActivity : ComponentActivity() {
                 fun isDetailRoute(route: String?) =
                     route != null && (route.startsWith("artist/") ||
                         route.startsWith("album/") || route.startsWith("playlist/") ||
-                        route.startsWith("artist-releases/") || route.startsWith("artist-songs/") || route.startsWith("downloads/"))
+                        route.startsWith("artist-releases/") || route.startsWith("artist-videos/") || route.startsWith("artist-songs/") || route.startsWith("downloads/"))
 
                 val onNavigate: (Screen) -> Unit = { screen ->
+                    if (screen == Screen.Search) searchFocusTrigger++
                     val wasDetail = isDetailRoute(currentRoute)
                     if (wasDetail) {
                         if (screen == Screen.Search) { searchResetTrigger++; searchFocusTrigger++ }
@@ -609,7 +603,7 @@ class MainActivity : ComponentActivity() {
                         bottom = 0.dp
                     )
 
-                    Box(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll(currentRoute)) {
                     // Surfaces are opaque; do not capture a full-screen blur source on each frame.
                     Box(modifier = Modifier.fillMaxSize()) {
                     Box(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())))
@@ -672,7 +666,8 @@ class MainActivity : ComponentActivity() {
                                             .loadAlbumDetails(album)
                                         navController.navigate("album/${album.id}")
                                     },
-                                    bottomPadding = bottomPadding
+                                    bottomPadding = bottomPadding,
+                                    onShowPlayer = { showPlayerModal = true }
                                 )
                             }
                             composable(Screen.Library.route) {
@@ -742,6 +737,7 @@ class MainActivity : ComponentActivity() {
                                         navController.popBackStack()
                                     },
                                     onShowAllSongs = { navController.navigate("artist-songs/$artistId") },
+                                    onShowAllVideos = { navController.navigate("artist-videos/$artistId") },
                                     onShowAllReleases = { kind -> navController.navigate("artist-releases/$artistId/$kind") },
                                     onNavigateToAlbum = { album ->
                                         activityViewModelProvider[AlbumDetailViewModel::class.java]
@@ -765,6 +761,11 @@ class MainActivity : ComponentActivity() {
                                             navController.navigate("album/${item.id}")
                                         }
                                     })
+                            }
+                            composable("artist-videos/{artistId}") { entry ->
+                                ArtistSongsScreen(artistId=entry.arguments?.getString("artistId").orEmpty(),
+                                    searchViewModel=searchViewModel,musicViewModel=musicViewModel,
+                                    onNavigateBack={ navController.popBackStack() },bottomPadding=bottomPadding,videos=true)
                             }
                             composable("artist-songs/{artistId}") { entry ->
                                 ArtistSongsScreen(

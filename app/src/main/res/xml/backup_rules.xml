@@ -6,6 +6,7 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <exclude domain="sharedpref" path="backend_session.xml"/>
     <exclude domain="sharedpref" path="alexa_remote_auth.xml"/>
         <exclude domain="sharedpref" path="shared_playback_output.xml"/>
     <!--

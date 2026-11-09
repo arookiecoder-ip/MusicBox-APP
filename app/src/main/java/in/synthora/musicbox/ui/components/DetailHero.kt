@@ -38,14 +38,14 @@ fun DetailHero(image: String?, artist: Boolean = false, content: @Composable Col
             surface.copy(alpha = 0.45f), surface))))
         if (paneHeight != null) Box(Modifier.matchParentSize().background(Brush.horizontalGradient(
             0f to Color.Transparent, 0.72f to Color.Transparent, 1f to surface)))
-        Column(Modifier.fillMaxWidth().then(paneHeight?.let { Modifier.heightIn(min = it) } ?: Modifier), content = content)
+        Column(Modifier.fillMaxWidth().heightIn(min = paneHeight ?: if (artist) 380.dp else 0.dp), content = content)
     }
 }
 
 @Composable
-fun DetailBackButton(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    IconButton(onClick = onBack, modifier = modifier.stableStatusBarsPadding().padding(8.dp)
-        .size(44.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.38f))) {
+fun DetailBackButton(onBack: () -> Unit, modifier: Modifier = Modifier, transparent: Boolean = false) {
+    IconButton(onClick = onBack, modifier = modifier.stableStatusBarsPadding().padding(horizontal = 8.dp, vertical = 6.dp)
+        .size(44.dp).clip(CircleShape).then(if (transparent) Modifier else Modifier.background(Color.Black.copy(alpha = 0.38f)))) {
         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
     }
 }

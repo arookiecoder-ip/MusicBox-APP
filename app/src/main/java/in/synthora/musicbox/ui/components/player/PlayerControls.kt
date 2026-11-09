@@ -22,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import `in`.synthora.musicbox.ui.components.alexaControlAvailability
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -66,7 +67,7 @@ fun PlayerControls(
     val resolvedSmallIconSize = smallIconSize ?: if (isLarge) 32.dp else 24.dp
 
     Row(
-        modifier = modifier
+        modifier = modifier.alexaControlAvailability(musicViewModel)
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,

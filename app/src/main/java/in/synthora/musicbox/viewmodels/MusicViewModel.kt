@@ -43,6 +43,7 @@ import `in`.synthora.musicbox.services.EchoState
 import `in`.synthora.musicbox.services.transferPlayback
 import `in`.synthora.musicbox.services.PlaybackManager
 import `in`.synthora.musicbox.services.QueueManager
+import `in`.synthora.musicbox.services.isRemotePhoneOutput
 import `in`.synthora.musicbox.ui.theme.ExtractedColors
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.CancellationException
@@ -134,6 +135,49 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _remoteMobileOutput = MutableStateFlow(`in`.synthora.musicbox.services.SharedPlaybackOutput())
     val remoteMobileOutput = _remoteMobileOutput.asStateFlow()
     private val outputChosen get() = settingsPrefs.contains(KEY_OUTPUT)
+    private val playbackTargetRestoration = `in`.synthora.musicbox.services.PlaybackTargetRestoration()
+    private val restoringSavedQueue = MutableStateFlow(true)
+    val restoringPlayback = combine(playbackTargetRestoration.loading, restoringSavedQueue) { target, queue -> target || queue }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    private var deferredPlaybackJob: Job? = null
+
+    private suspend fun restorePlaybackTarget() = playbackTargetRestoration.ensure {
+        val request = playbackRequestId
+        if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
+            setOutputPreference(PlaybackOutput.PHONE)
+        } else {
+            val latest = withTimeoutOrNull(8_000) {
+                `in`.synthora.musicbox.services.MobileDeviceConnection.rememberOutput(AlexaBackendApi.phoneOutputStatus())
+            } ?: throw java.io.IOException("Couldn't reconnect to the playback device. Please try again.")
+            coroutineContext.ensureActive()
+            if (signedIn && request == playbackRequestId && !_isSwitchingOutput.value) {
+                check(!latest.handoffPending) { "Playback is moving between devices. Please try again." }
+                if (latest.mode.isBlank()) {
+                    _remoteMobileOutput.value = `in`.synthora.musicbox.services.SharedPlaybackOutput()
+                    setOutputPreference(PlaybackOutput.PHONE)
+                } else {
+                    if (latest.mode == "alexa" && echo.devices.value.isEmpty()) echo.loadDevices()
+                    onMobileOutput(latest)
+                }
+                withTimeoutOrNull(4_000) { remotePhoneRefreshJob?.join() }
+            }
+        }
+    }
+
+    /** A persisted output name is not a usable command target until reconciled. */
+    private fun deferUntilPlaybackTargetReady(action: () -> Unit): Boolean {
+        if (!signedIn || playbackTargetRestoration.ready) return false
+        deferredPlaybackJob?.cancel()
+        deferredPlaybackJob = viewModelScope.launch {
+            try {
+                if (restorePlaybackTarget() && signedIn) action()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't restore the playback device. Please try again.")
+            }
+        }
+        return true
+    }
 
     private val outputSwitchRequests = `in`.synthora.musicbox.services.OutputSwitchRequests()
     private val _isSwitchingOutput = MutableStateFlow(false)
@@ -158,7 +202,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Ticks the Echo progress while the player screen asks for updates.
-    private val _tick = MutableStateFlow(0L)
     private val _colors = MutableStateFlow<ExtractedColors?>(null)
     /** Lyrics fetched for Echo songs, keyed by video id (phone songs keep theirs in the database). */
     private val _echoLyrics = MutableStateFlow<Map<String, Track>>(emptyMap())
@@ -182,7 +225,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _uiState,
         echo.state,
         AccountRepository.liked,
-        combine(_tick, _colors, _echoLyrics) { _, colors, lyrics -> colors to lyrics }
+        combine(_colors, _echoLyrics) { colors, lyrics -> colors to lyrics }
     ) { output, phone, echoState, liked, (colors, lyrics) ->
         val state = if (output != PlaybackOutput.PHONE) echoUiState(echoState, lyrics) else phone
         state.copy(
@@ -192,13 +235,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
 
-    private val pendingPlayback = MutableStateFlow<Track?>(null)
+    private data class PendingSelection(val track: Track, val index: Int?, val requestId: Long, val loading: Boolean = true, val error: String? = null)
+    private val pendingPlayback = MutableStateFlow<PendingSelection?>(null)
+    private val presentedPlaybackRequest = MutableStateFlow(0L)
+    private val lyricsRefreshJobs = mutableMapOf<String, Job>()
+    private var paletteJob: Job? = null
+    @Volatile private var paletteRevision = 0L
     private var pendingPlaybackJob: Job? = null
+    private var youtubeLinkJob: Job? = null
     private var phoneQueueSyncJob: Job? = null
     private var playlistBackfillJob: Job? = null
+    private var radioJob: Job? = null
+    private var previousRadioExpansionSeed: String? = null
     private val phoneQueueMutex = kotlinx.coroutines.sync.Mutex()
     private var sharedPhoneQueueReady = false
     private var serverPlaybackChecked = false
+    private var phoneQueueCheckVersion = -1L
+    private var phoneQueueCheckToken = ""
     private var playbackRequestId = 0L
 
     private val remoteTransportPreview = MutableStateFlow<`in`.synthora.musicbox.services.RemoteTransportPreview?>(null)
@@ -207,13 +260,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val remoteTransportMutex = kotlinx.coroutines.sync.Mutex()
 
     val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview) { state, busy, pending, preview ->
-        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending)
+        // Clearing the optimistic selection must wait for this projector to
+        // consume the new underlying track, not only for Media3 to be ready.
+        presentedPlaybackRequest.value = pending?.takeIf {
+            selectionPresented(state, it.track.uuid, it.index) || (it.index == null &&
+                !it.track.ytVideoId.isNullOrBlank() && state.currentTrack?.ytVideoId == it.track.ytVideoId)
+        }?.requestId ?: 0L
+        val base = withPendingPlayback(state.copy(isLoading = state.isLoading || busy), pending?.track, pending?.index, pending?.loading ?: true, pending?.error)
         val presented = if (isRemotePhone && pending == null && preview != null && preview.owner == _remoteMobileOutput.value.owner)
             preview.present(base, android.os.SystemClock.elapsedRealtime()) else base
         presented.copy(phase = `in`.synthora.musicbox.services.playbackPhase(presented.currentTrack != null,
-            _isSwitchingOutput.value, pending != null,
+            _isSwitchingOutput.value, pending?.loading == true,
             presented.isLoading, presented.isPlaying, presented.error != null))
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
+
+    // Prepared once per queue change, before opening either the player or its sheet.
+    val queueRows = `in`.synthora.musicbox.services.preparedQueueRows(viewModelScope, uiState)
 
     private fun Track.withLike(liked: Set<String>) =
         if (isFavourite == (ytVideoId in liked)) this else copy(isFavourite = ytVideoId in liked)
@@ -246,7 +308,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var hasStartedDeferredStartupWork = false
 
     fun saveLyricsOffset(track: Track, offsetMs: Long) {
-        if (isAlexa) {
+        if (isAlexa || isRemotePhone) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update { it + (videoId to (it[videoId] ?: track).copy(lyricsOffsetMs = offsetMs)) }
             return
@@ -287,7 +349,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (romanizedSyncedLyrics.isNullOrBlank() && romanizedPlainLyrics.isNullOrBlank()) {
             return
         }
-        if (isAlexa) {
+        if (isAlexa || isRemotePhone) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update {
                 val base = it[videoId] ?: track
@@ -358,6 +420,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        // Metadata does not need to wait for Media3, stream resolution, or downloads.
+        // Keep the skeleton until this read and device reconciliation both finish.
+        viewModelScope.launch {
+            try { loadRestoredQueue() }
+            finally { restoringSavedQueue.value = false }
+        }
         playbackManager.initialize()
         viewModelScope.launch {
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.queueNeedsSync.collect {
@@ -429,7 +497,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (current.ytVideoId.isNullOrBlank()) continue
                 val claim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
                 try {
-                    val snapshot = AlexaBackendApi.phoneQueueSnapshot()
+                    val snapshot = AlexaBackendApi.phoneQueueSnapshot(
+                        phoneQueueCheckVersion.takeIf { phoneQueueCheckToken == claim })
                     if (claim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token || state != _uiState.value) continue
                     val output = `in`.synthora.musicbox.services.sharedPlaybackOutput(snapshot)
                     if (!output.belongsToPhone(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId,
@@ -437,8 +506,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         if (output.mode == "alexa") adoptRemoteAlexa(output, claim)
                         continue
                     }
-                    val serverIds = snapshot.array("queue").map { it.objectOrEmpty().text("video_id") }
-                    if (serverIds != state.queue.map { it.ytVideoId }) {
+                    val differs = if (snapshot.containsKey("queue")) withContext(Dispatchers.Default) {
+                        snapshot.array("queue").map { it.objectOrEmpty().text("video_id") } != state.queue.map { it.ytVideoId }
+                    } else false // A matching queue_version omits the unchanged queue, rather than clearing it.
+                    if (claim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token || state != _uiState.value) continue
+                    phoneQueueCheckToken = claim
+                    phoneQueueCheckVersion = if (differs) -1 else snapshot["queue_version"]?.toString()?.toLongOrNull() ?: -1
+                    if (differs) {
                         synchronizePhoneQueue()
                         continue
                     }
@@ -453,6 +527,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // Observe restored state and update UI with saved queue
+        viewModelScope.launch {
+            combine(echo.devices, echo.serial, echo.state.map { it.sharedOutput }.distinctUntilChanged(),
+                combine(_output, pendingPlayback, _isSwitchingOutput) { output, pending, switching ->
+                    output.takeIf { pending?.loading != true && !switching }
+                }) { devices, serial, shared, output ->
+                if (output == PlaybackOutput.ALEXA) unavailableEchoSerial(devices, shared.serial.ifBlank { serial }) else null
+            }.distinctUntilChanged().collect { offline ->
+                if (offline != null && signedIn && isForeground) selectIdleForegroundDevice(offline)
+            }
+        }
         viewModelScope.launch {
             playbackManager.hasRestoredState.collect { hasState ->
                 if (hasState) loadRestoredQueue()
@@ -477,12 +561,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        viewModelScope.launch {
+            combine(combinedState, pendingPlayback) { state, pending -> state to pending }.collect { (state, pending) ->
+                if (pending != null && !pending.loading && state.isPlaying &&
+                    selectionPresented(state, pending.track.uuid, pending.index) && pendingPlayback.value == pending)
+                    pendingPlayback.value = null
+            }
+        }
+
+        viewModelScope.launch {
+            uiState.map { it.currentTrack?.thumbnailUri }.distinctUntilChanged().collect { extractColors(it) }
+        }
+
         // Lyrics for whatever is playing, on the phone or the Echo.
         viewModelScope.launch {
-            uiState.map { it.currentTrack }
-                .distinctUntilChanged { old, new -> old?.uuid == new?.uuid }
-                .collect { track ->
-                    if (track != null && track.syncedLyrics.isNullOrBlank() && track.plainLyrics.isNullOrBlank()) {
+            var lyricsOutput: PlaybackOutput? = null
+            combine(uiState.map { it.currentTrack }.distinctUntilChanged(), _output,
+                `in`.synthora.musicbox.network.NetworkFeedback.online) { track,output,online -> Triple(track,output,online) }
+                .collect { (track,output,online) ->
+                    if(!online || lyricsOutput!=output) lyricsRefreshJobs.values.toList().forEach { it.cancel() }
+                    lyricsOutput=output
+                    if(track!=null) lyricsRefreshJobs.filterKeys { it!=track.uuid }.values.toList().forEach { it.cancel() }
+                    if (online && track != null && track.title.isNotBlank() && track.title != "Loading…" && !`in`.synthora.musicbox.utils.hasTimedLyrics(track.syncedLyrics)) {
                         refreshLyrics(track)
                     }
                 }
@@ -522,6 +622,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun removeDownload(track: Track) = downloads.remove(track)
 
     fun playDownloaded(tracks: List<Track>, index: Int) {
+        if (deferUntilPlaybackTargetReady { playDownloaded(tracks, index) }) return
         if (index !in tracks.indices || _isSwitchingOutput.value) return
         launchPlayback(tracks[index], localOnly = true) {
             downloads.awaitReady()
@@ -541,7 +642,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (!online) `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
             setOutputPreference(PlaybackOutput.PHONE)
             updatePolling()
-            phoneSetQueue(available.tracks, available.index, synchronizeQueue = online, reuseOwnership = true)
+            phoneSetQueue(available.tracks, available.index, synchronizeQueue = online)
         }
     }
 
@@ -562,6 +663,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         collectionCache.clear()
         downloads.collections.value.filter { it.title.isBlank() || it.title == "Untitled" }.forEach { refreshDownloadedDetails(it.key) }
         signedIn = true
+        deferredPlaybackJob?.cancel()
+        playbackTargetRestoration.reset()
         `in`.synthora.musicbox.services.MobileDeviceConnection.start(getApplication(), ::onMobileOutput, ::onMobileCommand)
         serverPlaybackChecked = false
         signInJob?.cancel()
@@ -569,6 +672,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             // A saved remote selection cannot own playback when this app starts offline.
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
             setOutputPreference(PlaybackOutput.PHONE)
+            playbackTargetRestoration.clear()
             updatePolling()
             return
         }
@@ -576,6 +680,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val initialClaim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
             val initialRequest = playbackRequestId
             launch { runEcho { AccountRepository.refreshLiked() } }
+            try { restorePlaybackTarget() }
+            catch (e: CancellationException) { throw e }
+            catch (e: BackendAuthException) { _signedOut.tryEmit(Unit); return@launch }
+            catch (_: Exception) { /* A Play tap retries reconciliation after a transient failure. */ }
             val hasEcho = try {
                 echo.loadDevices()
             } catch (e: CancellationException) {
@@ -589,7 +697,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (!outputChosen) setOutputPreference(if (hasEcho) PlaybackOutput.ALEXA else PlaybackOutput.PHONE)
             val latest = echo.state.value.sharedOutput
-            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null) {
+            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null && echo.devices.value.any { it.online && it.serial == latest.serial }) {
                 adoptRemoteAlexa(latest)
             } else if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "phone") {
                 `in`.synthora.musicbox.services.PhonePlaybackOwnership.restoreIfCurrent(latest)
@@ -601,6 +709,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSignedOut() {
+        deferredPlaybackJob?.cancel()
+        playbackTargetRestoration.clear()
         skipLoadingJob?.cancel()
         remoteTransportJob?.cancel()
         remoteTransportPreview.value = null
@@ -626,7 +736,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** The app moved to the foreground or background: poll the Echo every 3 s or 10 s. */
     fun setForeground(foreground: Boolean) {
         isForeground = foreground
-        if (foreground && signedIn) `in`.synthora.musicbox.services.DeviceConnectionService.startWhileVisible(getApplication())
+        `in`.synthora.musicbox.services.MobileDeviceConnection.updateForeground(foreground)
         if (foreground) settingsPrefs.edit { putBoolean("remote_controls_dismissed", false) }
         if (foreground && signedIn && serverPlaybackChecked) viewModelScope.launch {
             try {
@@ -642,12 +752,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var idlePhoneSelection = false
-    private suspend fun selectIdleForegroundDevice() {
-        if (!isForeground || !signedIn || _isSwitchingOutput.value || pendingPlayback.value != null || (_output.value == PlaybackOutput.PHONE && playbackManager.shouldResumeAfterTrackChange())) return
+    private suspend fun selectIdleForegroundDevice(offlineAlexa: String? = null) {
+        if (!isForeground || !signedIn || _isSwitchingOutput.value || pendingPlayback.value?.loading == true || (_output.value == PlaybackOutput.PHONE && playbackManager.shouldResumeAfterTrackChange())) return
         val request = playbackRequestId
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true
         try {
-            val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault() } ?: return
+            val selected = withTimeout(6_000) { `in`.synthora.musicbox.services.MobileDeviceConnection.selectForegroundDefault(
+                offlineAlexa ?: if (isAlexa || echo.state.value.sharedOutput.mode == "alexa")
+                    unavailableEchoSerial(echo.devices.value, echo.state.value.sharedOutput.serial.ifBlank { echo.serial.value }) else null) } ?: return
             if (request != playbackRequestId || !isForeground) return
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(selected)
             // Restore only metadata. Audio preparation waits for an explicit play action.
@@ -673,6 +785,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun adoptRemoteAlexa(output: `in`.synthora.musicbox.services.SharedPlaybackOutput, expectedClaim: String? = null) {
         if (_isSwitchingOutput.value) return
+        unavailableEchoSerial(echo.devices.value, output.serial.ifBlank { echo.serial.value })?.let { offline ->
+            selectIdleForegroundDevice(offline)
+            return
+        }
+        // Unknown/removed devices are not a valid renderer either. Discovery or the
+        // next foreground reconciliation can restore an online selection.
+        if (echo.devices.value.none { it.online && (output.serial.isBlank() || it.serial == output.serial) }) return
         if (expectedClaim != null && expectedClaim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token) return
         phoneQueueSyncJob?.cancel()
         playlistBackfillJob?.cancel()
@@ -719,9 +838,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun remoteControl(action: String, payload: JsonObject = buildJsonObject {}, requestedTrack: Track? = null) {
+    private fun remoteControl(action: String, payload: JsonObject = buildJsonObject {}, requestedTrack: Track? = null, queueIndex: Int? = null) {
         if (requestedTrack != null) {
-            launchPlayback(requestedTrack) {
+            launchPlayback(requestedTrack, queueIndex = queueIndex) {
                 `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, action, payload)
             }
             return
@@ -741,7 +860,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         val now = android.os.SystemClock.elapsedRealtime()
         val initial = remoteTransportPreview.value?.takeIf { it.owner == target.owner }
-            ?.present(uiState.value, now) ?: uiState.value
+            ?.present(uiState.value.copy(position = currentPlaybackProgress().positionMs), now)
+            ?: uiState.value.copy(position = currentPlaybackProgress().positionMs)
         val preview = `in`.synthora.musicbox.services.remoteTransportPreview(target.owner, action, initial, now,
             payload["position_ms"]?.toString()?.toLongOrNull()).copy(baselineRevision = echo.state.value.playbackRevision, baselineEpoch = echo.state.value.sharedOutput.epoch)
         val sequence = ++remoteTransportSequence
@@ -840,6 +960,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Select another online phone without starting the same song on this phone. */
     fun switchToMobile(deviceId: String) {
+        deferredPlaybackJob?.cancel()
         ++remoteTransportSequence
         remoteTransportJob?.cancel()
         remoteTransportPreview.value = null
@@ -871,6 +992,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun moveRemotePhoneToThisPhone() {
+        // Connect the silent local renderer while the source is still playing.
+        playbackManager.initialize()
         val before = AlexaBackendApi.phoneOutputStatus()
         val transferred = `in`.synthora.musicbox.services.MobileDeviceConnection.transfer(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, before, echo.serial.value)
         startTransferredPhone(transferred)
@@ -912,18 +1035,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 // Stream resolution may outlive the initial transfer lease before a service exists.
                 val renewal = launch {
                     while (isActive) {
-                        delay(3_000)
+                        // Renew immediately while media is preparing: the transfer
+                        // response may already have spent part of its lease in flight.
                         try {
-                            val current = withTimeout(4_000) { AlexaBackendApi.phoneOutputRequest("heartbeat", `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token) }
+                            val current = withTimeout(3_000) { AlexaBackendApi.phoneOutputRequest("heartbeat", `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token) }
                             if (!current.belongsToPhone(`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId, output.token)) break
                             `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(current)
                         } catch (_: kotlinx.coroutines.TimeoutCancellationException) { /* Retry while preparing. */ }
                         catch (e: CancellationException) { throw e }
                         catch (_: Exception) { /* The bounded lease still prevents two outputs. */ }
+                        delay(2_000)
                     }
                 }
                 try {
-                    phoneSetQueue(queue, index, state.positionMs, play = playOverride ?: state.playing, synchronizeQueue = false, reuseOwnership = true)
+                    phoneSetQueue(queue, index, state.positionMs, play = playOverride ?: state.playing, synchronizeQueue = false)
                     // phoneSetQueue waits for this exact selected item to be READY;
                     // retain the foreground/ownership guards until it returns.
                 } finally { renewal.cancel() }
@@ -937,7 +1062,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     withTimeoutOrNull(1_500) {
                         AlexaBackendApi.updateQueue("current", requireNotNull(current.ytVideoId), emptyList(),
-                            playing = playbackManager.isPlayingFlow.value, positionMs = playbackManager.getCurrentPosition(),
+                            playing = playbackManager.shouldResumeAfterTrackChange(), positionMs = playbackManager.getCurrentPosition(),
                             queueIndex = _uiState.value.queueIndex, buffering = playbackManager.isBufferingFlow.value,
                             expectedToken = output.token, currentEntryId = current.uuid)
                     }
@@ -953,8 +1078,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var remotePhoneRefreshJob: Job? = null
+    private val remoteStateRefresh = `in`.synthora.musicbox.services.RemoteStateRefresh()
     private suspend fun onMobileOutput(output: `in`.synthora.musicbox.services.SharedPlaybackOutput) {
-        if (!signedIn || `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff) return
+        if (!signedIn) return
         val ownId = `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId
         val claim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
         if (claim.isNotBlank() && (output.mode != "phone" || output.owner != ownId)) {
@@ -962,9 +1088,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val stopped = `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff()
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.releaseTo(output, stopped.second, stopped.first)
         }
-        if (_isSwitchingOutput.value) return
-        if (output.mode == "phone" && output.owner == ownId && !output.handoffPending) {
+        // A superseded preparation must release ownership immediately, while a
+        // current local preparation still keeps its queue protected.
+        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff || _isSwitchingOutput.value) return
+        if (output.mode == "phone" && !output.handoffPending &&
+            (output.owner.isBlank() || (output.owner == ownId && !playbackTargetRestoration.ready))) {
+            // An unowned phone output is local idle state, never a remote target.
+            // Reopening restores metadata/valid ownership without resuming a closed task.
+            `in`.synthora.musicbox.services.PhonePlaybackOwnership.restoreIfCurrent(output)
+            _remoteMobileOutput.value = `in`.synthora.musicbox.services.SharedPlaybackOutput()
+            setOutputPreference(PlaybackOutput.PHONE)
+            if (!playbackManager.shouldResumeAfterTrackChange()) idlePhoneSelection = true
+            if (_uiState.value.currentTrack == null) output.nowPlaying?.let { snapshot ->
+                val state = `in`.synthora.musicbox.services.parseEchoSnapshot(snapshot, android.os.SystemClock.elapsedRealtime(), null, false)
+                _uiState.update { it.copy(currentTrack = state.track, queue = state.queue, queueIndex = state.index,
+                    position = state.livePosition(), duration = state.durationMs) }
+            }
+            updatePolling()
+        } else if (output.mode == "phone" && output.owner == ownId && !output.handoffPending) {
+            setOutputPreference(PlaybackOutput.PHONE)
             if (claim != output.token) {
+                if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.dismissed(output)) {
+                    // Renew control of the idle output, without treating a closed
+                    // task's old lease as an instruction to start its saved queue.
+                    `in`.synthora.musicbox.services.PhonePlaybackOwnership.accept(output)
+                    idlePhoneSelection = true
+                    setOutputPreference(PlaybackOutput.PHONE)
+                    return
+                }
                 _isSwitchingOutput.value = true
                 viewModelScope.launch {
                     try { startTransferredPhone(output) }
@@ -973,7 +1124,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     finally { _isSwitchingOutput.value = false }
                 }
             }
-        } else if (output.mode == "phone" && output.owner != ownId) {
+        } else if (output.isRemotePhoneOutput(ownId)) {
             // A downloaded track may have continued without a token while offline.
             // On reconnection it must stop before following another phone's ownership.
             playbackManager.pause()
@@ -983,11 +1134,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _remoteMobileOutput.value = output
             setOutputPreference(PlaybackOutput.REMOTE_PHONE)
             echo.phoneDisconnected(output)
-            if (remotePhoneRefreshJob?.isActive != true) remotePhoneRefreshJob = viewModelScope.launch {
-                runEcho { echo.refreshSharedPhone() }
-            }
+            if (remotePhoneRefreshJob?.isActive != true && remoteStateRefresh.needed(output, android.os.SystemClock.elapsedRealtime()))
+                remotePhoneRefreshJob = viewModelScope.launch {
+                    runEcho {
+                        echo.refreshSharedPhone()
+                        remoteStateRefresh.completed(output, android.os.SystemClock.elapsedRealtime())
+                    }
+                }
             updatePolling()
-        } else if (output.mode == "alexa" && !isAlexa && echo.serial.value.isNotBlank()) adoptRemoteAlexa(output)
+        } else if (`in`.synthora.musicbox.services.shouldFollowAlexa(output, echo.serial.value, isAlexa)) adoptRemoteAlexa(output)
     }
 
     private suspend fun onMobileCommand(action: String, payload: JsonObject) {
@@ -1066,6 +1221,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * and play/pause state move with it.
      */
     fun switchOutput(serial: String?) {
+        deferredPlaybackJob?.cancel()
         ++remoteTransportSequence
         remoteTransportJob?.cancel()
         remoteTransportPreview.value = null
@@ -1135,6 +1291,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun moveEchoToPhone() {
+        // Binding Media3 need not wait for Amazon to finish pausing the Echo.
+        playbackManager.initialize()
         var wasPlaying = echo.state.value.playing
         var claim: `in`.synthora.musicbox.services.SharedPlaybackOutput? = null
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff = true
@@ -1209,10 +1367,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- Colors ----------
 
-    private var paletteJob: Job? = null
 
     private fun extractColors(thumbnailUri: String?) {
         paletteJob?.cancel()
+        val revision=++paletteRevision
         if (thumbnailUri == null) {
             _colors.value = null
             return
@@ -1229,7 +1387,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
                 val result = (loader.execute(request) as? SuccessResult)?.drawable
                 val bitmap = (result as? android.graphics.drawable.BitmapDrawable)?.bitmap
-
+                ensureActive()
+                if(revision!=paletteRevision) return@launch
                 if (bitmap != null) {
                     val palette = Palette.from(bitmap).generate()
                     ensureActive()
@@ -1277,7 +1436,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         primary = Color(finalPrimaryInt),
                         secondary = Color(secondaryInt),
                         tertiary = Color(tertiaryInt),
-                        background = Color.Black,
+                        background = Color(dominant?.rgb ?: primaryInt),
                         surface = Color.Black,
                         onPrimary = Color(finalOnPrimary),
                         onSecondary = Color.White,
@@ -1292,7 +1451,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to extract colors", e)
-                _colors.value = null
+                if(revision==paletteRevision) _colors.value = null
             }
         }
     }
@@ -1321,7 +1480,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Show the requested song immediately, until local preparation or Echo confirmation finishes. */
-    private fun launchPlayback(track: Track, localOnly: Boolean = false, block: suspend () -> Unit) {
+    private fun launchPlayback(track: Track, localOnly: Boolean = false, queueIndex: Int? = null, block: suspend () -> Unit) {
         ++remoteTransportSequence
         remoteTransportJob?.cancel()
         remoteTransportPreview.value = null
@@ -1330,8 +1489,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         // A new song supersedes any in-flight playlist backfill: its chunks
         // belong to the previous song's queue and must not be appended.
         playlistBackfillJob?.cancel()
-        pendingPlayback.value = track
+        radioJob?.cancel()
+        pendingPlayback.value = PendingSelection(track, queueIndex, requestId)
         pendingPlaybackJob = viewModelScope.launch {
+            var readyForPresentation = false
             try {
                 if (isRemotePhone && !localOnly) {
                     block()
@@ -1339,50 +1500,92 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         echo.state.first { it.track?.ytVideoId == track.ytVideoId && it.confirmed && it.playing && !it.processing }
                         true
                     }
-                    if (confirmed != true) _messages.tryEmit("The other device hasn't confirmed playback yet")
+                    readyForPresentation = confirmed == true
+                    if (confirmed != true && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The other device hasn't confirmed playback yet")
                 } else if (isAlexa && !localOnly) {
                     runEcho {
                         block()
                         val videoId = requireNotNull(track.ytVideoId)
-                        if (!echo.awaitPlaying(videoId)) _messages.tryEmit("The Echo hasn't confirmed playback yet")
+                        readyForPresentation = echo.awaitPlaying(videoId)
+                        if (!readyForPresentation && requestId == playbackRequestId) `in`.synthora.musicbox.network.NetworkFeedback.notify("The Echo hasn't confirmed playback yet")
                     }
                 } else {
+                    `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff()
+                    playbackManager.cancelPendingStart()
+                    _uiState.update { it.copy(isPlaying = false) }
                     block()
                     val ready = withTimeoutOrNull(45_000) {
                         val expectedId = if (localOnly) _uiState.value.currentTrack?.uuid ?: track.uuid else track.uuid
                         playbackManager.snapshot.first { it.currentId == expectedId }
-                        playbackManager.isBufferingFlow.first { !it }
+                        playbackManager.isPlayingFlow.first { it }
                         true
                     }
-                    if (ready != true) _messages.tryEmit("Playback is taking longer than usual")
+                    readyForPresentation = ready == true
+                    if (ready != true && requestId == playbackRequestId &&
+                        playbackManager.isBufferingFlow.value && !playbackManager.isPlayingFlow.value)
+                        `in`.synthora.musicbox.network.NetworkFeedback.notify("Playback hasn't started yet. Check the connection or tap play to retry.")
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
-            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't play this song") }
+            catch (e: Exception) {
+                val message = `in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't play this song"
+                if (requestId == playbackRequestId) pendingPlayback.value = pendingPlayback.value?.copy(loading = false, error = message)
+                _messages.tryEmit(message)
+            }
             finally {
                 // A cancelled earlier request must not clear the next song's loading state.
-                if (requestId == playbackRequestId) pendingPlayback.value = null
+                if (requestId == playbackRequestId) {
+                    if (readyForPresentation) withTimeoutOrNull(1_500) {
+                        presentedPlaybackRequest.first { it == requestId }
+                    }
+                    if (requestId == playbackRequestId) {
+                        if (readyForPresentation) pendingPlayback.value = null
+                        else pendingPlayback.value = pendingPlayback.value?.copy(loading = false,
+                            error = pendingPlayback.value?.error ?: "Couldn't start this song. Tap play to retry.")
+                    }
+                }
             }
         }
     }
 
     /** Play one song; the queue continues with its radio. */
     fun playYoutubeLink(link: `in`.synthora.musicbox.network.YoutubeLink) {
-        viewModelScope.launch {
+        if (deferUntilPlaybackTargetReady { playYoutubeLink(link) }) return
+        val requestId = ++playbackRequestId
+        youtubeLinkJob?.cancel()
+        pendingPlaybackJob?.cancel()
+        link.videoId?.let { video ->
+            pendingPlayback.value = PendingSelection(Track("youtube-link:$video", "Loading…", "", durationSec = 0, ytVideoId = video), null, requestId)
+        }
+        youtubeLinkJob = viewModelScope.launch {
             try {
+                if (!isAlexa && !isRemotePhone) {
+                    `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff()
+                    playbackManager.cancelPendingStart()
+                    _uiState.update { it.copy(isPlaying = false) }
+                }
                 if (link.videoId != null) {
                     val metadata = Backend.get("/api/track/${link.videoId}/metadata").objectOrEmpty()
+                    if (requestId != playbackRequestId) return@launch
                     playTrack(BrowseParser.item(JsonObject(metadata + mapOf("video_id" to JsonPrimitive(link.videoId)))).toTrack(AccountRepository.liked.value))
-                } else if (link.playlistId != null) {
+                } else if (link.playlistId != null && requestId == playbackRequestId) {
                     playCollection(BrowseParser.item(buildJsonObject { put("playlistId", link.playlistId); put("title", "YouTube playlist") }))
                 }
             } catch (e: CancellationException) { throw e }
-            catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
-            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: "Couldn't play this YouTube link") }
+            catch (e: BackendAuthException) { if (requestId == playbackRequestId) _signedOut.tryEmit(Unit) }
+            catch (e: Exception) {
+                if (requestId == playbackRequestId) {
+                    val message = `in`.synthora.musicbox.network.networkErrorMessage(e) ?: "Couldn't play this YouTube link"
+                    pendingPlayback.value = pendingPlayback.value?.let { it.copy(track = it.track.copy(title = "YouTube track"), loading = false, error = message) }
+                    _messages.tryEmit(message)
+                }
+            }
         }
     }
 
     fun playTrack(track: Track) {
+        if (deferUntilPlaybackTargetReady { playTrack(track) }) return
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("song", buildJsonObject { put("track", kotlinx.serialization.json.Json.encodeToJsonElement(Track.serializer(), track)); put("radio", true) }, requestedTrack = track); return }
         if (isAlexa) {
             launchPlayback(track) { echo.playSong(track, radio = false) }
@@ -1392,6 +1595,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRadio(track: Track) {
+        if (deferUntilPlaybackTargetReady { startRadio(track) }) return
+        if (!isRemotePhone && uiState.value.currentTrack?.ytVideoId == track.ytVideoId && pendingPlayback.value == null) {
+            startRadio()
+            return
+        }
         if (isRemotePhone) { remoteControl("song", buildJsonObject { put("track", kotlinx.serialization.json.Json.encodeToJsonElement(Track.serializer(), track)); put("radio", true) }, requestedTrack = track); return }
         if (isAlexa) { launchPlayback(track) { echo.playSong(track, radio = true) }; return }
         launchPlayback(track) {
@@ -1475,6 +1683,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * and the full list backfills Up Next in the background.
      */
     fun playCollection(item: `in`.synthora.musicbox.network.BrowseItem, shuffle: Boolean = false) {
+        if (deferUntilPlaybackTargetReady { playCollection(item, shuffle) }) return
         if (item.raw.flag("offline")) {
             val tracks = `in`.synthora.musicbox.services.offlineCollectionTracks(item, downloads.collections.value, downloads.tracks.value).orEmpty()
             if (tracks.isNotEmpty()) playDownloaded(if (shuffle) tracks.shuffled() else tracks, 0)
@@ -1524,42 +1733,77 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Mix: replace the upcoming songs with a fresh radio from the current song. */
     fun startRadio() {
+        if (deferUntilPlaybackTargetReady { startRadio() }) return
         if (isRemotePhone) { uiState.value.currentTrack?.let { startRadio(it) }; return }
         val current = uiState.value.currentTrack ?: return
-        if (isAlexa) {
-            launchEcho { echo.playSong(current, radio = true) }
-            return
-        }
-        viewModelScope.launch {
-            playbackManager.keepOnlyCurrentTrack()
-            queueManager.initializeQueue(listOf(current), isRadioMode = true)
-            _uiState.update { it.copy(queue = listOf(current), queueIndex = 0) }
-            synchronizePhoneQueue(startRadio = true)
+        radioJob?.cancel()
+        playlistBackfillJob?.cancel()
+        val request = playbackRequestId
+        val outputAtStart = _output.value
+        val serialAtStart = echo.serial.value
+        val previous = uiState.value.queue.drop((uiState.value.queueIndex + 1).coerceAtLeast(0)).mapNotNull { it.ytVideoId }
+        radioJob = viewModelScope.launch {
+            try {
+                val seed = requireNotNull(current.ytVideoId)
+                val recommendations = withTimeout(20_000) { AlexaBackendApi.getRadio(seed) }
+                val choices = recommendations.filter { it.videoId.isNotBlank() && it.videoId != seed && it.videoId != previousRadioExpansionSeed }
+                val expansionSeed = choices.filter { it.videoId !in previous }.ifEmpty { choices }.shuffled().firstOrNull()?.videoId
+                val related = expansionSeed?.let { candidate ->
+                    try { withTimeoutOrNull(8_000) { AlexaBackendApi.getRadio(candidate) }.orEmpty() }
+                    catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { emptyList() }
+                }.orEmpty()
+                coroutineContext.ensureActive()
+                if (request != playbackRequestId || uiState.value.currentTrack?.uuid != current.uuid || _output.value != outputAtStart ||
+                    (isAlexa && echo.serial.value != serialAtStart)) return@launch
+                val fresh = `in`.synthora.musicbox.services.freshRadioQueue(seed, recommendations, related, previous)
+                check(fresh.isNotEmpty()) { "No radio songs were returned. Try again." }
+                previousRadioExpansionSeed = expansionSeed
+                val full = listOf(current) + fresh.map { it.toAppTrack(AlexaBackendApi.audioUrl(it.videoId)) }
+                if (isAlexa) {
+                    runEcho { echo.playQueue(full, 0) }
+                    return@launch
+                }
+                phoneQueueSyncJob?.cancel()
+                queueManager.clearQueue()
+                withContext(Dispatchers.IO) { trackDao.insertTracks(full.map { it.toEntity() }) }
+                coroutineContext.ensureActive()
+                if (request != playbackRequestId || _uiState.value.currentTrack?.uuid != current.uuid) return@launch
+                playbackManager.keepOnlyCurrentTrack()
+                playbackManager.replaceUpcoming(full, 0)
+                _uiState.update { it.copy(queue = full, queueIndex = 0) }
+                synchronizePhoneQueue()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't refresh radio") }
         }
     }
 
-    fun playTrackFromQueue(track: Track) {
-        if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("queue_index", uiState.value.queue.indexOfFirst { it.uuid == track.uuid }) }, requestedTrack = track); return }
+    fun playTrackFromQueue(track: Track, selectedIndex: Int? = null) {
+        if (deferUntilPlaybackTargetReady { playTrackFromQueue(track, selectedIndex) }) return
+        if (blockUnavailableAlexaControl()) return
+        val index = selectedIndex?.takeIf { uiState.value.queue.getOrNull(it)?.uuid == track.uuid }
+            ?: uiState.value.queue.indexOfFirst { it.uuid == track.uuid }
+        if (index < 0) return
+        if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("queue_index", index) }, requestedTrack = track, queueIndex = index); return }
         if (isAlexa) {
-            val index = uiState.value.queue.indexOfFirst { it.uuid == track.uuid }
-            if (index >= 0) launchPlayback(track) { echo.playQueueIndex(track, index) }
+            launchPlayback(track, queueIndex = index) { echo.playQueueIndex(track, index) }
             return
         }
-        launchPlayback(track) {
+        launchPlayback(track, queueIndex = index) {
             val currentState = _uiState.value
             val queue = currentState.queue
-            val shouldResumePlayback = playbackManager.shouldResumeAfterTrackChange()
-
             val trackIndex = queue.indexOfFirst { it.uuid == track.uuid }
-            if (trackIndex == -1) return@launchPlayback
-
-            playbackManager.seekToIndex(trackIndex)
+            check(trackIndex >= 0) { "This song is no longer in the queue" }
+            if (idlePhoneSelection || !playbackManager.seekToQueueEntry(track.uuid)) {
+                phoneSetQueue(queue, trackIndex)
+                return@launchPlayback
+            }
             _uiState.update {
                 it.copy(
                     currentTrack = track,
                     queueIndex = trackIndex,
                     position = 0L,
-                    isPlaying = shouldResumePlayback,
+                    isPlaying = playbackManager.isPlayingFlow.value,
                     duration = track.durationSec.toLong() * 1000
                 )
             }
@@ -1574,6 +1818,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Play [tracks] (a shelf, album, playlist or list) starting at [startIndex]. */
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
+        if (deferUntilPlaybackTargetReady { setQueue(tracks, startIndex) }) return
+        if (blockUnavailableAlexaControl()) return
         if (startIndex !in tracks.indices) return
         if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)); put("index", startIndex) }, requestedTrack = tracks[startIndex]); return }
         if (isAlexa) {
@@ -1591,6 +1837,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * immediately while the remaining songs backfill Up Next in the background.
      */
     fun playPlaylist(playlistId: String, tracks: List<Track>, startIndex: Int = 0) {
+        if (deferUntilPlaybackTargetReady { playPlaylist(playlistId, tracks, startIndex) }) return
         val selected = tracks.getOrNull(startIndex) ?: return
         if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("playlist_id", playlistId); put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)); put("index", startIndex) }, requestedTrack = selected); return }
         if (isAlexa) launchPlayback(selected) {
@@ -1801,7 +2048,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * safely append without racing the initial install.
      */
     private suspend fun phoneSetQueue(tracks: List<Track>, startIndex: Int, positionMs: Long = 0, play: Boolean = true, throwOnFailure: Boolean = true, synchronizeQueue: Boolean = true,
-        deferRadioSeed: Boolean = false, reuseOwnership: Boolean = false, onPublished: (suspend () -> Unit)? = null) {
+        deferRadioSeed: Boolean = false, onPublished: (suspend () -> Unit)? = null) {
         idlePhoneSelection = false
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.beginSongPreparation()
         _uiState.update { it.copy(isLoading = true, error = null) }
@@ -1817,22 +2064,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     coroutineScope {
                         val playable = async(Dispatchers.IO) { resolveForPhone(tracks, startIndex) }
                         if (`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
-                            if (!reuseOwnership || !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback())
+                            if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.token.isBlank() ||
+                                !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback())
                                 `in`.synthora.musicbox.services.PhonePlaybackOwnership.claim(echo.serial.value)
                             serverPlaybackChecked = true
                         } else `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
                         startupClaim = `in`.synthora.musicbox.services.PhonePlaybackOwnership.token
-                        if (synchronizeQueue && tracks.size == 1 && startupClaim.isNotBlank()) {
-                            // Mirror immediately while stream preparation runs in parallel.
-                            // This state is settled/paused; only real Media3 buffering is loading.
-                            try {
-                                withTimeoutOrNull(1_500) {
-                                    AlexaBackendApi.updateQueue("start", requireNotNull(tracks[0].ytVideoId), tracks.map(AlexaBackendApi::backendTrack),
-                                        playing = false, positionMs = positionMs, queueIndex = 0, expectedToken = startupClaim)
-                                }
-                            } catch (e: CancellationException) { throw e }
-                            catch (_: Exception) { /* Normal publication retries after local playback starts. */ }
-                        }
+                        // Ownership is required before sound. Queue mirroring is not:
+                        // DeviceQueueStartup publishes after installing the player.
+                        // An extra awaited paused report added up to 1.5s even for
+                        // a fully cached song and duplicated the final queue write.
                         playable.await()
                     }
                 },
@@ -1844,7 +2085,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         startPositionMs = if (positionMs > 0) positionMs else androidx.media3.common.C.TIME_UNSET,
                         playWhenReady = play)
                     _uiState.update { it.copy(queue = playable, queueIndex = startIndex, currentTrack = start,
-                        isPlaying = play, position = positionMs.coerceAtLeast(0), duration = start.durationSec * 1000L) }
+                        isPlaying = playbackManager.isPlayingFlow.value, position = positionMs.coerceAtLeast(0), duration = start.durationSec * 1000L) }
                 },
                 synchronize = sync@{ playable ->
                     if (!synchronizeQueue || !`in`.synthora.musicbox.network.NetworkFeedback.online.value) return@sync
@@ -1901,7 +2142,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } else trackDao.insertTracks(resolved.map { it.toEntity() })
         }
 
+    private fun cancelPendingYoutubeLink(): Boolean {
+        if (youtubeLinkJob?.isActive != true) return false
+        ++playbackRequestId
+        youtubeLinkJob?.cancel()
+        pendingPlayback.value = null
+        return true
+    }
+
+    fun blockUnavailableAlexaControl(): Boolean {
+        if (!isAlexa || echo.amazonConnected.value != false) return false
+        _messages.tryEmit("Sign in to Amazon to control Alexa, or choose another playback device.")
+        return true
+    }
+
     fun togglePlayPause() {
+        if (deferUntilPlaybackTargetReady { togglePlayPause() }) return
+        if (blockUnavailableAlexaControl()) return
+        pendingPlayback.value?.let { selection ->
+            if (!selection.loading) {
+                if (selection.track.uuid.startsWith("youtube-link:")) {
+                    `in`.synthora.musicbox.network.youtubeLink("https://youtu.be/${selection.track.ytVideoId}")?.let(::playYoutubeLink)
+                } else if (uiState.value.queue.any { it.uuid == selection.track.uuid }) playTrackFromQueue(selection.track, selection.index)
+                else playTrack(selection.track)
+            } else {
+                ++playbackRequestId
+                pendingPlaybackJob?.cancel()
+                youtubeLinkJob?.cancel()
+                pendingPlayback.value = selection.copy(requestId = playbackRequestId, loading = false, error = null)
+                viewModelScope.launch { `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff() }
+                playbackManager.cancelPendingStart()
+            }
+            return
+        }
+        if (cancelPendingYoutubeLink()) return
         if (isRemotePhone) { remoteControl(if (remoteTransportPreview.value?.takeIf { it.owner == _remoteMobileOutput.value.owner && it.error == null }?.playing ?: uiState.value.isPlaying) "pause" else "play"); return }
         if (isAlexa) {
             val playing = echo.state.value.playing
@@ -1924,7 +2198,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             launchPlayback(current) { phoneSetQueue(queue, index, playbackManager.getResumePosition(current.uuid, state.position)) }
         } else viewModelScope.launch {
             runEcho {
-                if (!playbackManager.isPlayingFlow.value && !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback()) {
+                if (!playbackManager.isPlayingFlow.value && !`in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback() &&
+                    !`in`.synthora.musicbox.services.PlaybackService.canResumeAvailablePhoneAudio()) {
                     if (`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
                         `in`.synthora.musicbox.services.PhonePlaybackOwnership.claim(echo.serial.value)
                         serverPlaybackChecked = true
@@ -1937,6 +2212,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
+        if (deferUntilPlaybackTargetReady { toggleShuffle() }) return
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("shuffle", buildJsonObject {}); return }
         if (isAlexa) {
             launchEcho { echo.shuffle() }
@@ -1948,6 +2225,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleRepeat() {
+        if (deferUntilPlaybackTargetReady { toggleRepeat() }) return
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("repeat", buildJsonObject {}); return }
         if (isAlexa) return
         playbackManager.toggleRepeatMode()
@@ -1957,6 +2236,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Insert songs right after the current one. */
     fun addNext(tracks: List<Track>) {
+        if (deferUntilPlaybackTargetReady { addNext(tracks) }) return
         if (isRemotePhone) { remoteControl("next_items", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)) }); return }
         if (tracks.isEmpty()) return
         if (isAlexa) {
@@ -1994,6 +2274,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Add songs to the end of the queue. */
     fun addToQueue(tracks: List<Track>) {
+        if (deferUntilPlaybackTargetReady { addToQueue(tracks) }) return
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("append", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)) }); return }
         if (tracks.isEmpty()) return
         if (isAlexa) {
@@ -2048,7 +2330,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         current?.invokeOnCompletion { if (skipLoadingJob === current) transportLoading.value = false }
     }
 
+    private fun clearSelectionForNavigation() {
+        if (pendingPlayback.value == null) return
+        ++playbackRequestId
+        pendingPlaybackJob?.cancel()
+        youtubeLinkJob?.cancel()
+        radioJob?.cancel()
+        pendingPlayback.value = null
+    }
+
     fun skipToNext() {
+        if (deferUntilPlaybackTargetReady { skipToNext() }) return
+        if (blockUnavailableAlexaControl()) return
+        clearSelectionForNavigation()
+        cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("next"); return }
         if (isAlexa) {
             launchEcho { echo.command("next") }
@@ -2058,6 +2353,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        if (deferUntilPlaybackTargetReady { skipToPrevious() }) return
+        if (blockUnavailableAlexaControl()) return
+        clearSelectionForNavigation()
+        cancelPendingYoutubeLink()
         if (isRemotePhone || isAlexa) { skipRemote("previous"); return }
         if (isAlexa) {
             launchEcho { echo.command("previous") }
@@ -2067,6 +2366,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seekTo(positionMs: Long) {
+        if (deferUntilPlaybackTargetReady { seekTo(positionMs) }) return
+        if (blockUnavailableAlexaControl()) return
+        // A failed/new target must never seek the superseded song still in the renderer.
+        pendingPlayback.value?.let { if (playbackManager.snapshot.value.currentId != it.track.uuid) return }
         if (isRemotePhone) { remoteControl("seek", buildJsonObject { put("position_ms", positionMs) }); return }
         if (isAlexa) {
             launchEcho { echo.seek(positionMs) }
@@ -2076,23 +2379,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(position = positionMs) }
     }
 
-    fun updateProgress() {
+    /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
+    internal fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
+        val state = uiState.value
         if (isAlexa || isRemotePhone) {
-            _tick.value++
-            return
+            val echoState = echo.state.value
+            if (state.currentTrack?.ytVideoId != echoState.track?.ytVideoId)
+                return `in`.synthora.musicbox.services.PlaybackProgress(state.position, state.duration)
+            val now = android.os.SystemClock.elapsedRealtime()
+            val live = state.copy(position = echoState.livePosition(now))
+            val shown = remoteTransportPreview.value?.takeIf { isRemotePhone && it.owner == _remoteMobileOutput.value.owner }
+                ?.present(live, now) ?: live
+            return `in`.synthora.musicbox.services.PlaybackProgress(shown.position, shown.duration)
         }
-        // The destination's previous Media3 item is not the transferred song's clock.
-        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff ||
-            playbackManager.snapshot.value.currentId != _uiState.value.currentTrack?.uuid) return
-        val currentPos = playbackManager.getCurrentPosition()
-        val durationMs = playbackManager.getDuration()
-        _uiState.update { state ->
-            state.copy(
-                position = currentPos,
-                duration = if (durationMs > 0) durationMs else state.duration
-            )
-        }
+        val matches = !`in`.synthora.musicbox.services.PhonePlaybackOwnership.localHandoff &&
+            playbackManager.snapshot.value.currentId == state.currentTrack?.uuid && !idlePhoneSelection
+        return `in`.synthora.musicbox.services.PlaybackProgress(
+            if (matches && state.currentTrack != null) playbackManager.getResumePosition(state.currentTrack.uuid, state.position) else state.position,
+            if (matches) playbackManager.getDuration().takeIf { it > 0 } ?: state.duration else state.duration)
     }
+
+    internal fun visiblePlaybackProgress(progress: `in`.synthora.musicbox.services.PlaybackProgress) =
+        if (progress.trackId == uiState.value.currentTrack?.uuid && progress.output == _output.value.name) progress
+        else currentPlaybackProgress()
+
+    val playbackProgress = `in`.synthora.musicbox.services.playbackClock(viewModelScope,
+        combine(uiState, _output, playbackManager.cursorRevision) { state, output, revision ->
+            `in`.synthora.musicbox.services.PlaybackClockState(state.currentTrack?.uuid, output.name,
+                state.isPlaying, state.isLoading, state.position, state.duration,
+                if (output == PlaybackOutput.PHONE) revision else 0)
+        }, read = { currentPlaybackProgress() })
 
     /** Echo volume (0–100), shown by the player's volume slider. */
     val echoVolume: StateFlow<Int?> = echo.state.map { it.volume }
@@ -2117,9 +2433,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 
     fun removeFromQueue(trackId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        if (blockUnavailableAlexaControl()) { onComplete?.invoke(false); return }
         if (isRemotePhone) {
             viewModelScope.launch {
-                try { `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "remove", buildJsonObject { put("id", trackId) }); onComplete?.invoke(true) }
+                try {
+                    val state = uiState.value
+                    val index = state.queue.indexOfFirst { it.uuid == trackId }
+                    if (index < 0) { onComplete?.invoke(true); return@launch }
+                    if (index == state.queueIndex) { onComplete?.invoke(false); return@launch }
+                    `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "remove", buildJsonObject {
+                        put("id", trackId); put("index", index)
+                        state.queue[index].ytVideoId?.let { put("video_id", it) }
+                    })
+                    onComplete?.invoke(true)
+                }
                 catch (e: Exception) { onComplete?.invoke(false); _messages.tryEmit(e.message ?: "Couldn't remove song") }
             }
             return
@@ -2161,6 +2488,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun moveInQueue(fromIndex: Int, toIndex: Int) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("reorder", buildJsonObject { put("from", fromIndex); put("to", toIndex) }); return }
         if (isAlexa) {
             launchEcho { echo.queueReorder(fromIndex, toIndex) }
@@ -2239,11 +2567,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playbackManager.cancelSleepTimer()
     }
 
-    private val lyricsRefreshJobs = mutableMapOf<String, Job>()
 
     fun refreshLyrics(track: Track) {
         if (lyricsRefreshJobs[track.uuid]?.isActive == true) return
-        val isEcho = isAlexa
+        val isEcho = isAlexa || isRemotePhone
         lyricsRefreshJobs[track.uuid] = viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -2261,9 +2588,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 if (isEcho) {
                     val videoId = track.ytVideoId ?: return@launch
                     _echoLyrics.update {
-                        it + (videoId to track.withUpdatedLyrics(
-                            syncedLyrics = result.syncedLyrics?.takeIf { s -> s.isNotBlank() },
-                            plainLyrics = result.plainLyrics?.takeIf { s -> s.isNotBlank() }
+                        val previous=it[videoId] ?: track
+                        it + (videoId to previous.withUpdatedLyrics(
+                            syncedLyrics = result.syncedLyrics?.takeIf { s -> `in`.synthora.musicbox.utils.hasTimedLyrics(s) } ?: previous.syncedLyrics,
+                            plainLyrics = result.plainLyrics?.takeIf { s -> s.isNotBlank() } ?: previous.plainLyrics
                         ))
                     }
                     return@launch
@@ -2273,7 +2601,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     database.withTransaction {
                         val latest = trackDao.getTrackByUuid(track.uuid)?.toTrack() ?: track
                         val refreshedTrack = latest.withUpdatedLyrics(
-                            syncedLyrics = result.syncedLyrics?.takeIf { it.isNotBlank() } ?: latest.syncedLyrics,
+                            syncedLyrics = result.syncedLyrics?.takeIf { `in`.synthora.musicbox.utils.hasTimedLyrics(it) } ?: latest.syncedLyrics,
                             plainLyrics = result.plainLyrics?.takeIf { it.isNotBlank() } ?: latest.plainLyrics
                         )
                         trackDao.insertTrack(refreshedTrack.toEntity())
@@ -2287,7 +2615,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to refresh lyrics: ${`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message}", e)
             } finally {
-                lyricsRefreshJobs.remove(track.uuid)
+                if(lyricsRefreshJobs[track.uuid] === coroutineContext[Job]) lyricsRefreshJobs.remove(track.uuid)
             }
         }
     }
@@ -2364,28 +2692,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadRestoredQueue() {
+        val request = playbackRequestId
         try {
             val prefs = getApplication<Application>().getSharedPreferences(
                 "playback_state_prefs",
                 android.content.Context.MODE_PRIVATE
             )
+            if (!prefs.getBoolean("has_saved_state", false)) return
             val trackIds = prefs.getString("queue_track_ids", "") ?: ""
             val savedIndex = prefs.getInt("queue_start_index", 0)
+            val savedPosition = prefs.getLong("playback_position", 0L).coerceAtLeast(0)
             if (trackIds.isEmpty()) return
 
             val tracks = withContext(Dispatchers.IO) {
-                trackIds.split(",").mapNotNull { id ->
-                    runCatching { trackDao.getTrackByUuid(id)?.toTrack() }.getOrNull()
-                }
+                val ids = trackIds.split(",")
+                val found = ids.distinct().chunked(500).flatMap { trackDao.getTracksByUuids(it) }
+                    .associate { it.uuid to it.toTrack() }
+                ids.mapNotNull(found::get)
             }
-            if (tracks.isNotEmpty()) {
-                val currentTrack = tracks.getOrNull(savedIndex)
+            if (tracks.isNotEmpty() && request == playbackRequestId && _uiState.value.queue.isEmpty()) {
+                val index = savedIndex.coerceIn(tracks.indices)
+                val currentTrack = tracks[index]
                 _uiState.update {
                     it.copy(
                         queue = tracks,
-                        queueIndex = savedIndex,
+                        queueIndex = index,
                         currentTrack = currentTrack,
-                        duration = currentTrack?.durationSec?.toLong()?.times(1000) ?: 0L
+                        position = savedPosition,
+                        duration = currentTrack.durationSec * 1000L
                     )
                 }
             }
@@ -2398,6 +2732,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Power tools for the phone queue. The playing song and its position are untouched. */
     fun applyQueueTool(tool: QueueTool) {
+        if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("tool", buildJsonObject { put("tool", tool.name) }); return }
         if (isAlexa) {
             if (tool == QueueTool.SHUFFLE_UPCOMING) launchEcho { echo.shuffle() }
@@ -2465,9 +2800,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
-internal fun withPendingPlayback(state: MusicUiState, pending: Track?): MusicUiState =
-    if (pending == null) state else state.copy(currentTrack = pending, position = 0L,
-        duration = pending.durationSec * 1000L, isPlaying = false, isLoading = true)
+internal fun withPendingPlayback(state: MusicUiState, pending: Track?, selectedIndex: Int? = null, loading: Boolean = true, error: String? = null): MusicUiState {
+    if (pending == null) return state
+    val index = selectedIndex?.takeIf { state.queue.getOrNull(it)?.uuid == pending.uuid }
+        ?: state.queue.indexOfFirst { it.uuid == pending.uuid }
+    return state.copy(currentTrack = pending, queueIndex = index, position = 0L,
+        duration = pending.durationSec * 1000L, isPlaying = false, isLoading = loading, error = error)
+}
 
 /**
  * Songs that backfill Up Next behind an already-playing fast start.
@@ -2500,3 +2839,17 @@ internal fun reconcilePhonePlayback(state: MusicUiState, queue: List<Track>, cur
     return state.copy(queue = queue, queueIndex = index, currentTrack = track,
         position = if (changed) 0 else state.position, duration = track.durationSec * 1000L)
 }
+
+/** Selection and queue position must agree before an optimistic song can be released. */
+internal fun selectionPresented(state: MusicUiState, trackId: String, index: Int?): Boolean {
+    if (state.currentTrack?.uuid != trackId) return false
+    if (index == null) return true
+    val expected = index.takeIf { state.queue.getOrNull(it)?.uuid == trackId }
+        ?: state.queue.indexOfFirst { it.uuid == trackId }
+    return expected >= 0 && state.queueIndex == expected
+}
+
+/** An empty server serial after restart must not strand a saved queue on an offline Echo. */
+internal fun unavailableEchoSerial(devices: List<`in`.synthora.musicbox.services.EchoDevice>, selected: String): String? =
+    devices.firstOrNull { it.serial == selected && !it.online }?.serial
+        ?: devices.takeIf { it.isNotEmpty() && it.none { device -> device.online } }?.first()?.serial

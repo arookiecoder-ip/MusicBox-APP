@@ -2,6 +2,7 @@ package `in`.synthora.musicbox.services
 
 import `in`.synthora.musicbox.models.Track
 import `in`.synthora.musicbox.network.BrowseItem
+import `in`.synthora.musicbox.network.metadata
 import `in`.synthora.musicbox.viewmodels.HomeShelf
 import kotlin.random.Random
 
@@ -10,7 +11,7 @@ internal fun speedDialItems(shelves: List<HomeShelf>, recent: List<Track>): List
         BrowseItem(id = it.ytVideoId!!, kind = "track", title = it.title, subtitle = it.artist,
             image = it.thumbnailUri.orEmpty(), videoId = it.ytVideoId.orEmpty(), playlistId = "", durationMs = it.durationSec * 1000L,
             artistId = it.artistId.orEmpty(), albumId = it.albumId.orEmpty(), editable = false,
-            raw = kotlinx.serialization.json.JsonObject(emptyMap()))
+            raw = it.metadata())
     }
     return (songs + shelves.flatMap { it.items }.filter {
         it.kind == "track" && it.videoId.isNotBlank()

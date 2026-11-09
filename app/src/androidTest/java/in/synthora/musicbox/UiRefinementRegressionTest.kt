@@ -82,7 +82,7 @@ class UiRefinementRegressionTest {
         var moved: Pair<Int, Int>? = null
         compose.setContent { JUKETheme(darkTheme = true) { Surface(Modifier.fillMaxSize()) {
             QueueBottomSheetContent(current, listOf(current, first, second), 0, MusicUiState(), {},
-                { from, to -> moved = from to to }, {}, {})
+                { from, to -> moved = from to to }, { _, _ -> }, {})
         } } }
         compose.onNodeWithText("Queue").assertIsDisplayed()
         compose.onNodeWithText("3 songs").assertIsDisplayed()
@@ -96,7 +96,7 @@ class UiRefinementRegressionTest {
     @Test fun queueHasClearEmptyStateAndSaveAction() {
         var saved = false
         compose.setContent { JUKETheme { Surface(Modifier.fillMaxSize()) {
-            QueueBottomSheetContent(current, listOf(current), 0, MusicUiState(), {}, { _, _ -> }, {}, {},
+            QueueBottomSheetContent(current, listOf(current), 0, MusicUiState(), {}, { _, _ -> }, { _, _ -> }, {},
                 onSaveAsPlaylist = { saved = true })
         } } }
         compose.onNodeWithText("No upcoming songs").assertIsDisplayed()

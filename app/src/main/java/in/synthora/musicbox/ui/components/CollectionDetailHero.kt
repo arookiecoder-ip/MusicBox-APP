@@ -3,10 +3,13 @@ package `in`.synthora.musicbox.ui.components
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,12 +33,26 @@ fun CollectionDetailHero(item: BrowseItem, title: String, image: String, credit:
         BoxWithConstraints(Modifier.fillMaxWidth().stableStatusBarsPadding()) {
             val wide = paneHeight == null && maxWidth >= 840.dp
             @Composable fun labels() {
-                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                    maxLines = if (item.kind == "playlist") 1 else Int.MAX_VALUE, overflow = TextOverflow.Ellipsis)
                 if (credit.isNotBlank()) Text(credit, style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.clickable(enabled = onCreditClick != null) { onCreditClick?.invoke() })
                 Text(metadata, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
-                if (description.isNotBlank()) Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+                if (description.isNotBlank()) {
+                    var expanded by remember(item.id, description) { mutableStateOf(false) }
+                    var overflowed by remember(item.id, description) { mutableStateOf(false) }
+                    Text(description, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        onTextLayout = { if (!expanded) overflowed = it.hasVisualOverflow })
+                    if (overflowed) Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                        TextButton(onClick = { expanded = true }) { Text("Read more") }
+                    }
+                    if (expanded) AlertDialog(onDismissRequest = { expanded = false },
+                        shape = RoundedCornerShape(0.dp), title = { Text(title) },
+                        text = { Text(description, Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) },
+                        confirmButton = { TextButton(onClick = { expanded = false }) { Text("Back") } })
+                }
             }
             if (wide) Row(Modifier.fillMaxWidth().padding(start = 28.dp, end = 28.dp, top = 56.dp, bottom = 16.dp),
                 verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(28.dp)) {

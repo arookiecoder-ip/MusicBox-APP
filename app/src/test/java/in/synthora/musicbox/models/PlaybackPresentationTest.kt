@@ -2,6 +2,7 @@ package `in`.synthora.musicbox.models
 
 import `in`.synthora.musicbox.network.BrowseParser
 import `in`.synthora.musicbox.network.toTrack
+import `in`.synthora.musicbox.network.metadata
 import `in`.synthora.musicbox.viewmodels.MusicUiState
 import `in`.synthora.musicbox.viewmodels.withPendingPlayback
 import kotlinx.serialization.json.Json
@@ -11,9 +12,9 @@ import org.junit.Test
 import `in`.synthora.musicbox.services.resolveTracks
 
 class PlaybackPresentationTest {
-    @Test fun liveMetadataUpdatesArtworkAndMissingCurrentRowsStillChangeTheSong() {
+    @Test fun liveMetadataFillsMissingFieldsAndMissingCurrentRowsStillChangeTheSong() {
         val old = Track("old", "Old", "Artist", durationSec = 100)
-        val stored = Track("next", "Stale", "Stale artist", thumbnailUri = "stale.jpg", durationSec = 100, ytVideoId = "video")
+        val stored = Track("next", "", "", thumbnailUri = null, durationSec = 100, ytVideoId = "video")
         val live = stored.copy(title = "New", artist = "New artist", thumbnailUri = "new.jpg", durationSec = 200, ytVideoId = null)
         val snapshot = `in`.synthora.musicbox.services.PhonePlaybackSnapshot(listOf("old", "next"), "next", live)
         val resolved = snapshot.resolveTracks(mapOf("old" to old, "next" to stored))
@@ -38,6 +39,25 @@ class PlaybackPresentationTest {
         assertEquals(actual.queue, pending.queue)
         assertSame(actual, withPendingPlayback(actual, null))
     }
+    @Test fun pendingSelectionHighlightsImmediatelyAndConfirmationOrFailureWins() {
+        val a = Track("a", "A", "Artist", durationSec = 100)
+        val b = Track("b", "B", "Artist", durationSec = 100)
+        val original = MusicUiState(currentTrack = a, queue = listOf(a, b), queueIndex = 0)
+        assertEquals(1, withPendingPlayback(original, b).queueIndex)
+        assertSame(original, withPendingPlayback(original, null))
+        val confirmed = original.copy(currentTrack = b, queueIndex = 1, isPlaying = true)
+        assertSame(confirmed, withPendingPlayback(confirmed, null))
+        assertEquals(-1, withPendingPlayback(original, b.copy(uuid = "not-in-queue")).queueIndex)
+    }
+    @Test fun duplicateQueueTapKeepsTheTappedOccurrenceAndRemovedIndexFallsBackSafely() {
+        val a = Track("a", "A", "Artist", durationSec = 100)
+        val b = Track("b", "B", "Artist", durationSec = 100)
+        val state = MusicUiState(currentTrack = b, queue = listOf(a, b, a), queueIndex = 1)
+        assertEquals(2, withPendingPlayback(state, a, 2).queueIndex)
+        assertEquals(0, withPendingPlayback(state.copy(queue = listOf(a, b)), a, 2).queueIndex)
+        assertEquals(0, withPendingPlayback(state, a, 99).queueIndex)
+    }
+
     @Test fun handoffKeepsTheTransferredCursorWhenTheSameItemIsPrepared() {
         val song = Track("entry", "Song", "Artist", durationSec = 200)
         val handedOff = MusicUiState(currentTrack = song, queue = listOf(song), queueIndex = 0, position = 75000L)
@@ -69,6 +89,44 @@ class PlaybackPresentationTest {
         assertEquals(next, reordered.currentTrack)
         assertEquals(0, reordered.queueIndex)
         assertSame(stale, `in`.synthora.musicbox.viewmodels.reconcilePhonePlayback(stale, listOf(next), "missing"))
+    }
+
+    @Test fun combinedIdlessCreditMatchesWebappAndSplitsScreenshotArtists() {
+        val byline = "Sai Abhyankkar and Shruti Haasan and Vivek"
+        val track = Track("song", "Song", byline, durationSec = 10,
+            artists = listOf(ArtistCredit(byline)))
+        assertEquals(listOf("Sai Abhyankkar", "Shruti Haasan", "Vivek"),
+            track.artistCredits().map { it.name })
+    }
+
+    @Test fun authoritativeNamesContainingConjunctionsRemainOneArtist() {
+        for (name in listOf("Of Monsters and Men", "Florence and the Machine", "Simon & Garfunkel", "Earth, Wind & Fire")) {
+            val credit = ArtistCredit(name, "UCband")
+            assertEquals(listOf(credit), Track("song", "Song", name, durationSec = 10,
+                artists = listOf(credit)).artistCredits())
+        }
+        val credits = listOf(ArtistCredit("Of Monsters and Men", "UCband"), ArtistCredit("Guest"))
+        assertEquals(credits, Track("song", "Song", "Unused", durationSec = 10, artists = credits).artistCredits())
+        assertEquals(listOf(ArtistCredit("Simon & Garfunkel")),
+            Track("song", "Song", "Simon & Garfunkel", durationSec = 10).artistCredits())
+    }
+
+    @Test fun legacySeparatorsBlankIdsAndOxfordCommaKeepCorrectPrimaryId() {
+        for (byline in listOf("A, B, and C", " A AND B featuring C ", "A · B ft. C")) {
+            assertEquals(listOf(ArtistCredit("A", "UCfirst"), ArtistCredit("B"), ArtistCredit("C")),
+                Track("song", "Song", byline, durationSec = 10, artistId = "UCfirst",
+                    artists = listOf(ArtistCredit(byline, " "))).artistCredits())
+        }
+        assertTrue(Track("song", "Song", " ", durationSec = 10).artistCredits().isEmpty())
+        assertEquals(listOf(ArtistCredit("A")),
+            Track("song", "Song", "A and a", durationSec = 10).artistCredits())
+    }
+
+    @Test fun queueMetadataPreservesAuthoritativeBandNamesOnRoundTrip() {
+        val credits = listOf(ArtistCredit("Of Monsters and Men", "UCband"), ArtistCredit("Guest", "UCguest"))
+        val track = Track("song", "Song", "Of Monsters and Men, Guest", durationSec = 10,
+            ytVideoId = "video", artists = credits)
+        assertEquals(credits, BrowseParser.item(track.metadata()).toTrack().artistCredits())
     }
 
 }

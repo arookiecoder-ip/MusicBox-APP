@@ -1,5 +1,7 @@
 package `in`.synthora.musicbox.ui.screens
 
+import `in`.synthora.musicbox.ui.components.blackStatusBarOnScroll
+
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
@@ -141,43 +143,10 @@ import kotlinx.coroutines.launch
 
 // Re-export LyricLine for compatibility if needed elsewhere,
 // though it should ideally be in a model file.
-data class LyricLine(
-    val timeMs: Long,
-    val text: String
-)
+typealias LyricLine = `in`.synthora.musicbox.utils.TimedLyricLine
 
-// Helper moved to top level or util file, keeping here for now to avoid breaking changes if used elsewhere
-fun parseSyncedLyrics(syncedLyrics: String, offsetMs: Long = 0L): List<LyricLine> {
-    val lines = mutableListOf<LyricLine>()
-    val regex = """\[(\d{2}):(\d{2})\.(\d{1,3})]\s*(.*)""".toRegex()
-
-    syncedLyrics.lines().forEach { line ->
-        regex.find(line)?.let { match ->
-            val minutes = match.groupValues[1].toLongOrNull() ?: 0L
-            val seconds = match.groupValues[2].toLongOrNull() ?: 0L
-            val frac = match.groupValues[3]
-            var text = match.groupValues[4]
-
-            // Basic cleanup of lrc artifact chars
-            text = text.trim()
-
-            val millisFromFrac = when (frac.length) {
-                3 -> frac.toLongOrNull() ?: 0L
-                2 -> (frac.toLongOrNull() ?: 0L) * 10L
-                1 -> (frac.toLongOrNull() ?: 0L) * 100L
-                else -> frac.padEnd(3, '0').take(3).toLongOrNull() ?: 0L
-            }
-
-            val timeMs = (minutes * 60 * 1000) + (seconds * 1000) + millisFromFrac
-            val adjustedTimeMs = (timeMs + offsetMs).coerceAtLeast(0L)
-            if (text.isNotBlank()) {
-                lines.add(LyricLine(adjustedTimeMs, text))
-            }
-        }
-    }
-
-    return lines.sortedBy { it.timeMs }
-}
+fun parseSyncedLyrics(syncedLyrics: String, offsetMs: Long = 0L): List<LyricLine> =
+    `in`.synthora.musicbox.utils.parseLrc(syncedLyrics,offsetMs)
 
 @SuppressLint("ConfigurationScreenWidthHeight")
 @OptIn(ExperimentalMaterial3Api::class)
@@ -207,9 +176,9 @@ fun PlayerScreen(
         }
     }
     val presentation = remember(musicViewModel) {
-        musicViewModel.uiState.map { it.copy(position = 0L) }.distinctUntilChanged()
+        musicViewModel.uiState.map { it.copy(position = 0L, queue = emptyList(), queueIndex = -1) }.distinctUntilChanged()
     }
-    val uiState by presentation.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.copy(position = 0L))
+    val uiState by presentation.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.copy(position = 0L, queue = emptyList(), queueIndex = -1))
     val currentTrack = uiState.currentTrack
     var showQueue by remember { mutableStateOf(false) }
     LaunchedEffect(showQueue) { if (showQueue) musicViewModel.refreshQueue() }
@@ -222,6 +191,7 @@ fun PlayerScreen(
     val echoVolume by musicViewModel.echoVolume.collectAsStateWithLifecycle()
     val mobileDevices by musicViewModel.mobileDevices.collectAsStateWithLifecycle()
     val remoteMobileOutput by musicViewModel.remoteMobileOutput.collectAsStateWithLifecycle()
+    val amazonConnected by musicViewModel.echo.amazonConnected.collectAsStateWithLifecycle()
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoSerial by musicViewModel.echo.serial.collectAsStateWithLifecycle()
     val isAlexa = output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.ALEXA
@@ -261,17 +231,6 @@ fun PlayerScreen(
     val shareSong = `in`.synthora.musicbox.ui.components.rememberShareAction()
 
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    // Poll the position only while playing; paused, one read is enough (no 300 ms wakeups).
-    LaunchedEffect(lifecycleOwner, uiState.isPlaying) {
-        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            musicViewModel.updateProgress()
-            while (uiState.isPlaying) {
-                delay(300)
-                musicViewModel.updateProgress()
-            }
-        }
-    }
 
     if (currentTrack == null) {
         if (uiState.isLoading) {
@@ -318,7 +277,9 @@ fun PlayerScreen(
         // times; successful lines are cached in memory, so a retry only re-asks for the failures.
         for (attempt in 0..3) {
             if (attempt > 0) delay(5_000L * attempt)
-            val romanizedSynced = currentTrack.romanizedSyncedLyrics?.takeIf(complete)
+            val romanizedSynced = currentTrack.romanizedSyncedLyrics?.takeIf {
+                LyricsRomanizer.isValidSyncedRomanization(currentTrack.syncedLyrics.orEmpty(), it)
+            }
                 ?: currentTrack.syncedLyrics?.let { LyricsRomanizer.romanizeSyncedLyrics(it) }
             val romanizedPlain = currentTrack.romanizedPlainLyrics?.takeIf(complete)
                 ?: currentTrack.plainLyrics?.let { LyricsRomanizer.romanizeText(it) }
@@ -349,32 +310,43 @@ fun PlayerScreen(
 
     val stableQueueTrack = remember(currentTrack) { currentTrack }
     val queueContent: @Composable () -> Unit = {
+        val queuePresentation = remember(musicViewModel) {
+            musicViewModel.uiState.map { Triple(it.queue, it.queueIndex, it.currentTrack) }.distinctUntilChanged()
+        }
+        val queueState by queuePresentation.collectAsStateWithLifecycle(
+            initialValue = musicViewModel.uiState.value.let { Triple(it.queue, it.queueIndex, it.currentTrack) })
+        val prepared by musicViewModel.queueRows.collectAsStateWithLifecycle()
+        val preparingRows = queueState.first.isNotEmpty() && prepared.tracks != queueState.first
         val rec by musicViewModel.recStatus.collectAsStateWithLifecycle()
         val queueError by musicViewModel.queueLoadError.collectAsStateWithLifecycle()
         // The queue does not display the playback clock. Keep its inputs stable
         // while progress updates so visible rows are not rebuilt every tick.
-        val queueUiState = remember(uiState.isLoading, uiState.isQueueOperationInProgress) {
-            MusicUiState(isLoading = uiState.isLoading, isQueueOperationInProgress = uiState.isQueueOperationInProgress)
+        val queueUiState = remember(uiState.isPlaying, uiState.isLoading, uiState.isQueueOperationInProgress, uiState.extractedColors, preparingRows) {
+            MusicUiState(isPlaying = uiState.isPlaying, isLoading = uiState.isLoading || preparingRows, isQueueOperationInProgress = uiState.isQueueOperationInProgress, extractedColors = uiState.extractedColors)
         }
+            Box(Modifier.alpha(if (isAlexa && amazonConnected == false) .4f else 1f)) {
             QueueBottomSheetContent(
                 statusText = when {
                     rec.reserve > 0 -> "${rec.reserve} more songs ready from the radio"
                     else -> null
                 },
                 error = queueError, onRetry = musicViewModel::refreshQueue,
-                currentTrack = stableQueueTrack,
-                queue = uiState.queue,
-                queueIndex = uiState.queueIndex,
+                currentTrack = queueState.third ?: stableQueueTrack,
+                queue = queueState.first,
+                queueIndex = queueState.second,
                 uiState = queueUiState,
                 onClose = { showQueue = false }, showClose = !tabletLandscape,
                 onMoveTrack = { from, to -> musicViewModel.moveInQueue(from, to) },
                 onRemoveTrack = { id, complete -> musicViewModel.removeFromQueue(id, complete) },
                 onPlayTrack = { track -> musicViewModel.playTrackFromQueue(track) },
+                preparedRows = prepared.takeIf { queueState.first.isNotEmpty() },
+                onPlayEntry = { track, index -> musicViewModel.playTrackFromQueue(track, index) },
                 onShuffleUpcoming = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.SHUFFLE_UPCOMING) },
                 onSortUpcoming = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.SORT_UPCOMING) },
                 onClearPlayed = { musicViewModel.applyQueueTool(`in`.synthora.musicbox.viewmodels.MusicViewModel.QueueTool.CLEAR_PLAYED) },
                 onSaveAsPlaylist = { musicViewModel.saveQueueAsPlaylist() }
             )
+            }
     }
 
     // Present the shell immediately; use a short, controlled entrance instead of the
@@ -403,13 +375,13 @@ fun PlayerScreen(
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
         dragHandle = null
     ) {
+        `in`.synthora.musicbox.utils.ObserveWindowFrameTimings("player")
         JUKETheme(darkTheme = true) {
-        Box(modifier = Modifier.fillMaxSize().graphicsLayer {
-            alpha = entrance.value
+        Box(modifier = Modifier.fillMaxSize().blackStatusBarOnScroll().graphicsLayer {
             translationY = (1f - entrance.value) * 48.dp.toPx()
         }) {
             // Plain black backdrop; the artwork is the only color on the screen.
-            Box(Modifier.fillMaxSize().background(GlassBackdrop.color(isGlassDark())))
+            `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(uiState.extractedColors?.let { listOf(it.background,it.secondary,it.tertiary) }.orEmpty(), Modifier.fillMaxSize(), baseColor = GlassBackdrop.color(isGlassDark()))
             // Content — fully responsive, adapts to screen height
             BoxWithConstraints(
                 modifier = Modifier
@@ -491,7 +463,7 @@ fun PlayerScreen(
         }
         ModalBottomSheet(
             shape = androidx.compose.ui.graphics.RectangleShape,
-            containerColor = `in`.synthora.musicbox.ui.theme.glassSheetColor(),
+            containerColor = Color.Transparent,
             contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
             onDismissRequest = { showQueue = false },
             sheetState = queueSheet,
@@ -588,13 +560,11 @@ fun PlayerHeader(
     var showMenu by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         IconButton(onClick = onDismiss) { Icon(Icons.Default.KeyboardArrowDown, "Close player") }
-        Text("Now playing", style = MaterialTheme.typography.labelLarge)
         if (showLyrics) IconButton(onClick = onToggleLyrics) { Icon(Icons.Default.Close, "Hide lyrics") }
         else if (showMenuOption) IconButton(onClick = {
             if (track != null && mediaMenu != null) {
                 val extras = listOf(
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Lyrics, "Lyrics", onToggleLyrics),
-                    `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Timer, "Sleep timer", onShowSleepTimer),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Refresh, "Refresh lyrics", onRefreshLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off", onToggleRomanizedLyrics)
                 )
@@ -611,7 +581,6 @@ fun PlayerHeader(
                 fun run(action: () -> Unit) { showMenu = false; action() }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Lyrics, if (showLyrics) "Hide lyrics" else "Lyrics") { run(onToggleLyrics) }
                 if (isAlbumAvailable) `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Album, "Go to album") { run(onNavigateToAlbum) }
-                `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Timer, "Sleep timer") { run(onShowSleepTimer) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Refresh, "Refresh lyrics") { run(onRefreshLyrics) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off") { run(onToggleRomanizedLyrics) }
             }
@@ -744,7 +713,7 @@ private fun EchoVolumeRow(volume: Int?, enabled: Boolean = true, onVolumeChange:
 }
 
 @Composable
-private fun OutputPickerContent(
+internal fun OutputPickerContent(
     isAlexa: Boolean,
     devices: List<`in`.synthora.musicbox.services.EchoDevice>,
     mobileDevices: List<`in`.synthora.musicbox.services.MobileAudioDevice>,
@@ -757,6 +726,7 @@ private fun OutputPickerContent(
     onSelectEcho: (String) -> Unit,
     onRefresh: () -> Unit
 ) {
+    val contextForOutputPicker = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
         Text(
             "Play on",
@@ -771,21 +741,13 @@ private fun OutputPickerContent(
             OutputRow(icon = Icons.Outlined.PhoneAndroid, title = device.name, detail = "Online",
                 selected = selectedMobileId == device.id, enabled = !busy, onClick = { onSelectMobile(device.id) })
         }
-        if (devices.isEmpty()) {
-            Text(
-                "No Echo found. Connect Amazon in Settings to play on an Echo.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp)
-            )
-        }
-        devices.forEach { device ->
+        devices.filter { it.online }.forEach { device ->
             OutputRow(
-                icon = Icons.Outlined.Speaker, title = device.name,
-                detail = if (device.online) null else "Offline",
+                icon = Icons.Outlined.Speaker, title = device.name + if (!device.controllable) " (logged out)" else "",
+                detail = if (!device.controllable) "Sign in to control" else if (device.online) null else "Offline",
                 selected = isAlexa && device.serial == selectedSerial,
-                enabled = device.online,
-                onClick = { onSelectEcho(device.serial) }
+                enabled = device.online, readOnly = !device.controllable,
+                onClick = { if (device.controllable) onSelectEcho(device.serial) else android.widget.Toast.makeText(contextForOutputPicker, "Sign in to Amazon to control Alexa.", android.widget.Toast.LENGTH_SHORT).show() }
             )
         }
         TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
@@ -802,6 +764,7 @@ private fun OutputRow(
     detail: String?,
     selected: Boolean,
     enabled: Boolean,
+    readOnly: Boolean = false,
     onClick: () -> Unit
 ) {
     ListItem(
@@ -820,7 +783,7 @@ private fun OutputRow(
             if (selected) Icon(Icons.Default.Check, contentDescription = "Selected", tint = MaterialTheme.colorScheme.primary)
         },
         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent),
-        modifier = Modifier.fillMaxWidth().alpha(if (enabled) 1f else 0.5f).clickable(enabled = enabled, onClick = onClick)
+        modifier = Modifier.fillMaxWidth().alpha(if (enabled && !readOnly) 1f else 0.4f).clickable(enabled = enabled, onClick = onClick)
     )
 }
 
@@ -865,16 +828,19 @@ internal fun PlayerBannerMetadata(track: Track, compact: Boolean, onArtistClick:
 @Composable
 private fun ClockedPlayerArtwork(state: MusicUiState, track: Track, lyrics: Boolean,
     music: MusicViewModel, tablet: Boolean, toggleLyrics: () -> Unit) {
-    val positionFlow = remember(music) { music.uiState.map { it.position }.distinctUntilChanged() }
-    val position = if (lyrics) positionFlow.collectAsStateWithLifecycle(initialValue = music.uiState.value.position).value else 0L
-    PlayerArtwork(queue = state.queue, queueIndex = state.queueIndex, currentTrack = track,
-        currentPosition = position, showLyrics = lyrics, musicViewModel = music,
+    val queuePresentation = remember(music) {
+        music.uiState.map { it.queue to it.queueIndex }.distinctUntilChanged()
+    }
+    val queue by queuePresentation.collectAsStateWithLifecycle(
+        initialValue = music.uiState.value.let { it.queue to it.queueIndex })
+    PlayerArtwork(queue = queue.first, queueIndex = queue.second, currentTrack = track,
+        currentPosition = state.position, showLyrics = lyrics, musicViewModel = music,
         isTablet = tablet, onToggleLyrics = toggleLyrics)
 }
 
 @Composable
 private fun ClockedPlayerProgress(state: MusicUiState, music: MusicViewModel, modifier: Modifier) {
-    val positionFlow = remember(music) { music.uiState.map { it.position }.distinctUntilChanged() }
-    val position by positionFlow.collectAsStateWithLifecycle(initialValue = music.uiState.value.position)
-    PlayerProgress(currentPosition = position, uiState = state.copy(position = position), musicViewModel = music, modifier = modifier)
+    val cachedProgress by music.playbackProgress.collectAsStateWithLifecycle()
+    val progress = music.visiblePlaybackProgress(cachedProgress)
+    PlayerProgress(currentPosition = progress.positionMs, uiState = state.copy(position = progress.positionMs, duration = progress.durationMs.takeIf { it > 0 } ?: state.duration), musicViewModel = music, modifier = modifier)
 }

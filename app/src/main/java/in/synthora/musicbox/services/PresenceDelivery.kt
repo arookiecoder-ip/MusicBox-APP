@@ -43,3 +43,21 @@ internal data class PublishedCursor(val token: String, val mediaId: String, val 
         return kotlin.math.abs(position - expected) > 1_500 || (playing && elapsed >= 10_000)
     }
 }
+
+/** Player events interrupt the fallback timer; rapid seeks keep only the newest cursor. */
+internal class CursorPublicationSignal {
+    private val changes = Channel<Unit>(Channel.CONFLATED)
+    fun changed() { changes.trySend(Unit) }
+    suspend fun awaitChange(timeoutMs: Long = 3_000): Boolean =
+        kotlinx.coroutines.withTimeoutOrNull(timeoutMs) { changes.receive(); true } ?: false
+}
+
+/** Ownership must not wait behind slow command preparation or a metadata request. */
+internal class PlaybackPresenceDelivery<S, C>(scope: CoroutineScope,
+    onFailure: (Exception) -> Unit = {}, onState: suspend (S) -> Unit,
+    onCommands: suspend (S, C) -> Unit) {
+    private val states = PresenceDelivery<S>(scope, onFailure, onState)
+    private val commands = PresenceDelivery<Pair<S, C>>(scope, onFailure) { (state, queued) -> onCommands(state, queued) }
+    fun offerState(state: S) { states.offer(state) }
+    fun offer(state: S, queued: C) { states.offer(state); commands.offer(state to queued) }
+}

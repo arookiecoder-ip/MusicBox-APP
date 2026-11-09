@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 82
-        versionName = "2.4.30"
+        versionCode = 117
+        versionName = "2.4.65"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -84,6 +84,15 @@ android {
     }
 
     buildTypes {
+        create("optimizedDebug") {
+            initWith(getByName("release"))
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
         release {
             isDebuggable = false
             isMinifyEnabled = true
@@ -127,6 +136,7 @@ android {
 }
 
 dependencies {
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -167,6 +177,7 @@ dependencies {
     implementation(libs.androidx.media3.session)
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.datasource)
+    implementation("androidx.media3:media3-datasource-okhttp:1.5.0")
 
     // Coil
     implementation(libs.coil.compose)
@@ -181,6 +192,7 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
     testImplementation(libs.junit)
     testImplementation(libs.ktor.client.mock)
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

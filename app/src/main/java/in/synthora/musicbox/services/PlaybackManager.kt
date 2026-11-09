@@ -116,20 +116,16 @@ class PlaybackManager private constructor(private val context: Context) {
 
     private val _snapshot = MutableStateFlow(PhonePlaybackSnapshot())
     val snapshot: StateFlow<PhonePlaybackSnapshot> = _snapshot.asStateFlow()
+    private val _cursorRevision = MutableStateFlow(0L)
+    val cursorRevision: StateFlow<Long> = _cursorRevision.asStateFlow()
     private var connectionFailures = 0
     private var connectionRetry: kotlinx.coroutines.Job? = null
     private var pendingQueueAction: ((MediaController) -> Unit)? = null
     private var userQueueRequested = false
     private var pausedAtMs = android.os.SystemClock.elapsedRealtime()
     private fun publishSnapshot(ctrl: MediaController) {
-        _snapshot.value = PhonePlaybackSnapshot((0 until ctrl.mediaItemCount).map { ctrl.getMediaItemAt(it).mediaId },
-            ctrl.currentMediaItem?.mediaId, ctrl.currentMediaItem?.let { item ->
-                val metadata = ctrl.mediaMetadata
-                Track(uuid = item.mediaId, title = metadata.title?.toString().orEmpty(),
-                    artist = metadata.artist?.toString().orEmpty(), thumbnailUri = metadata.artworkUri?.toString(),
-                    durationSec = (ctrl.duration.coerceAtLeast(0) / 1000).toInt(),
-                    localUri = item.localConfiguration?.uri?.toString())
-            })
+        _snapshot.value = phonePlaybackSnapshot(ctrl)
+        _cursorRevision.value++
     }
 
     // Flow to emit current track UUID changes
@@ -248,6 +244,12 @@ class PlaybackManager private constructor(private val context: Context) {
                     // Add a Player.Listener on the controller's underlying player
                     playerListener = object : Player.Listener {
                         override fun onEvents(player: Player, events: Player.Events) {
+                            if (events.contains(Player.EVENT_POSITION_DISCONTINUITY) ||
+                                events.contains(Player.EVENT_PLAYBACK_STATE_CHANGED) ||
+                                events.contains(Player.EVENT_PLAYBACK_PARAMETERS_CHANGED) ||
+                                events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) ||
+                                events.contains(Player.EVENT_IS_PLAYING_CHANGED) ||
+                                events.contains(Player.EVENT_PLAYBACK_SUPPRESSION_REASON_CHANGED)) _cursorRevision.value++
                             if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED))
                                 controller?.let(::publishSnapshot)
                         }
@@ -278,6 +280,8 @@ class PlaybackManager private constructor(private val context: Context) {
                         }
 
                         override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                            if (!playWhenReady) _isPlaying.value = false
+                            if (!playWhenReady) savePlaybackState()
                             if (playWhenReady) pausedAtMs = 0L
                             else if (pausedAtMs == 0L) pausedAtMs = android.os.SystemClock.elapsedRealtime()
                         }
@@ -364,6 +368,7 @@ class PlaybackManager private constructor(private val context: Context) {
                     }
                     try {
                         controller?.addListener(playerListener!!)
+                        controller?.let(::publishSnapshot)
                     } catch (e: Exception) {
                         Log.w(TAG, "Failed to add player listener: ${e.message}")
                     }
@@ -393,12 +398,8 @@ class PlaybackManager private constructor(private val context: Context) {
                                     Log.d(TAG, "Polled controller index updated: $currentIndex")
                                 }
 
-                                // Save position every 5 seconds when playing
-                                if (playing) {
-                                    withContext(Dispatchers.Main) {
-                                        savePlaybackState()
-                                    }
-                                }
+                                // PlaybackService owns the periodic resume save. Controller
+                                // polling is only a fallback for missed player events.
                                 kotlinx.coroutines.delay(5000)
                             } catch (e: Exception) {
                                 Log.w(TAG, "Polling loop error: ${e.message}")
@@ -411,7 +412,7 @@ class PlaybackManager private constructor(private val context: Context) {
                     val queued = pendingQueueAction
                     pendingQueueAction = null
                     if (queued != null) queued(requireNotNull(controller))
-                    else if (!userQueueRequested || connected.mediaItemCount == 0) scope.launch { restorePlaybackState(restoreEmptyController = true) }
+                    else if (connected.mediaItemCount == 0 && !PlaybackService.recoveryLoading.value) scope.launch { restorePlaybackState(restoreEmptyController = true) }
                 },
                 androidx.core.content.ContextCompat.getMainExecutor(context)
             )
@@ -630,7 +631,13 @@ class PlaybackManager private constructor(private val context: Context) {
         } }
     }
 
+    fun cancelPendingStart() {
+        pendingQueueAction = null
+        _isPlaying.value = false
+    }
+
     fun pause() {
+        cancelPendingStart()
         controller?.pause()
     }
 
@@ -728,9 +735,11 @@ class PlaybackManager private constructor(private val context: Context) {
         Log.d(TAG, "Seeked to $target ms")
     }
 
+    suspend fun seekToQueueEntry(trackId: String): Boolean =
+        PlaybackService.playPhoneQueueEntry(trackId, PhonePlaybackOwnership.token)
+
     fun seekToIndex(index: Int) {
-        runTrackChangePreservingPlayState { it.seekTo(index, 0L) }
-        Log.d(TAG, "Seeked to index $index")
+        controller?.let { playQueueEntry(it, index) }
     }
 
     fun getResumePosition(trackId: String, fallback: Long): Long {
@@ -1043,8 +1052,10 @@ class PlaybackManager private constructor(private val context: Context) {
 
     private fun savePlaybackState() {
         try {
-            val position = controller?.currentPosition ?: 0L
-            val currentIndex = controller?.currentMediaItemIndex ?: -1
+            val current = controller ?: return
+            val currentIndex = current.currentMediaItemIndex
+            if (currentIndex < 0 || current.currentMediaItem == null) return
+            val position = current.currentPosition.coerceAtLeast(0)
 
             prefs.edit().apply {
                 putLong("playback_position", position)
@@ -1153,15 +1164,17 @@ class PlaybackManager private constructor(private val context: Context) {
 
             // MediaController methods must be called on main thread
             withContext(Dispatchers.Main) {
-                if (userQueueRequested && (!restoreEmptyController || controller?.mediaItemCount != 0)) return@withContext
+                if (controller?.mediaItemCount != 0 || PlaybackService.recoveryLoading.value ||
+                    (userQueueRequested && !restoreEmptyController)) return@withContext
                 controller?.apply {
                     setMediaItems(
                         mediaItems,
                         restoredIndex,
                         restoredPosition
                     )
+                    playWhenReady = false
                     prepare()
-                    // Don't auto-play, just prepare to paused state
+                    // Restoring the queue never carries an old playWhenReady intent.
                 }
 
                 restoredTracks.getOrNull(restoredIndex)?.let { track ->

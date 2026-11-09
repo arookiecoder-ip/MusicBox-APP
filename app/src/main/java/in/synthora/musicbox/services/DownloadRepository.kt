@@ -23,7 +23,6 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 private data class DownloadResult(val status: Int, val bytes: Long, val total: Long, val reason: Int)
-@Serializable private data class DownloadEntry(val id: Long, val track: Track)
 data class DownloadStatus(val active: Int = 0, val total: Int = 0, val completed: Int = 0,
     val failed: Int = 0, val title: String = "", val percent: Int = -1)
 
@@ -45,7 +44,8 @@ class DownloadRepository private constructor(private val context: Context) {
     private val starting = mutableSetOf<String>()
     private val savedCollections = mutableListOf<DownloadedCollection>()
     private val dao = `in`.synthora.musicbox.database.DownloadManifestDatabase.get(context).manifests()
-    private val snapshots = kotlinx.coroutines.channels.Channel<List<`in`.synthora.musicbox.database.DownloadManifestRow>>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val codec = DownloadManifestCodec()
+    private val snapshots = kotlinx.coroutines.channels.Channel<DownloadSnapshot>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private var initialized = false
     private val ready = CompletableDeferred<Unit>()
     suspend fun awaitReady() { ready.await() }
@@ -75,7 +75,8 @@ class DownloadRepository private constructor(private val context: Context) {
             }
         }, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), ContextCompat.RECEIVER_EXPORTED)
         scope.launch {
-            val rows = try { withContext(Dispatchers.IO) {
+            val restored = try {
+                val rows = withContext(Dispatchers.IO) {
                 if (dao.migrated() == 0) {
                     val legacy = mutableListOf<`in`.synthora.musicbox.database.DownloadManifestRow>()
                     for (kind in listOf("pending", "completed")) readEntries(kind).forEach {
@@ -92,33 +93,20 @@ class DownloadRepository private constructor(private val context: Context) {
                     prefs.edit().clear().apply()
                 }
                 dao.read()
-            } } catch (e: CancellationException) { throw e }
+                }
+                codec.decode(rows) { track -> readableDownloadedTrack(track) != null }
+            } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
                 NetworkFeedback.notify("Couldn't load downloads. Check device storage and restart the app.")
                 ready.complete(Unit)
                 return@launch
             }
-            rows.filter { it.kind == "pending" }.forEach { runCatching { json.decodeFromString<DownloadEntry>(it.payload) }.getOrNull()?.let(pending::add) }
-            rows.filter { it.kind == "unavailable" }.forEach { unavailable[it.key] = it }
-            rows.filter { it.kind == "completed" }.forEach { row ->
-                runCatching { json.decodeFromString<DownloadEntry>(row.payload) }.getOrNull()?.let { entry ->
-                    if (file(entry.track)?.let { f -> f.exists() && f.length() > 0 } == true) completed += entry
-                    else unavailable[row.key] = manifest("unavailable", row.key, "missing", row.payload)
-                }
-            }
-            rows.filter { it.kind == "queued" }.forEach { row ->
-                runCatching { json.decodeFromString<Track>(row.payload) }.getOrNull()?.let { queued.putIfAbsent(it.ytVideoId.orEmpty(), it) }
-            }
-            rows.filter { it.kind == "collection" }.forEach { row ->
-                runCatching { json.decodeFromString<DownloadedCollection>(row.payload) }.getOrNull()?.let { collection ->
-                    val members = rows.filter { it.kind == "member:${row.key}" }.sortedBy { it.key.toIntOrNull() ?: 0 }.mapNotNull {
-                        runCatching { json.decodeFromString<Track>(it.payload) }.getOrNull()
-                    }
-                    if (savedCollections.none { it.key == collection.key }) savedCollections += collection.copy(tracks = members)
-                }
-            }
-            val retained = (pending + completed).mapNotNull { it.track.ytVideoId }.toSet()
-            queued.keys.removeAll(retained)
+            pending.addAll(restored.pending)
+            completed.addAll(restored.completed)
+            restored.queued.forEach { queued.putIfAbsent(it.ytVideoId.orEmpty(), it) }
+            val existingCollections = savedCollections.map { it.key }.toSet()
+            savedCollections.addAll(restored.collections.filter { it.key !in existingCollections })
+            unavailable.putAll(restored.unavailable.associateBy { it.key })
             initialized = true
             batchTotal = pending.size + queued.size
             save(); publishStatus()
@@ -126,7 +114,10 @@ class DownloadRepository private constructor(private val context: Context) {
             ready.complete(Unit)
             pump(); poll()
             if (_status.value.active > 0) DownloadService.start(context)
-            for (snapshot in snapshots) try { withContext(Dispatchers.IO) { dao.replace(snapshot) } }
+            for (snapshot in snapshots) try {
+                val encoded = codec.encode(snapshot)
+                withContext(Dispatchers.IO) { dao.replace(encoded) }
+            }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { NetworkFeedback.notify("Couldn't save download changes. Check device storage.") }
         }
@@ -238,11 +229,9 @@ class DownloadRepository private constructor(private val context: Context) {
     fun cancelAll() { removeAll(pending.map { it.track } + queued.values) }
     private fun save() {
         if (initialized) {
-            val rows = pending.map { manifest("pending", it.track.ytVideoId.orEmpty(), "downloading", json.encodeToString(it)) } +
-                completed.map { manifest("completed", it.track.ytVideoId.orEmpty(), "complete", json.encodeToString(it)) } +
-                queued.values.map { manifest("queued", it.ytVideoId.orEmpty(), "queued", json.encodeToString(it)) } +
-                savedCollections.flatMap(::collectionRows) + unavailable.values
-            snapshots.trySend(rows)
+            // Conflate before serialization: bursts never encode every obsolete manifest on Main.
+            snapshots.trySend(DownloadSnapshot(pending.toList(), completed.toList(), queued.values.toList(),
+                savedCollections.toList(), unavailable.values.toList()))
         }
         _collections.value = savedCollections.toList(); _tracks.value = completed.map { it.track }
         completedByVideo = _tracks.value.associateBy { it.ytVideoId }
@@ -250,10 +239,7 @@ class DownloadRepository private constructor(private val context: Context) {
     }
     private fun manifest(kind: String, key: String, state: String, payload: String) =
         `in`.synthora.musicbox.database.DownloadManifestRow(kind, key, state, payload)
-    private fun collectionRows(collection: DownloadedCollection): List<`in`.synthora.musicbox.database.DownloadManifestRow> =
-        listOf(manifest("collection", collection.key, "complete", json.encodeToString(collection.copy(tracks = emptyList())))) +
-            collection.tracks.mapIndexed { index, track -> manifest("member:${collection.key}", index.toString(),
-                "member", json.encodeToString(track)) }
+    private fun collectionRows(collection: DownloadedCollection) = codec.collectionRows(collection)
 
     private fun publishStatus(percentages: Map<String, Int> = _progress.value) {
         val activeTracks = (pending.map { it.track } + queued.values).distinctBy { it.ytVideoId }

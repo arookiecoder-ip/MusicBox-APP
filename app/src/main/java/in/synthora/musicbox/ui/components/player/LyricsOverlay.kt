@@ -44,6 +44,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -116,7 +117,7 @@ fun LyricsOverlay(
     val density = LocalDensity.current
     val headerHeight = WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding() + 56.dp
     val haptic = rememberJukeHaptics()
-    val syncedLyrics = currentTrack.syncedLyrics?.takeIf { it.isNotBlank() }
+    val syncedLyrics = currentTrack.syncedLyrics?.takeIf { `in`.synthora.musicbox.utils.hasTimedLyrics(it) }
     val plainLyrics = currentTrack.plainLyrics?.takeIf { it.isNotBlank() }
     var localOffsetMs by remember(currentTrack.uuid) {
         mutableFloatStateOf(currentTrack.lyricsOffsetMs.toFloat())
@@ -127,6 +128,9 @@ fun LyricsOverlay(
     var showSyncControls by remember(currentTrack.uuid) { mutableStateOf(false) }
     var lyricsPending by remember(currentTrack.uuid) { mutableStateOf(false) }
 
+    LaunchedEffect(currentTrack.uuid) {
+        if (syncedLyrics == null) musicViewModel.refreshLyrics(currentTrack)
+    }
     LaunchedEffect(currentTrack.uuid, syncedLyrics, plainLyrics) {
         if (syncedLyrics != null || plainLyrics != null) {
             lyricsPending = false
@@ -153,8 +157,11 @@ fun LyricsOverlay(
         }
 
         if (syncedLyrics != null) {
-            val lyricLines = remember(syncedLyrics, localOffsetMs) {
-                parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
+            val lyricLines by produceState<List<`in`.synthora.musicbox.ui.screens.LyricLine>>(emptyList(), syncedLyrics, localOffsetMs) {
+                value = emptyList()
+                value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
+                    parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
+                }
             }
             SyncedLyricsLines(lyricLines, currentPosition,
                 onSeek = musicViewModel::seekTo,

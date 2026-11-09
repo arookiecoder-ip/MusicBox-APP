@@ -33,6 +33,7 @@ object Diagnostics {
         buildString {
             appendLine("Music Box diagnostics")
             appendLine("Version: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            appendLine("Build: ${BuildConfig.BUILD_TYPE}, debuggable=${BuildConfig.DEBUG}")
             appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}, Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine()
             appendLine("Last saved crash:")
@@ -44,10 +45,20 @@ object Diagnostics {
                         appendLine("  reason=${it.reason}, status=${it.status}, time=${it.timestamp}, description=${it.description}")
                     } }
             }
+            appendLine("Last automatically saved audio error:")
+            appendLine(`in`.synthora.musicbox.services.PlaybackErrorRecorder.savedReport(context))
             appendLine("Recent audio failures (codes and exception types only):")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.recentAudioFailures().forEach { appendLine("  $it") }
-            appendLine("Recent audio responses (network source, MIME and byte length only):")
+            appendLine("Recent audio responses (timings, anonymous source IDs, MIME and byte length):")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.recentAudioResponses().forEach { appendLine("  $it") }
+            appendLine("Recent audio transfers (timings, anonymous source IDs, offsets and byte counts):")
+            `in`.synthora.musicbox.services.PlaybackDiagnostics.recentAudioTransfers().forEach { appendLine("  $it") }
+            appendLine("Recent playback events (elapsed time, anonymous source IDs, state/reason and cursor):")
+            `in`.synthora.musicbox.services.PlaybackDiagnostics.recentPlaybackEvents().forEach { appendLine("  $it") }
+            appendLine("Remote notification lifecycle:")
+            `in`.synthora.musicbox.services.RemoteNotificationDiagnostics.snapshot().forEach { appendLine("  $it") }
+            appendLine("Foreground UI frame timings (per-process, display-budget aware):")
+            appendLine(FrameTimings.report())
             appendLine("Playback timings:")
             `in`.synthora.musicbox.services.PlaybackDiagnostics.snapshot().forEach { (stage, value) ->
                 appendLine("  $stage: $value")

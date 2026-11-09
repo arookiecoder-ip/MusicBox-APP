@@ -19,6 +19,9 @@ import `in`.synthora.musicbox.network.ApiClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +60,9 @@ object UpdateManager {
     private val _downloadState = MutableStateFlow<UpdateDownloadState>(UpdateDownloadState.Idle)
     val downloadState: StateFlow<UpdateDownloadState> = _downloadState.asStateFlow()
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var preparing = false
+    private var activeDigest: String? = null
     private var downloadReceiver: BroadcastReceiver? = null
     private var activeDownloadId: Long? = null
     private var activeDownloadFileName: String? = null
@@ -90,7 +96,8 @@ object UpdateManager {
 
         return try {
             val appContext = context.applicationContext
-            val fileName = resolveDownloadFileName(asset.name, release.tagName)
+            require(trustedUpdateUrl(asset.browserDownloadUrl)) { "Untrusted update download URL" }
+            val fileName = resolveDownloadFileName(appContext, asset.name, release.tagName)
             val request = DownloadManager.Request(Uri.parse(asset.browserDownloadUrl)).apply {
                 setTitle("Downloading Music Box Update")
                 setDescription("Fetching ${release.tagName}...")
@@ -98,7 +105,7 @@ object UpdateManager {
                 setNotificationVisibility(
                     DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
                 )
-                setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                setDestinationInExternalFilesDir(appContext, Environment.DIRECTORY_DOWNLOADS, fileName)
             }
 
             val downloadManager =
@@ -109,6 +116,7 @@ object UpdateManager {
             activeDownloadId = downloadId
             activeDownloadFileName = fileName
             activeReleaseTag = release.tagName
+            activeDigest = asset.digest
             _downloadState.value = UpdateDownloadState.Downloading(
                 releaseTag = release.tagName,
                 fileName = fileName,
@@ -211,7 +219,13 @@ object UpdateManager {
                 )
                 if (completedDownloadId != activeDownloadId) return
 
-                handleDownloadComplete(context, completedDownloadId)
+                if (preparing) return
+                preparing = true
+                val pending = goAsync()
+                scope.launch {
+                    try { handleDownloadComplete(context, completedDownloadId) }
+                    finally { pending.finish() }
+                }
             }
         }
 
@@ -224,62 +238,29 @@ object UpdateManager {
         }
     }
 
-    private fun handleDownloadComplete(context: Context, downloadId: Long) {
-        val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-        val query = DownloadManager.Query().setFilterById(downloadId)
-
+    private suspend fun handleDownloadComplete(context: Context, downloadId: Long) {
+        val fileName = activeDownloadFileName.orEmpty()
+        val releaseTag = activeReleaseTag.orEmpty()
+        val digest = activeDigest
         try {
-            downloadManager.query(query)?.use { cursor ->
-                if (!cursor.moveToFirst()) {
-                    _downloadState.value = UpdateDownloadState.Error(
-                        "The completed update couldn't be found."
-                    )
-                    return
-                }
-
-                val statusIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)
-                val status = cursor.getInt(statusIndex)
-
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    val fileName = activeDownloadFileName.orEmpty()
-                    val releaseTag = activeReleaseTag.orEmpty()
-                    val downloadedFile = createInstallerCopy(
-                        context = context,
-                        downloadManager = downloadManager,
-                        downloadId = downloadId,
-                        fileName = fileName
-                    )
-
-                    if (downloadedFile == null || !downloadedFile.exists()) {
-                        _downloadState.value = UpdateDownloadState.Error(
-                            "The update finished downloading, but the APK file couldn't be found."
-                        )
-                        return
-                    }
-
-                    _downloadState.value = UpdateDownloadState.Ready(
-                        DownloadedUpdate(
-                            releaseTag = releaseTag,
-                            fileName = downloadedFile.name,
-                            absolutePath = downloadedFile.absolutePath
-                        )
-                    )
-                } else {
-                    val reasonIndex = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)
-                    val reason = cursor.getInt(reasonIndex)
-                    _downloadState.value = UpdateDownloadState.Error(
-                        "Update download failed (code $reason)."
-                    )
-                }
+            val update = withContext(Dispatchers.IO) {
+                val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+                manager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
+                    check(cursor.moveToFirst()) { "The completed update could not be found" }
+                    check(cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) == DownloadManager.STATUS_SUCCESSFUL) { "Update download failed" }
+                } ?: error("Update download status is unavailable")
+                val file = createInstallerCopy(context, manager, downloadId, fileName)
+                    ?: error("Downloaded APK could not be found")
+                try { verifyUpdateApk(context, file, digest) }
+                catch (error: Exception) { file.delete(); throw error }
+                DownloadedUpdate(releaseTag, file.name, file.absolutePath)
             }
-        } catch (e: Exception) {
-            Log.e("UpdateManager", "Failed to process completed update download", e)
-            _downloadState.value = UpdateDownloadState.Error(
-                "Couldn't finish preparing the downloaded update."
-            )
-        } finally {
-            cleanupReceiver(context)
-        }
+            _downloadState.value = UpdateDownloadState.Ready(update)
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) {
+            Log.e("UpdateManager", "Failed to verify downloaded update", error)
+            _downloadState.value = UpdateDownloadState.Error("Couldn't verify the update. Download it again from the official release.")
+        } finally { cleanupReceiver(context); preparing = false }
     }
 
     private fun cleanupReceiver(context: Context) {
@@ -295,18 +276,20 @@ object UpdateManager {
         activeDownloadId = null
         activeDownloadFileName = null
         activeReleaseTag = null
+        activeDigest = null
     }
 
-    private fun resolveDownloadFileName(assetName: String, releaseTag: String): String {
+    private fun resolveDownloadFileName(context: Context, assetName: String, releaseTag: String): String {
         val fallbackName = "JUKES-${releaseTag.removePrefix("v")}.apk"
-        val baseName = assetName.takeIf { it.endsWith(".apk", ignoreCase = true) } ?: fallbackName
+        val baseName = (assetName.takeIf { it.endsWith(".apk", ignoreCase = true) } ?: fallbackName)
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
         val stem = if (baseName.endsWith(".apk", ignoreCase = true)) {
             baseName.dropLast(4)
         } else {
             baseName
         }
 
-        val downloadsDirectory = publicDownloadsDirectory()
+        val downloadsDirectory = requireNotNull(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS))
         if (!downloadsDirectory.exists()) {
             downloadsDirectory.mkdirs()
         }
@@ -349,8 +332,5 @@ object UpdateManager {
         return installerFile
     }
 
-    @Suppress("DEPRECATION")
-    private fun publicDownloadsDirectory(): File {
-        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-    }
+
 }

@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import `in`.synthora.musicbox.network.BrowseItem
+import `in`.synthora.musicbox.network.toTrack
 import `in`.synthora.musicbox.ui.components.*
 import `in`.synthora.musicbox.viewmodels.MusicViewModel
 import `in`.synthora.musicbox.viewmodels.SearchViewModel
@@ -42,6 +43,7 @@ fun ArtistDetailScreen(
     onNavigateToPlaylist: (BrowseItem) -> Unit = {},
     onNavigateToArtist: (BrowseItem) -> Unit = { searchViewModel.loadArtistDetails(it) },
     onShowAllSongs: () -> Unit = {},
+    onShowAllVideos: () -> Unit = {},
     onShowAllReleases: (String) -> Unit = {},
     bottomPadding: Dp = 0.dp
 ) {
@@ -50,13 +52,13 @@ fun ArtistDetailScreen(
     var expandedDescription by remember(artist?.id) { mutableStateOf(false) }
     Box(Modifier.fillMaxSize()) {
         when {
-            state.error != null && (artist == null || state.topTracks.isEmpty()) -> {
+            state.error != null && (artist == null || (state.topTracks.isEmpty() && state.videos.isEmpty() && state.albums.isEmpty() && state.singles.isEmpty() && state.playlists.isEmpty() && state.featured.isEmpty() && state.additionalShelves.isEmpty())) -> {
                 ConnectionErrorState(state.error.orEmpty(), {
                     artist?.let { searchViewModel.loadArtistDetails(it) }
                 }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
             }
             state.isLoading || artist == null -> MediaDetailSkeleton(modifier = Modifier.stableStatusBarsPadding(), contentPadding = PaddingValues(20.dp), bottomPadding = bottomPadding)
-            else -> AdaptiveDetailLayout(bottomPadding = bottomPadding, spacing = 16.dp, hero = {
+            else -> AdaptiveDetailLayout(bottomPadding = bottomPadding, spacing = 0.dp, hero = {
                     DetailHero(state.imageUrl, artist = true) {
                     Column(Modifier.fillMaxWidth().heightIn(min = LocalDetailPaneHeight.current ?: 380.dp).padding(top = 170.dp, start = 20.dp, end = 20.dp, bottom = 24.dp), verticalArrangement = Arrangement.Bottom) {
                         Text(artist.title, style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
@@ -80,7 +82,7 @@ fun ArtistDetailScreen(
             }) {
                 state.error?.let { error -> item { Text(error, Modifier.padding(horizontal = 20.dp), color = MaterialTheme.colorScheme.error) } }
                 if (state.topTracks.isNotEmpty()) {
-                    item { Text("Top songs", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge) }
+                    item { Text("Top songs", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge) }
                     itemsIndexed(state.topTracks.take(5), key = { index, track -> "$index-${track.ytVideoId}" }) { index, track ->
                         SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
                             FlatTrackRow(track.thumbnailUri, track.title, track.artist, if (track.durationSec > 0) "%d:%02d".format(track.durationSec / 60, track.durationSec % 60) else "", onClick = { musicViewModel.startRadio(track) }, modifier = Modifier.padding(horizontal = 20.dp), track = track)
@@ -92,11 +94,24 @@ fun ArtistDetailScreen(
                         }
                     }
                 }
+                if (state.videos.isNotEmpty()) {
+                    item(key = "videos-heading") { Text("Music videos", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge) }
+                    items(state.videos.take(5), key = { "video-${it.ytVideoId}" }) { track ->
+                        SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
+                            FlatTrackRow(track.thumbnailUri, track.title, track.artist,
+                                if (track.durationSec > 0) "%d:%02d".format(track.durationSec / 60, track.durationSec % 60) else "",
+                                onClick = { musicViewModel.startRadio(track) }, modifier = Modifier.padding(horizontal = 20.dp), track = track)
+                        }
+                    }
+                }
+                if (state.videos.size>5 || state.videosBrowseId.isNotBlank()) item(key="all-videos") {
+                    TextButton(onClick=onShowAllVideos, modifier=Modifier.padding(horizontal=12.dp)) { Text("Show all video songs") }
+                }
                 fun releases(title: String, releases: List<BrowseItem>, kind: String, hasMore: Boolean) {
                     if (releases.isEmpty()) return
                     item(key = title) {
                         Column {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                                 IconButton(onClick = { onShowAllReleases(kind) }) {
                                     Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowForward, "Show all $title")
@@ -114,10 +129,37 @@ fun ArtistDetailScreen(
                 }
                 releases("Albums", state.albums, "albums", state.albumsHasMore)
                 releases("Singles", state.singles, "singles", state.singlesHasMore)
-                releases("Playlists", state.playlists, "playlists", state.playlists.size > 5)
+                releases("Playlists by artist", state.playlists, "playlists", state.playlists.size > 5)
+                releases("Featured on", state.featured, "featured", state.featured.size > 5)
+                state.additionalShelves.forEachIndexed { shelfIndex, shelf ->
+                    item(key = "extra-heading-$shelfIndex") {
+                        Text(shelf.title, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
+                    }
+                    if (shelf.items.all { it.kind == "track" }) {
+                        itemsIndexed(shelf.items, key = { index, item -> "extra-$shelfIndex-$index-${item.id}" }) { _, item ->
+                            val track = item.toTrack()
+                            SwipeToAddNextContainer(onAddNext = { musicViewModel.addNext(track) }, onAddToQueue = { musicViewModel.addToQueue(listOf(track)) }) {
+                                FlatTrackRow(track.thumbnailUri, track.title, track.artist,
+                                    if (track.durationSec > 0) "%d:%02d".format(track.durationSec / 60, track.durationSec % 60) else "",
+                                    onClick = { musicViewModel.startRadio(track) }, modifier = Modifier.padding(horizontal = 20.dp), track = track)
+                            }
+                        }
+                    } else item(key = "extra-cards-$shelfIndex") {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(shelf.items, key = { it.id }) { item ->
+                                when (item.kind) {
+                                    "artist" -> ArtistCard(item, onClick = { onNavigateToArtist(item) })
+                                    "album" -> AlbumCard(item, onClick = { onNavigateToAlbum(item) }, onPlay = { musicViewModel.playCollection(item) })
+                                    "track" -> { val track = item.toTrack(); TrackCard(track, onClick = { musicViewModel.startRadio(track) }) }
+                                    else -> PlaylistCard(item, onClick = { onNavigateToPlaylist(item) }, onPlay = { musicViewModel.playCollection(item) })
+                                }
+                            }
+                        }
+                    }
+                }
                 if (state.related.isNotEmpty()) item(key = "related") {
                     Column {
-                        Text("Related artists", Modifier.padding(horizontal = 20.dp), style = MaterialTheme.typography.titleLarge)
+                        Text("Related artists", Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(12.dp))
                         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(state.related, key = { it.id }) { related -> ArtistCard(related, onClick = { onNavigateToArtist(related) }) }

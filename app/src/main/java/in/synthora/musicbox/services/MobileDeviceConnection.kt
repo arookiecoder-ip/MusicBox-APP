@@ -5,6 +5,7 @@ import `in`.synthora.musicbox.network.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.*
 import java.util.UUID
@@ -19,9 +20,35 @@ object MobileDeviceConnection {
     private val _devices = MutableStateFlow<List<MobileAudioDevice>>(emptyList())
     val devices = _devices.asStateFlow()
     private var job: Job? = null
+    private var presenceReplyAt=Long.MIN_VALUE
+    private var presenceRevision=Long.MIN_VALUE
+    private val _changes=kotlinx.coroutines.flow.MutableSharedFlow<Long>(replay=1,extraBufferCapacity=1)
+    internal val changes=_changes.asSharedFlow()
+    internal fun hasLivePresence():Boolean {
+        if(job?.isActive!=true || presenceReplyAt==Long.MIN_VALUE) return false
+        return android.os.SystemClock.elapsedRealtime()-presenceReplyAt in 0..12_000
+    }
+
     private var generation = 0L
+    private var visibilityRevision = 0L
+    private var foregroundOverride: Boolean? = null
     private val handled = linkedSetOf<String>()
     private val acknowledgments = CommandAcknowledgments()
+    private val presenceWake = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private var eventRevision = -1L
+    private var eventDelivery: ((SharedPlaybackOutput) -> Unit)? = null
+    internal fun acceptPlaybackEvent(snapshot: JsonObject) {
+        if (job?.isActive != true) return
+        val output = sharedPlaybackOutput(snapshot).let {
+            it.copy(nowPlaying = snapshot.takeIf { value -> value["queue"] is JsonArray })
+        }
+        if (!output.olderThan(latestOutput)) {
+            rememberOutput(output)
+            val revision = snapshot.number("presence_revision")
+            if (revision != eventRevision) { eventRevision = revision; presenceWake.trySend(Unit) }
+            eventDelivery?.invoke(output)
+        }
+    }
     private var latestOutput = SharedPlaybackOutput()
     private val _output = MutableStateFlow(latestOutput)
     val output = _output.asStateFlow()
@@ -39,18 +66,25 @@ object MobileDeviceConnection {
     fun start(context: android.content.Context, onState: suspend (SharedPlaybackOutput) -> Unit,
               onCommand: suspend (String, JsonObject) -> Unit) {
         appContext = context.applicationContext
-        DeviceConnectionService.startWhileVisible(context)
+        DeviceConnectionService.stop(context)
+        PlaybackCoordinator.echo(context).observeEvents(true)
         if (job?.isActive == true) return
+        presenceReplyAt=Long.MIN_VALUE
+        presenceRevision=Long.MIN_VALUE
         val activeSession = UUID.randomUUID().toString()
         session = activeSession
         val activeGeneration = ++generation
         val audio = context.getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
         job = scope.launch {
-            val delivery = PresenceDelivery<Pair<SharedPlaybackOutput, JsonArray>>(this,
-                onFailure = { `in`.synthora.musicbox.utils.SafeLog.w("MobilePresence", "Playback delivery failed: ${it.javaClass.simpleName}") }) { (output, commands) ->
-                if (activeGeneration != generation) return@PresenceDelivery
-                PhonePlaybackOwnership.retryPauseAcknowledgment(latestOutput)
-                if (!output.olderThan(latestOutput)) onState(output)
+            val delivery = PlaybackPresenceDelivery<SharedPlaybackOutput, JsonArray>(this,
+                onFailure = { `in`.synthora.musicbox.utils.SafeLog.w("MobilePresence", "Playback delivery failed: ${it.javaClass.simpleName}") },
+                onState = { output ->
+                    if (activeGeneration == generation) {
+                        PhonePlaybackOwnership.retryPauseAcknowledgment(latestOutput)
+                        if (!output.olderThan(latestOutput)) onState(output)
+                    }
+                }) { _, commands ->
+                if (activeGeneration != generation) return@PlaybackPresenceDelivery
                 for (raw in commands) {
                     val command = raw.objectOrEmpty()
                     val id = command.text("id")
@@ -65,12 +99,14 @@ object MobileDeviceConnection {
                     while (handled.size > 100) handled.remove(handled.first())
                 }
             }
+            eventDelivery = { output -> delivery.offerState(output) }
             var revision = -1L
             var outputToken = ""
             var supportsWait = false
             var supportsLongWait = false
             var failures = 0
             var retryAfterMs = 0L
+            var serverRetryMs = 100L
             while (isActive && activeGeneration == generation) {
                 if (!NetworkFeedback.online.value) {
                     NetworkFeedback.online.first { it }
@@ -79,8 +115,10 @@ object MobileDeviceConnection {
                 try {
                     val sentAcknowledgments = acknowledgments.snapshot()
                     val reply = withTimeout(12_000) { request("online", buildJsonObject {
+                        put("foreground", foregroundOverride ?: androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        put("visibility_revision", ++visibilityRevision)
                         put("include_handoff_state", true); put("accepted_token", PhonePlaybackOwnership.token)
-                        put("wait", true); put("wait_seconds", 8); put("revision", revision); put("output_token", outputToken)
+                        put("wait", !PlaybackCoordinator.echo(context).hasLiveEvents()); put("bounded_wait", true); put("wait_seconds", 2); put("revision", revision); put("output_token", outputToken)
                         put("volume", (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC) * 100 / audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
                         put("volume_steps", audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1))
                         put("name", "${Build.MANUFACTURER} ${Build.MODEL}")
@@ -98,14 +136,19 @@ object MobileDeviceConnection {
                             if (pending != null && (reported == pending.value || android.os.SystemClock.elapsedRealtime() >= pending.until)) pendingVolumes.remove(id)
                             MobileAudioDevice(id, it.text("name"), pendingVolumes[id]?.value ?: reported, (it["volume_steps"] as? JsonPrimitive)?.intOrNull)
                         }
+                    serverRetryMs = reply.number("presence_retry_ms").coerceIn(100, 5_000)
                     supportsWait = reply.containsKey("revision")
                     supportsLongWait = reply.number("presence_wait_seconds") >= 8
                     revision = reply.number("revision")
+                    if(supportsWait) {
+                        presenceReplyAt=android.os.SystemClock.elapsedRealtime()
+                        if(presenceRevision!=revision) { presenceRevision=revision;_changes.tryEmit(revision) }
+                    }
                     val output = rememberOutput(sharedPlaybackOutput(reply))
                     outputToken = output.token
                     // Playback preparation/acknowledgment may wait on slow audio or
                     // the server. Presence must keep renewing while that work runs.
-                    delivery.offer(output to reply.array("commands"))
+                    delivery.offer(output, reply.array("commands"))
                 } catch (_: TimeoutCancellationException) { failures++; retryAfterMs = 0L }
                 catch (e: CancellationException) { throw e }
                 catch (error: Exception) {
@@ -113,6 +156,7 @@ object MobileDeviceConnection {
                     retryAfterMs = (error as? BackendHttpException)?.retryAfterMs ?: 0L
                 }
                 if (failures > 0) {
+                    presenceReplyAt=Long.MIN_VALUE
                     val retryDelay = presenceRetryDelay(failures, retryAfterMs)
                     if (retryAfterMs > 0) delay(retryDelay)
                     else withTimeoutOrNull(retryDelay) {
@@ -127,8 +171,23 @@ object MobileDeviceConnection {
                 // Server waits wake immediately on commands; no background gap.
                 val visible = androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
                 val activeOutput = latestOutput.mode == "phone" && latestOutput.owner == PhonePlaybackOwnership.ownerId
-                delay(if (supportsWait && (supportsLongWait || visible || activeOutput)) 100 else 3_000)
+                if (PlaybackCoordinator.echo(context).hasLiveEvents()) {
+                    withTimeoutOrNull(8_000) { presenceWake.receive() }
+                    continue
+                }
+                delay(if (supportsWait && (supportsLongWait || visible || activeOutput)) serverRetryMs + kotlin.random.Random.nextLong(0, 150) else 3_000)
             }
+        }
+    }
+
+    fun updateForeground(foreground: Boolean) {
+        foregroundOverride = foreground
+        if (job?.isActive != true || session.isBlank()) return
+        val currentSession=session
+        scope.launch {
+            try { withTimeout(2_000) { request("visibility", buildJsonObject { put("foreground",foreground); put("visibility_revision",++visibilityRevision) }, currentSession) } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* The next presence heartbeat repairs visibility. */ }
         }
     }
 
@@ -137,6 +196,8 @@ object MobileDeviceConnection {
         val closingSession = session
         val wasOwner = PhonePlaybackOwnership.token.isNotBlank()
         ++generation
+        eventDelivery = null
+        appContext?.let { PlaybackCoordinator.echo(it).observeEvents(false) }
         job?.cancel(); job = null
         _devices.value = emptyList()
         pendingVolumes.clear()
@@ -146,8 +207,12 @@ object MobileDeviceConnection {
         } } }
     }
 
-    suspend fun selectForegroundDefault(): SharedPlaybackOutput? {
-        val reply = request("foreground", buildJsonObject { put("name", "${Build.MANUFACTURER} ${Build.MODEL}") })
+    suspend fun selectForegroundDefault(offlineAlexa: String? = null): SharedPlaybackOutput? {
+        val reply = request("foreground", buildJsonObject {
+            put("name", "${Build.MANUFACTURER} ${Build.MODEL}")
+            put("visibility_revision",++visibilityRevision)
+            offlineAlexa?.let { put("offline_alexa", it) }
+        })
         return if (reply.flag("default_selected")) rememberOutput(sharedPlaybackOutput(reply)) else null
     }
 
@@ -187,6 +252,9 @@ object MobileDeviceConnection {
         })))
 
     suspend fun control(output: SharedPlaybackOutput, action: String, payload: JsonObject = buildJsonObject {}) {
+        require(output.isRemotePhoneOutput(PhonePlaybackOwnership.ownerId) && output.token.isNotBlank() && !output.handoffPending) {
+            "The playback device is reconnecting. Please select a device and try again."
+        }
         val commandId = UUID.randomUUID().toString()
         suspend fun send(current: SharedPlaybackOutput) = request("command", buildJsonObject {
             put("target_id", current.owner); put("output_token", current.token)

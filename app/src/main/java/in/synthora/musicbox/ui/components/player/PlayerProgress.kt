@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import `in`.synthora.musicbox.ui.components.alexaControlAvailability
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -60,7 +61,7 @@ fun PlayerProgress(
         }
     }
 
-    Column(modifier = modifier.fillMaxWidth()) {
+    Column(modifier = modifier.alexaControlAvailability(musicViewModel).fillMaxWidth()) {
         PlaybackSeekSlider(
             positionMs = currentPosition,
             durationMs = duration,
