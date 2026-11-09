@@ -542,10 +542,14 @@ class PlaybackService : MediaLibraryService() {
             // Do not take playback back from another music app selected during
             // the call or during Android's final focus handoff.
             if (callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
-                if (callGuard.resumePending) mainHandler.postDelayed(this, 250)
-                callGuard.resumeConsumed()
+                // Audio still active after call - just clear resumePending to stop looping
+                // but do NOT call resumeConsumed() to avoid interfering with audio device switches
+                // Use explicitPlay() instead of direct resumePending assignment since resumePending has private set
+                callGuard.explicitPlay()
+                mainHandler.postDelayed(this, 250)
                 return
             }
+            // Audio has released - safely resume playback
             callGuard.resumeConsumed()
             // The normal resume path safely renews an expired lease and fences newer devices.
             cancelledMedia3Resume=false
