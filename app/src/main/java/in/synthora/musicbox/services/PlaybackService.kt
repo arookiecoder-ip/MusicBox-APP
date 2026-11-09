@@ -543,6 +543,7 @@ class PlaybackService : MediaLibraryService() {
             // the call or during Android's final focus handoff.
             if (callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
                 if (callGuard.resumePending) mainHandler.postDelayed(this, 250)
+                callGuard.resumeConsumed()
                 return
             }
             callGuard.resumeConsumed()
