@@ -544,7 +544,8 @@ class PlaybackService : MediaLibraryService() {
             if (callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
                 // Audio still active after call - just clear resumePending to stop looping
                 // but do NOT call resumeConsumed() to avoid interfering with audio device switches
-                callGuard.resumePending = false
+                // Use explicitPlay() instead of direct resumePending assignment since resumePending has private set
+                callGuard.explicitPlay()
                 mainHandler.postDelayed(this, 250)
                 return
             }
