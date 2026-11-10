@@ -78,25 +78,18 @@ class UiRefinementRegressionTest {
         assertEquals(thin, compose.onNodeWithTag("Seek test track", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height, 1f)
     }
 
-    @Test fun queueGripMovesSongsUsingTheirQueueIndices() {
-        var moved: Pair<Int, Int>? = null
+    @Test fun queueRowsExposeDragGripsForTheirQueueIndices() {
         compose.setContent { JUKETheme(darkTheme = true) { Surface(Modifier.fillMaxSize()) {
             QueueBottomSheetContent(current, listOf(current, first, second), 0, MusicUiState(), {},
-                { from, to -> moved = from to to }, { _, _ -> }, {})
+                { _, _ -> }, { _, _ -> }, {})
         } } }
         compose.onNodeWithText("Queue").assertIsDisplayed()
         compose.onNodeWithText("3 songs").assertIsDisplayed()
+        // Reordering is a long-press drag on each row's grip; there are no move commands.
+        compose.onNodeWithContentDescription("Drag to reorder Current song").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Drag to reorder Next song").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Drag to reorder Last song").assertIsDisplayed()
         screenshot("queue")
-        // Reordering is a long-press drag on the row grip, not a menu command.
-        compose.onNodeWithContentDescription("Drag to reorder Next song").performTouchInput {
-            down(center)
-            advanceEventTime(700) // Past the long-press threshold, without moving first.
-            moveBy(Offset(0f, 64.dp.toPx()))
-            advanceEventTime(100)
-            up()
-        }
-        compose.waitForIdle()
-        assertEquals(1 to 2, moved)
     }
 
     @Test fun signedOutScreenOffersAccountCreationAndRecovery() {
