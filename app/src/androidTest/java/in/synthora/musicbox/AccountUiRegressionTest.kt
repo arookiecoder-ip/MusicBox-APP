@@ -30,6 +30,33 @@ class AccountUiRegressionTest {
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
     )
 
+    @Test fun signedOutScreenShowsCreateAccountAndRecoveryLinks() {
+        val account = account()
+        compose.setContent {
+            JUKETheme { SignInScreen(AccountUiState(stage = AuthStage.SIGNED_OUT), account) }
+        }
+        compose.onNodeWithText("Create account").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Forgot password?").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun createAccountScreenRendersItsForm() {
+        val account = account()
+        compose.setContent {
+            JUKETheme { SignInScreen(AccountUiState(stage = AuthStage.SIGNUP), account) }
+        }
+        compose.onNodeWithText("Create your account").assertIsDisplayed()
+        compose.onNodeWithText("Repeat the password").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun forgotPasswordScreenRendersItsForm() {
+        val account = account()
+        compose.setContent {
+            JUKETheme { SignInScreen(AccountUiState(stage = AuthStage.FORGOT_PASSWORD), account) }
+        }
+        compose.onNodeWithText("Reset your password").assertIsDisplayed()
+        compose.onNodeWithText("Send reset code").performScrollTo().assertIsDisplayed()
+    }
+
     @Test fun emptySignInShowsValidationWithoutLeavingNativeLogin() {
         val account = account()
         compose.setContent {
