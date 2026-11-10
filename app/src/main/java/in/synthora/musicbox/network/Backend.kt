@@ -73,7 +73,7 @@ object Backend {
 
     fun init(context: Context) {
         if (!::jar.isInitialized) {
-            jar = PersistentCookieJar(context, context.getSharedPreferences("backend_session", Context.MODE_PRIVATE))
+            jar = PersistentCookieJar(context.getSharedPreferences("backend_session", Context.MODE_PRIVATE))
         }
     }
 
@@ -305,14 +305,15 @@ internal fun browserCookieHeaders(destination: String, cookies: List<Cookie>): L
 
 /** Keeps the web session across app restarts, encrypted at rest. */
 internal class PersistentCookieJar(
-    private val context: Context,
-    private val prefs: SharedPreferences
+    private val prefs: SharedPreferences,
+    private val encryptCookie: (String) -> String? = { SecureStore.encrypt(it) },
+    private val decryptCookie: (String) -> String? = { SecureStore.decrypt(it) }
 ) : CookieJar {
     private val cookies = linkedMapOf<String, Cookie>()
 
     init {
         val restored = prefs.getString(ENCRYPTED_KEY, null)?.let { encoded ->
-            SecureStore.decrypt(encoded)?.let { raw ->
+            decryptCookie(encoded)?.let { raw ->
                 runCatching {
                     val array = JSONArray(raw)
                     (0 until array.length()).mapNotNull { index ->
@@ -371,7 +372,7 @@ internal class PersistentCookieJar(
     private fun persist() {
         val array = JSONArray()
         cookies.values.forEach { cookie -> array.put("https://${cookie.domain}${cookie.path}\n$cookie") }
-        val encoded = SecureStore.encrypt(array.toString())
+        val encoded = encryptCookie(array.toString())
         if (encoded == null) {
             // Never fall back to plaintext: an unwritable session is a re-login, not a leak.
             prefs.edit().remove(ENCRYPTED_KEY).apply()

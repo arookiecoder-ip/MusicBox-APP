@@ -27,7 +27,7 @@ class PlaybackEventAuthenticationTest {
         val context = RuntimeEnvironment.getApplication()
         val preferences = context.getSharedPreferences("legacy-event-auth", Context.MODE_PRIVATE)
         preferences.edit().clear().putString("echo_serial", "speaker").commit()
-        val cookies = PersistentCookieJar(preferences)
+        val cookies = PersistentCookieJar(preferences, { it }, { it })
         val server = MockWebServer()
         val validated = CompletableDeferred<Unit>()
         val headers = mutableListOf<String?>()
@@ -64,7 +64,7 @@ class PlaybackEventAuthenticationTest {
             assertEquals("Polling still works", controller.state.value.track?.title)
             assertEquals(0, signOuts)
             assertTrue(cookies.hasCookies())
-            assertTrue(PersistentCookieJar(preferences).hasCookies())
+            assertTrue(PersistentCookieJar(preferences, { it }, { it }).hasCookies())
             assertTrue(synchronized(headers) { headers.size >= 3 && headers.all { it == "session=valid-owner" } })
         } finally {
             controller.clear(); owner.cancel()
