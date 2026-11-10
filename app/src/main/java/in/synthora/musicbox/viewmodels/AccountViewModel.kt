@@ -77,6 +77,8 @@ data class AccountStatus(
 
 data class AccountUiState(
     val stage: AuthStage = AuthStage.CHECKING,
+    /** Whether this server has account pages; null while unknown or offline. */
+    val doorsAvailable: Boolean? = null,
     val door: AuthDoorState = AuthDoorState(),
     val profile: AccountWebApi.AccountProfile? = null,
     val profileLoading: Boolean = false,
@@ -125,6 +127,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private var codeToken = ""
     private var busyJob: Job? = null
     private var statusJob: Job? = null
+    private var doorsJob: Job? = null
     private var accountPoll: Job? = null
     private val downloadCookies = DownloadCookies()
     private var cookieJob: Job? = null
@@ -137,6 +140,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private fun checkSession() {
         if (!Backend.hasSession()) {
             _state.value = AccountUiState(stage = AuthStage.SIGNED_OUT)
+            checkDoors()
             return
         }
         // A saved session can open cached screens while validation runs in the background.
@@ -204,6 +208,21 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     fun restartLogin() {
         codeToken = ""
         _state.update { it.copy(stage = AuthStage.SIGNED_OUT, error = null) }
+    }
+
+    /**
+     * Ask once whether this deployment serves the account pages. A server that
+     * answers 404 for /signup has no multi-user layer, so the sign-in screen
+     * says so instead of offering buttons that lead to a "page not found" page.
+     */
+    fun checkDoors() {
+        if (doorsJob?.isActive == true) return
+        doorsJob = viewModelScope.launch {
+            val available = AccountWebApi.doorsAvailable() ?: return@launch
+            if (_state.value.stage != AuthStage.SIGNED_IN) {
+                _state.update { it.copy(doorsAvailable = available) }
+            }
+        }
     }
 
     private fun onSignedIn() {
@@ -401,6 +420,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         browserFlow = null
         AccountWebApi.clearSecrets()
         _state.value = AccountUiState(stage = AuthStage.SIGNED_OUT, busy = true)
+        checkDoors()
         busyJob = viewModelScope.launch {
             try { Backend.logout() }
             catch (e: CancellationException) { throw e }
@@ -424,6 +444,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         accountPoll?.cancel()
         statusJob?.cancel()
         _state.value = AccountUiState(stage = AuthStage.SIGNED_OUT, error = "Your session ended. Sign in again.")
+        checkDoors()
         viewModelScope.launch { AccountScope.forget(getApplication()) }
     }
 

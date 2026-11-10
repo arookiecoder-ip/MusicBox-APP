@@ -74,6 +74,25 @@ object AccountWebApi {
 
     // ---------------------------------------------------------------- public doors
 
+    /**
+     * Whether this server mounts the account pages at all. A 404 on the sign-up
+     * form means the multi-user layer is off, not that the form is temporarily
+     * unhappy, so the sign-in screen can stop offering doors that cannot open.
+     * Null means the server could not be asked (offline, timeouts).
+     */
+    suspend fun doorsAvailable(): Boolean? = try {
+        when (Backend.formGet("/signup").status) {
+            404 -> false
+            503 -> true // Sign-ups are closed, but the recovery doors do exist.
+            in 200..399 -> true
+            else -> null
+        }
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        null
+    }
+
     suspend fun openSignup(): SignupGate {
         val response = Backend.formGet("/signup")
         val message = DoorHtml.resultText(response.body)

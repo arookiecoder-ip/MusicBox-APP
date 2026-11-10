@@ -112,6 +112,27 @@ class UiRefinementRegressionTest {
         screenshot("sign-in")
     }
 
+    @Test fun signedOutScreenHidesDoorsTheServerDoesNotServe() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT,
+                        doorsAvailable = false
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("This server doesn't offer account creation or password recovery.")
+            .assertIsDisplayed()
+        compose.onNodeWithText("Create account").assertDoesNotExist()
+        screenshot("sign-in-no-doors")
+    }
+
     @Test fun createAccountDoorRendersItsForm() {
         val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
             InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application

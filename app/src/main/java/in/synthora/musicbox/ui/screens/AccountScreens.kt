@@ -268,20 +268,30 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
         // keyboard open these links would otherwise sit below the fold, and a
         // signed-out install has no other way to reach sign-up or recovery.
         if (state.stage == AuthStage.SIGNED_OUT) {
-            Row(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .imePadding()
-                    .stableNavigationBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
-            ) {
-                TextButton(onClick = { haptic.click(); account.openSignup() }, enabled = !state.busy) {
-                    Text("Create account")
-                }
-                TextButton(onClick = { haptic.click(); account.openForgotPassword() }, enabled = !state.busy) {
-                    Text("Forgot password?")
+            val footer = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .imePadding()
+                .stableNavigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+            if (state.doorsAvailable == false) {
+                // The server answered 404 for /signup: it runs no multi-user
+                // layer, so a button here could only land on "page not found".
+                Text(
+                    "This server doesn't offer account creation or password recovery.",
+                    modifier = footer.padding(vertical = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+            } else {
+                Row(footer, horizontalArrangement = Arrangement.SpaceEvenly) {
+                    TextButton(onClick = { haptic.click(); account.openSignup() }, enabled = !state.busy) {
+                        Text("Create account")
+                    }
+                    TextButton(onClick = { haptic.click(); account.openForgotPassword() }, enabled = !state.busy) {
+                        Text("Forgot password?")
+                    }
                 }
             }
         }
