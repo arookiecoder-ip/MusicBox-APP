@@ -335,10 +335,13 @@ object AccountWebApi {
         }
         val providers = root.array("providers").mapNotNull { row ->
             val obj = row as? JsonObject ?: return@mapNotNull null
+            val status = obj.text("status")
             LinkedProvider(
                 provider = obj.text("provider"),
-                connected = obj.flag("connected") || obj.flag("linked"),
-                detail = obj.text("detail", "account", "status")
+                connected = obj.flag("connected") || obj.flag("linked") || status == "connected",
+                detail = obj.text("detail", "account").ifBlank {
+                    if (status == "connected") "" else obj.text("last_error", "status")
+                }
             )
         }
         return AccountProfile(
