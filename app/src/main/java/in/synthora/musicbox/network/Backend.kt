@@ -21,8 +21,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
 import `in`.synthora.musicbox.utils.SecureStore
-import org.json.JSONArray
 import java.net.URLEncoder
+import java.util.Base64
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -315,11 +315,9 @@ internal class PersistentCookieJar(
         val restored = prefs.getString(ENCRYPTED_KEY, null)?.let { encoded ->
             decryptCookie(encoded)?.let { raw ->
                 runCatching {
-                    val array = JSONArray(raw)
-                    (0 until array.length()).mapNotNull { index ->
-                        val stored = array.optString(index, "")
-                        parse(stored)
-                    }
+                    raw.lineSequence().mapNotNull { encodedCookie ->
+                        parse(String(Base64.getDecoder().decode(encodedCookie), Charsets.UTF_8))
+                    }.toList()
                 }.getOrNull()
             }
         }
@@ -370,9 +368,12 @@ internal class PersistentCookieJar(
     }
 
     private fun persist() {
-        val array = JSONArray()
-        cookies.values.forEach { cookie -> array.put("https://${cookie.domain}${cookie.path}\n$cookie") }
-        val encoded = encryptCookie(array.toString())
+        // Each entry is base64("origin + cookie header") on its own line, so a
+        // cookie value can never forge a second entry.
+        val raw = cookies.values.joinToString("\n") { cookie ->
+            Base64.getEncoder().encodeToString("https://${cookie.domain}${cookie.path}\n$cookie".toByteArray(Charsets.UTF_8))
+        }
+        val encoded = encryptCookie(raw)
         if (encoded == null) {
             // Never fall back to plaintext: an unwritable session is a re-login, not a leak.
             prefs.edit().remove(ENCRYPTED_KEY).apply()
