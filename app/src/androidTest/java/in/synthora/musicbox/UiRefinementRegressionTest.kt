@@ -93,6 +93,43 @@ class UiRefinementRegressionTest {
         assertEquals(1 to 2, moved)
     }
 
+    @Test fun signedOutScreenOffersAccountCreationAndRecovery() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("Create account").assertIsDisplayed()
+        compose.onNodeWithText("Forgot password?").assertIsDisplayed()
+        screenshot("sign-in")
+    }
+
+    @Test fun createAccountDoorRendersItsForm() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNUP
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("Create your account").assertIsDisplayed()
+        screenshot("signup")
+    }
+
     @Test fun queueHasClearEmptyStateAndSaveAction() {
         var saved = false
         compose.setContent { JUKETheme { Surface(Modifier.fillMaxSize()) {
