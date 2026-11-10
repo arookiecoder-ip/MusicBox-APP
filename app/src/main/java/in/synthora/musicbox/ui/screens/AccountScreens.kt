@@ -128,7 +128,8 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                 .stableNavigationBarsPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 32.dp),
+                .padding(horizontal = 24.dp)
+                .padding(top = 32.dp, bottom = if (state.stage == AuthStage.SIGNED_OUT) 80.dp else 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
@@ -211,17 +212,6 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                                     textAlign = TextAlign.Center
                                 )
                             }
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly
-                            ) {
-                                TextButton(onClick = account::openSignup, enabled = !state.busy) {
-                                    Text("Create account")
-                                }
-                                TextButton(onClick = account::openForgotPassword, enabled = !state.busy) {
-                                    Text("Forgot password?")
-                                }
-                            }
                         }
                         AuthStage.NEEDS_CODE -> {
                             Icon(
@@ -270,6 +260,27 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                             textAlign = TextAlign.Center
                         )
                     }
+                }
+            }
+        }
+
+        // Pinned, not part of the scrolling form: on a short screen or with the
+        // keyboard open these links would otherwise sit below the fold, and a
+        // signed-out install has no other way to reach sign-up or recovery.
+        if (state.stage == AuthStage.SIGNED_OUT) {
+            Row(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .stableNavigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                TextButton(onClick = { haptic.click(); account.openSignup() }, enabled = !state.busy) {
+                    Text("Create account")
+                }
+                TextButton(onClick = { haptic.click(); account.openForgotPassword() }, enabled = !state.busy) {
+                    Text("Forgot password?")
                 }
             }
         }
