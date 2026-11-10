@@ -64,10 +64,17 @@ data class ArtistDetailUiState(
     val description: String = "",
     val topTracks: List<Track> = emptyList(),
     val allTracks: List<Track> = emptyList(),
+    val videos: List<Track> = emptyList(),
+    val videosBrowseId: String = "",
+    val videosLoading: Boolean = false,
+    val videosNextOffset: Long = 0,
+    val allVideosLoaded: Boolean = false,
     val topSongsBrowseId: String = "",
     val albums: List<BrowseItem> = emptyList(),
     val singles: List<BrowseItem> = emptyList(),
     val playlists: List<BrowseItem> = emptyList(),
+    val featured: List<BrowseItem> = emptyList(),
+    val additionalShelves: List<`in`.synthora.musicbox.network.BrowseShelf> = emptyList(),
     val related: List<BrowseItem> = emptyList(),
     val subscriptionChannelId: String = "",
     val subscriptionBusy: Boolean = false,
@@ -236,7 +243,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             val region = locale.country.ifBlank { "US" }
             val payload = """
                 {
-                    "input": "${query.replace("\"", "\\\"")}",
+                    "input": ${JSONObject.quote(query)},
                     "context": {
                         "client": {
                             "clientName": "$YT_CLIENT_NAME",
@@ -300,7 +307,9 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.value = _uiState.value.copy(
                 suggestions = results
             )
+        } catch (e: CancellationException) { throw e
         } catch (e: Exception) {
+            if (requestNonce != suggestionRequestNonce.get() || _uiState.value.query != query) return
             Log.e("SearchViewModel", "Failed to fetch suggestions", e)
             _uiState.value = _uiState.value.copy(
                 suggestions = emptyList()
@@ -318,6 +327,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     fun search(query: String) {
         val trimmedQuery = query.trim()
+        suggestionRequestNonce.incrementAndGet()
         searchJob?.cancel() // Cancel any pending suggestion fetch
         // Flip out of suggestion mode immediately so results can render
         _uiState.value = _uiState.value.copy(
@@ -345,17 +355,17 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 val liked = AccountRepository.liked.value
                 fun rows(key: String) = result.array(key).mapNotNull { (it as? JsonObject)?.let { raw -> BrowseParser.item(raw, key) } }
                 val all = rows("all")
-                val songs = `in`.synthora.musicbox.network.searchSongItems(all, rows("songs"))
-                val hero = `in`.synthora.musicbox.network.audioSearchHero(all, songs)
+                val songs = `in`.synthora.musicbox.network.searchSongItems(all, rows("songs"), trimmedQuery)
+                val hero = `in`.synthora.musicbox.network.relevantSearchHero(all, songs, trimmedQuery)
                 val heroIndex = all.indexOf(hero)
                 val preview = if (hero?.kind == "artist") all.drop(heroIndex + 1).takeWhile { it.kind == "track" }
                     .filter { `in`.synthora.musicbox.network.isAudioSearchItem(it) }.take(3).map { it.toTrack(liked) } else emptyList()
                 _uiState.value = _uiState.value.copy(
                     tracks = songs.filter { it.videoId.isNotBlank() }.map { it.toTrack(liked) },
                     topResult = hero, topArtistTracks = preview,
-                    artists = rows("artists").filter { it.id.isNotBlank() },
-                    albums = rows("albums").filter { it.id.isNotBlank() },
-                    playlists = rows("playlists").filter { it.playlistId.isNotBlank() || it.id.isNotBlank() },
+                    artists = `in`.synthora.musicbox.network.searchKindItems(all, rows("artists"), "artist"),
+                    albums = `in`.synthora.musicbox.network.searchKindItems(all, rows("albums"), "album"),
+                    playlists = `in`.synthora.musicbox.network.searchKindItems(all, rows("playlists"), "playlist"),
                     isSearching = false
                 )
                 if (hero?.kind == "artist") {
@@ -416,6 +426,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     fun loadArtistDetails(artist: BrowseItem) {
         songsJob?.cancel()
         durationJob?.cancel()
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState(artist = artist, imageUrl = artist.image, isLoading = true)
         artistJob = viewModelScope.launch {
@@ -423,8 +434,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                 val data = Backend.get("/api/artist/${artist.id}").objectOrEmpty()
                 val info = data["artist"].objectOrEmpty()
                 val liked = AccountRepository.liked.value
-                fun releases(key: String) = data.array(key).mapNotNull { (it as? JsonObject)?.let { raw -> BrowseParser.item(raw, if (key == "playlists") "" else "albums") } }
-                    .filter { it.id.isNotBlank() }
+                fun releases(key: String) = `in`.synthora.musicbox.network.artistCollectionItems(data, key)
                 val name = info.text("name").ifBlank { artist.title }
                 _artistDetailState.value = ArtistDetailUiState(
                     artist = artist.copy(title = name),
@@ -434,10 +444,14 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
                     description = info.text("description"),
                     topTracks = data.array("topSongs").mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                         .filter { it.videoId.isNotBlank() }.map { it.toTrack(liked) },
+                    videos = `in`.synthora.musicbox.network.artistVideoItems(data).map { it.toTrack(liked) },
+                    videosBrowseId = info["videos"].objectOrEmpty().text("browseId", "playlistId"),
                     topSongsBrowseId = data.text("topSongsBrowseId"),
                     albums = releases("albums"),
                     singles = releases("singles"),
                     playlists = releases("playlists"),
+                    featured = releases("featured"),
+                    additionalShelves = `in`.synthora.musicbox.network.artistAdditionalShelves(data),
                     albumsHasMore = info["albums"].objectOrEmpty().text("params").isNotBlank(),
                     singlesHasMore = info["singles"].objectOrEmpty().text("params").isNotBlank(),
                     related = data.array("related").mapNotNull { (it as? JsonObject)?.let { row -> BrowseParser.item(row, "related") } }.filter { it.id.isNotBlank() },
@@ -456,6 +470,31 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
             } catch (e: Exception) {
                 _artistDetailState.update { it.copy(isLoading = false, error = `in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Failed to load artist") }
             }
+        }
+    }
+
+    private var videosJob: Job? = null
+    private var videosRequest=0L
+    fun loadAllArtistVideos() {
+        val state=_artistDetailState.value
+        val artist=state.artist ?: return
+        if(state.videosLoading || state.allVideosLoaded || state.videosBrowseId.isBlank()) return
+        val request=++videosRequest
+        videosJob?.cancel()
+        _artistDetailState.update { it.copy(videosLoading=true,error=null) }
+        videosJob=viewModelScope.launch {
+            try {
+                val data=Backend.get("/api/library/playlists/${state.videosBrowseId}",mapOf("offset" to state.videosNextOffset.toString(),"limit" to "30")).objectOrEmpty()
+                val rows=data.array("tracks").mapNotNull { it as? JsonObject }.map(BrowseParser::item)
+                    .filter { it.videoId.isNotBlank() }.map { it.copy(id=it.videoId,kind="track").toTrack(AccountRepository.liked.value) }
+                if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(
+                    videos=(it.videos+rows).distinctBy { row->row.ytVideoId },
+                    videosNextOffset=data.number("next_offset").takeIf { n->n>state.videosNextOffset } ?: state.videosNextOffset+rows.size,
+                    allVideosLoaded=!data.flag("has_more") || rows.isEmpty()) }
+            } catch(e:CancellationException) { throw e }
+            catch(e:BackendAuthException) { _signedOut.tryEmit(Unit) }
+            catch(e:Exception) { if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(error=e.message ?: "Could not load artist videos") } }
+            finally { if(_artistDetailState.value.artist?.id==artist.id && request==videosRequest) _artistDetailState.update { it.copy(videosLoading=false) } }
         }
     }
 
@@ -530,6 +569,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Resolve an artist by name (songs from a radio may carry only the name), then open it. */
     fun loadArtistDetailsByName(name: String) {
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState(isLoading = true)
         artistJob = viewModelScope.launch {
@@ -599,6 +639,7 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     fun clearArtistDetail() {
         songsJob?.cancel()
         durationJob?.cancel()
+        videosJob?.cancel()
         artistJob?.cancel()
         _artistDetailState.value = ArtistDetailUiState()
     }

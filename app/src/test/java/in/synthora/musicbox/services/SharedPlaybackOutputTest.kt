@@ -6,6 +6,16 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SharedPlaybackOutputTest {
+    @Test fun externalEchoSwitchChangesTheControlTargetWithoutReplayingOnTheOldEcho() {
+        val active = SharedPlaybackOutput(mode = "alexa", serial = "echo-b")
+        assertTrue(shouldFollowAlexa(active, "echo-a", alreadyAlexa = true))
+        assertFalse(shouldFollowAlexa(active, "echo-b", alreadyAlexa = true))
+        assertTrue(shouldFollowAlexa(active, "", alreadyAlexa = false))
+        assertFalse(shouldFollowAlexa(active.copy(mode = "phone"), "echo-a", alreadyAlexa = true))
+        assertFalse(shouldFollowAlexa(active.copy(serial = ""), "echo-a", alreadyAlexa = true))
+        assertTrue(shouldFollowAlexa(active.copy(serial = ""), "echo-a", alreadyAlexa = false))
+    }
+
     @org.junit.Test fun renewedSongTokenRetriesOnlyExplicitIntentsOnTheSamePhone() {
         val old = SharedPlaybackOutput(mode = "phone", owner = "two", token = "old")
         val renewed = old.copy(token = "new")
@@ -90,5 +100,12 @@ class SharedPlaybackOutputTest {
         assertTrue(SharedPlaybackOutput("alexa", token = "old", revision = 3, epoch = "server-one").olderThan(latest))
         assertFalse(latest.copy(revision = 4).olderThan(latest))
         assertFalse(SharedPlaybackOutput("alexa", revision = 1, epoch = "restarted-server").olderThan(latest))
+    }
+    @org.junit.Test fun dismissedTaskCannotResumeItsOldOwnershipButCanReceiveANewTransfer() {
+        val old = SharedPlaybackOutput(mode = "phone", owner = "this-phone", token = "closed-token")
+        org.junit.Assert.assertTrue(dismissedPhoneOutput(old, "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(token = "new-transfer"), "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(owner = "other-phone"), "this-phone", "closed-token"))
+        org.junit.Assert.assertFalse(dismissedPhoneOutput(old.copy(mode = "alexa"), "this-phone", "closed-token"))
     }
 }

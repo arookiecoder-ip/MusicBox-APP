@@ -100,6 +100,7 @@ import `in`.synthora.musicbox.ui.theme.glassPane
 import `in`.synthora.musicbox.utils.rememberJukeHaptics
 import `in`.synthora.musicbox.viewmodels.HomeViewModel
 import `in`.synthora.musicbox.viewmodels.MusicViewModel
+import `in`.synthora.musicbox.network.toTrack
 import `in`.synthora.musicbox.network.BrowseItem
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -116,6 +117,7 @@ fun HomeScreen(
     bottomPadding: Dp = 0.dp,
     jam: `in`.synthora.musicbox.viewmodels.JamViewModel = viewModel()
 ) {
+    val amazonConnected by musicViewModel.echo.amazonConnected.collectAsStateWithLifecycle()
     val uiState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val jamState by jam.state.collectAsStateWithLifecycle()
     LaunchedEffect(jam) { jam.refresh() }
@@ -126,12 +128,15 @@ fun HomeScreen(
     }
 
     if (uiState.isLoading && uiState.shelves.isEmpty()) {
-        HomeSkeleton(bottomPadding = bottomPadding)
+        Box(Modifier.fillMaxSize()) {
+            `in`.synthora.musicbox.ui.components.HomeAmbientBackdrop(Modifier.matchParentSize())
+            HomeSkeleton(bottomPadding = bottomPadding)
+        }
         return
     }
 
     HomeContent(
-        uiState = uiState, alexaStatus = "", bottomPadding = bottomPadding, jamActive = jamState.active,
+        uiState = uiState, alexaStatus = if (amazonConnected == false) "disconnected" else "", bottomPadding = bottomPadding, jamActive = jamState.active,
         onSettingsClick = { haptic.click(); onSettingsClick() }, onRefresh = homeViewModel::refresh,
         onSearchClick = onSearchClick, onOpenItem = onOpenItem,
         onPlayTracks = { tracks, index -> musicViewModel.setQueue(tracks, index) },
@@ -161,11 +166,14 @@ internal fun HomeContent(
     val shortcuts = remember(uiState.shelves, uiState.recentTracks) {
         `in`.synthora.musicbox.services.speedDialItems(uiState.shelves, uiState.recentTracks)
     }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val availableWidth = maxWidth
     PullToRefreshBox(
         isRefreshing = uiState.isRefreshing,
         onRefresh = { onRefresh() },
         modifier = Modifier.fillMaxSize()
     ) {
+        `in`.synthora.musicbox.ui.components.HomeAmbientBackdrop(Modifier.matchParentSize())
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("Home feed"),
             contentPadding = PaddingValues(bottom = 16.dp + bottomPadding)
@@ -175,12 +183,12 @@ internal fun HomeContent(
             }
             if (shortcuts.isNotEmpty()) {
                 item(key = "speed-dial", contentType = "speed-dial") {
-                    SpeedDial(shortcuts, uiState.shelves.any { it.tracks.isNotEmpty() } || uiState.recentTracks.isNotEmpty(),
+                    SpeedDial(shortcuts, availableWidth, uiState.shelves.any { it.tracks.isNotEmpty() } || uiState.recentTracks.isNotEmpty(),
                         onPlaySomething, onOpenItem) { item ->
                         val track = uiState.recentTracks.firstOrNull { it.ytVideoId == item.videoId }
                             ?: uiState.shelves.asSequence().flatMap { it.tracks.asSequence() }
                                 .firstOrNull { it.ytVideoId == item.videoId }
-                        if (track != null) onPlayTracks(listOf(track), 0)
+                        onPlayTracks(listOf(track ?: item.toTrack()), 0)
                     }
                 }
             }
@@ -202,7 +210,7 @@ internal fun HomeContent(
                 }) {
                     when {
                         shelf.tracks.isNotEmpty() && shelf.items.all { it.kind == "track" } -> SongOnlyShelf(
-                            title = shelf.title, tracks = shelf.tracks,
+                            title = shelf.title, tracks = shelf.tracks, availableWidth = availableWidth,
                             onTrackClick = { onPlayTracks(shelf.tracks, it) }
                         )
                         shelf.items.all { it.kind == "artist" } -> ArtistShelf(shelf.title, shelf.items, onOpenItem)
@@ -216,51 +224,44 @@ internal fun HomeContent(
             }
         }
     }
+    }
 }
 
 /** Bounded rows inside Home's single scrolling list; no nested vertical scroll. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SpeedDial(items: List<BrowseItem>, canPlaySomething: Boolean, onPlaySomething: () -> Unit,
-    onOpen: (BrowseItem) -> Unit,
-    onPlayTrack: (BrowseItem) -> Unit) {
+private fun SpeedDial(items: List<BrowseItem>, availableWidth: Dp, canPlaySomething: Boolean, onPlaySomething: () -> Unit,
+    onOpen: (BrowseItem) -> Unit, onPlayTrack: (BrowseItem) -> Unit) {
+    val menu = LocalMediaMenu.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Speed dial", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-            Button(onClick = onPlaySomething, enabled = canPlaySomething, shape = androidx.compose.ui.graphics.RectangleShape,
+            Text("Speed dial", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Button(onClick = onPlaySomething, enabled = canPlaySomething, shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
                 Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp))
                 Text("Play something", Modifier.padding(start = 4.dp), style = MaterialTheme.typography.labelLarge)
             }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth()) {
             val tablet = androidx.compose.ui.platform.LocalConfiguration.current.smallestScreenWidthDp >= 600
             val columns = if (tablet) 4 else 3
             val rows = remember(items, columns) { items.take(columns * 3).chunked(columns) }
-            val artworkSize = (maxWidth - 6.dp * (columns - 1)) / columns
+            val artworkSize = (availableWidth - 32.dp - 6.dp * (columns - 1)) / columns
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 rows.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         row.forEach { item ->
-                            val click = Modifier.combinedClickable(role = Role.Button,
-                                onClick = { onPlayTrack(item) }, onLongClick = { onOpen(item) },
-                                onLongClickLabel = "Open ${item.title}")
-                            if (tablet) {
-                                Row(Modifier.weight(1f).height(68.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                    .then(click), verticalAlignment = Alignment.CenterVertically) {
-                                    `in`.synthora.musicbox.ui.components.ListArtwork(item.image, 56.dp,
-                                        Modifier.padding(start = 6.dp).size(56.dp))
-                                    Text(item.title, Modifier.weight(1f).padding(horizontal = 8.dp),
-                                        style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            } else {
-                                Column(Modifier.weight(1f).then(click)) {
-                                    `in`.synthora.musicbox.ui.components.ListArtwork(item.image, artworkSize,
-                                        Modifier.size(artworkSize))
-                                    Text(item.title, Modifier.fillMaxWidth().padding(top = 3.dp),
-                                        style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
+                            Box(Modifier.weight(1f).height(if (tablet) 96.dp else artworkSize)
+                                .clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                .testTag("Speed dial ${item.videoId}")
+                                .combinedClickable(role = Role.Button, onClick = { onPlayTrack(item) },
+                                    onLongClick = { if (menu != null) menu.show(item.toTrack(`in`.synthora.musicbox.services.AccountRepository.liked.value)) else onOpen(item) }, onLongClickLabel = "Song options")) {
+                                `in`.synthora.musicbox.ui.components.ListArtwork(item.image, artworkSize, Modifier.fillMaxSize())
+                                Box(Modifier.fillMaxWidth().height(56.dp).align(Alignment.BottomCenter)
+                                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = .88f)))))
+                                Text(item.title, Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 8.dp, vertical = 7.dp),
+                                    color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold,
+                                    maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
@@ -297,7 +298,7 @@ private fun HomeHeader(
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier.size(44.dp).clip(androidx.compose.ui.graphics.RectangleShape).background(MaterialTheme.colorScheme.surfaceContainerHigh, androidx.compose.ui.graphics.RectangleShape)
-                .then(Modifier.border(1.dp, if (jamActive) Color(0xFF66BB6A) else MaterialTheme.colorScheme.outlineVariant, androidx.compose.ui.graphics.RectangleShape))
+                .then(Modifier.border(1.dp, if (alexaStatus == "disconnected") Color(0xFFF16F65) else if (jamActive) Color(0xFF66BB6A) else MaterialTheme.colorScheme.outlineVariant, androidx.compose.ui.graphics.RectangleShape))
                 .clickable(role = Role.Button, onClick = onSettingsClick)
         ) {
             Icon(Icons.Filled.Person, contentDescription = "Profile", modifier = Modifier.size(24.dp))
@@ -307,7 +308,9 @@ private fun HomeHeader(
 
 /** Four compact songs per horizontally scrolling column, matching web Home shelves. */
 @Composable
-internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (Int) -> Unit) {
+internal fun SongOnlyShelf(title: String, tracks: List<Track>,
+    availableWidth: Dp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp,
+    onTrackClick: (Int) -> Unit) {
     val menu = LocalMediaMenu.current
     val columns = remember(tracks) { tracks.chunked(4) }
     Column(Modifier.padding(top = 16.dp)) {
@@ -317,8 +320,8 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (In
             androidx.compose.material3.OutlinedButton(onClick = { onTrackClick(0) }, enabled = tracks.isNotEmpty(),
                 modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Play all") }
         }
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val columnWidth = (if (maxWidth >= 600.dp && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) (maxWidth - 64.dp) / 2 else maxWidth - 48.dp).coerceAtLeast(240.dp)
+        Box(Modifier.fillMaxWidth()) {
+            val columnWidth = (if (availableWidth >= 600.dp && androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) (availableWidth - 64.dp) / 2 else availableWidth - 48.dp).coerceAtLeast(240.dp)
             LazyRow(contentPadding = PaddingValues(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 itemsIndexed(columns, key = { index, songs -> "$index:${songs.firstOrNull()?.uuid}" }) { columnIndex, songs ->
                     Column(Modifier.width(columnWidth)) {
@@ -328,7 +331,7 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>, onTrackClick: (In
                                 onLongClick = { menu?.show(track) }, onLongClickLabel = "Song options"), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
                                     `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 56.dp, Modifier.fillMaxSize())
-                                    Icon(Icons.Default.PlayArrow, null, Modifier.size(28.dp), tint = Color.White)
+                                    `in`.synthora.musicbox.ui.components.ArtworkPlayIndicator(28.dp)
                                 }
                                 Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                     Text(track.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
@@ -440,9 +443,7 @@ private fun MusicCard(track: Track, onClick: () -> Unit) {
     Column(Modifier.width(160.dp).combinedClickable(onClick = onClick, onLongClick = { menu?.show(track) }, onLongClickLabel = "Song options")) {
         Box(Modifier.size(160.dp).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 160.dp, Modifier.fillMaxSize())
-            androidx.compose.material3.FilledIconButton(onClick = onClick, modifier = Modifier.size(48.dp), colors = androidx.compose.material3.IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = 0.24f))) {
-                Icon(Icons.Filled.PlayArrow, "Play ${track.title}", Modifier.size(30.dp), tint = Color.White)
-            }
+            `in`.synthora.musicbox.ui.components.CollectionPlayButton("Play ${track.title}", onClick, Modifier.size(48.dp))
         }
         Spacer(Modifier.height(8.dp))
         Text(track.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)

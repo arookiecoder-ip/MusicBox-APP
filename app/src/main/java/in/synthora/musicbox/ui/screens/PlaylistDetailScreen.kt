@@ -34,7 +34,8 @@ fun PlaylistDetailScreen(playlistDetailViewModel: PlaylistDetailViewModel = view
             }, Modifier.fillMaxSize().padding(bottom = bottomPadding))
         } else if (playlist == null || (state.isLoading && state.tracks.isEmpty())) {
             MediaDetailSkeleton(modifier = Modifier.stableStatusBarsPadding(), contentPadding = PaddingValues(20.dp), bottomPadding = bottomPadding)
-        } else AdaptiveDetailLayout(bottomPadding = bottomPadding, hero = {
+        } else AdaptiveDetailLayout(bottomPadding = bottomPadding, title = state.title,
+            onFloatingPlay = { musicViewModel.playCollection(playlist) }, hero = {
                 CollectionDetailHero(playlist, state.title, state.imageUrl, state.author.takeIf { it.isNotBlank() }?.let { "By $it" }.orEmpty(),
                     "${state.trackCount} tracks", state.description,
                     onPlay = { musicViewModel.playCollection(playlist) }, onShuffle = { musicViewModel.playCollection(playlist, shuffle = true) },
@@ -62,6 +63,6 @@ fun PlaylistDetailScreen(playlistDetailViewModel: PlaylistDetailViewModel = view
                 if (state.isLoadingMore) item { TrackRowsSkeleton(3) }
             }
         }
-        DetailBackButton(onNavigateBack, Modifier.align(Alignment.TopStart))
+        DetailBackButton(onNavigateBack, Modifier.align(Alignment.TopStart), transparent = true)
     }
 }

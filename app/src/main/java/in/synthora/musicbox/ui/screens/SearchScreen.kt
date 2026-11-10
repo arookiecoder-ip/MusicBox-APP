@@ -121,7 +121,8 @@ fun SearchScreen(
     onNavigateToArtist: (BrowseItem) -> Unit = {},
     onNavigateToPlaylist: (BrowseItem) -> Unit = {},
     onNavigateToAlbum: (BrowseItem) -> Unit = {},
-    bottomPadding: Dp = 0.dp
+    bottomPadding: Dp = 0.dp,
+    onShowPlayer: () -> Unit = {}
 ) {
     val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
     val home by homeViewModel.uiState.collectAsStateWithLifecycle()
@@ -132,11 +133,10 @@ fun SearchScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val haptic = rememberJukeHaptics()
 
-    var previousFocusTrigger by rememberSaveable { mutableIntStateOf(searchFocusTrigger) }
+    var previousFocusTrigger by rememberSaveable { mutableIntStateOf(0) }
     var previousResetTrigger by rememberSaveable { mutableIntStateOf(searchResetTrigger) }
     var selectedFilter by rememberSaveable { mutableStateOf("All") }
     var active by rememberSaveable { mutableStateOf(false) }
-    var lastPlayedLink by rememberSaveable { mutableStateOf("") }
     val filters = listOf("All", "Tracks", "Artists", "Playlists", "Albums")
 
     // Warm the YT suggestions connection once when search screen is opened.
@@ -149,7 +149,7 @@ fun SearchScreen(
     LaunchedEffect(searchFocusTrigger) {
         if (searchFocusTrigger != previousFocusTrigger && searchFocusTrigger > 0) {
             previousFocusTrigger = searchFocusTrigger
-            if (discovery != null) { leaveDiscovery(); active = false } else active = true
+            leaveDiscovery(); active = true
         }
     }
 
@@ -174,23 +174,21 @@ fun SearchScreen(
             SearchHeader(
                 title = uiState.query.ifBlank { "Search" },
                 query = uiState.query,
-                onQueryChange = { query ->
-                    searchViewModel.updateQuery(query)
-                    val link = `in`.synthora.musicbox.network.youtubeLink(query)
-                    if (link != null && query != lastPlayedLink) {
-                        lastPlayedLink = query; keyboardController?.hide(); active = false
-                        musicViewModel.playYoutubeLink(link)
-                        searchViewModel.resetToDiscovery()
-                    } else if (link == null) lastPlayedLink = ""
-                },
+                onQueryChange = searchViewModel::updateQuery,
                 open = active,
                 onOpenChange = { active = it },
                 placeholder = "Songs, artists, albums",
                 selectAllTrigger = searchFocusTrigger,
                 onSearch = {
-                    if (uiState.query.isNotBlank() && !uiState.isSearching) {
+                    if (uiState.query.isNotBlank()) {
                         keyboardController?.hide()
-                        searchViewModel.search(uiState.query)
+                        val link = `in`.synthora.musicbox.network.youtubeLink(uiState.query)
+                        if (link != null) {
+                            active = false
+                            musicViewModel.playYoutubeLink(link)
+                            onShowPlayer()
+                            searchViewModel.resetToDiscovery()
+                        } else if (!uiState.isSearching) searchViewModel.search(uiState.query)
                     }
                 }
             )

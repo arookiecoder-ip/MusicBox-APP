@@ -30,8 +30,8 @@ internal class BackgroundRetry(private val baseMs: Long = 5_000, private val max
 /** Retain an existing foreground service only for an interrupted local play intent. */
 internal fun retainRecoveryNotification(phoneOutput: Boolean, alreadyForeground: Boolean,
     playing: Boolean, leasePending: Boolean, networkPending: Boolean, streamPending: Boolean,
-    handingOff: Boolean): Boolean = phoneOutput && alreadyForeground && !playing && !handingOff &&
-    (leasePending || networkPending || streamPending)
+    handingOff: Boolean, callPending: Boolean = false): Boolean = phoneOutput && alreadyForeground && !playing && !handingOff &&
+    (leasePending || networkPending || streamPending || callPending)
 
 /** A hung buffering loader is different from silence in real, advancing playback. */
 internal class BufferingStall(private val timeoutMs: Long = 30_000) {
@@ -86,3 +86,52 @@ internal fun destinationHandoffWaiting(output: SharedPlaybackOutput, thisPhone: 
 internal fun retainDestinationForeground(output: SharedPlaybackOutput, thisPhone: String,
     acceptedToken: String, preparing: Boolean, alreadyForeground: Boolean): Boolean = alreadyForeground &&
     destinationHandoffWaiting(output, thisPhone, acceptedToken, preparing)
+
+/** A connectivity event alone must never discard healthy decoded audio. */
+internal fun needsNetworkSourceRecovery(hasError: Boolean, idle: Boolean, buffering: Boolean,
+    positionMs: Long, bufferedMs: Long): Boolean =
+    hasError || idle || (buffering && bufferedMs <= positionMs)
+
+/** Keep only locally initiated, available audio running through a network partition. */
+internal fun canContinueCachedOffline(online: Boolean, remoteControlled: Boolean, localSource: Boolean,
+    fullyCached: Boolean, handingOff: Boolean, bufferedAudio: Boolean = false): Boolean =
+    !online && !remoteControlled && !handingOff && (localSource || fullyCached || bufferedAudio)
+
+/** Allow one bounded ownership reconciliation after an outage, without extending it on polls. */
+internal class OfflineReconciliationWindow(private val graceMs: Long = 4_000) {
+    private var offline = false
+    private var deadline = 0L
+    fun update(online: Boolean, now: Long) {
+        if (!online) { offline = true; deadline = 0 }
+        else if (offline) { offline = false; deadline = now + graceMs }
+    }
+    fun active(online: Boolean, now: Long): Boolean = !online || now < deadline
+    fun reconciled() { deadline = 0 }
+}
+
+/** Connectivity capabilities do not establish whether the ownership server is reachable. */
+internal class OwnershipServerHealth {
+    private var failedToken = ""
+    private var pendingToken = ""
+    private var pendingUntil = 0L
+    @Synchronized fun checking(expected: String, current: String, now: Long) {
+        if (expected.isBlank() || expected != current) return
+        pendingToken = current; pendingUntil = now + 4_000
+    }
+    @Synchronized fun checking(current: String, now: Long): Boolean =
+        current.isNotBlank() && current == pendingToken && now < pendingUntil
+    @Synchronized fun failed(expected: String, current: String, unavailable: Boolean) {
+        if (expected.isBlank() || expected != current) return
+        pendingToken = ""; pendingUntil = 0
+        failedToken = if (unavailable) current else ""
+    }
+    @Synchronized fun unavailable(current: String): Boolean = current.isNotBlank() && failedToken == current
+    @Synchronized fun clear() { failedToken = ""; pendingToken = ""; pendingUntil = 0 }
+}
+
+internal fun ownershipServerUnavailable(error: Throwable): Boolean =
+    generateSequence(error) { it.cause }.take(8).any {
+        it is java.io.IOException || it is kotlinx.coroutines.TimeoutCancellationException ||
+            (it is `in`.synthora.musicbox.network.BackendHttpException && (it.statusCode == 429 || it.statusCode >= 500)) ||
+            it is io.ktor.client.plugins.HttpRequestTimeoutException
+    }

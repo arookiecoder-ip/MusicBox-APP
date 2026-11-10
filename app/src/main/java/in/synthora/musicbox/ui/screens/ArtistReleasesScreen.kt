@@ -38,7 +38,7 @@ fun ArtistReleasesScreen(artistId: String, kind: String, music: MusicViewModel,
         else LazyVerticalGrid(GridCells.Adaptive(148.dp), Modifier.fillMaxSize().stableStatusBarsPadding(), state = grid,
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 60.dp, bottom = bottomPadding + 24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-            item(span = { GridItemSpan(maxLineSpan) }) { Text(kind.replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.headlineMedium) }
+            item(span = { GridItemSpan(maxLineSpan) }) { Text(artistCollectionTitle(kind), style = MaterialTheme.typography.headlineMedium) }
             items(state.items, key = { it.id }) { item ->
                 if (item.kind == "playlist") PlaylistCard(item, { onOpen(item) }, onPlay = { music.playCollection(item) }, fillCell = true)
                 else AlbumCard(item, { onOpen(item) }, onPlay = { music.playCollection(item) }, fillCell = true)

@@ -228,24 +228,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
 
     // ---------- Amazon (Echo control) ----------
 
-    fun connectAmazon(email: String, password: String) {
-        if (email.isBlank() || password.isEmpty()) {
-            _state.update { it.copy(amazonMessage = "Enter your Amazon email and password") }
-            return
-        }
-        runBusy {
-            val result = Backend.post("/alexa/proxy_login/", JsonObject(mapOf(
-                "email" to JsonPrimitive(email.trim()),
-                "password" to JsonPrimitive(password),
-                // Reconnecting replaces the server's single Amazon session on purpose.
-                "force" to JsonPrimitive(true)
-            ))).objectOrEmpty()
-            val url = result.text("login_url")
-            require(url.isNotBlank()) { "The server didn't return an Amazon sign-in page" }
-            browserFlow = "amazon"
-            _state.update { it.copy(browserUrl = absolute(url), amazonMessage = "Finish signing in to Amazon…") }
-            pollAccount("amazon")
-        }
+    fun connectAmazon(email: String = "", password: String = "") {
+        accountPoll?.cancel()
+        browserFlow = "amazon"
+        _state.update { it.copy(browserUrl = absolute("/accounts/amazon"), amazonMessage = null) }
     }
 
     fun disconnectAmazon() {
@@ -259,34 +245,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     // ---------- YouTube Music ----------
 
     fun connectYouTube(retry: Boolean = false) {
-        runBusy {
-            val data = Backend.post(
-                if (retry) "/api/youtube/browser-session/retry" else "/api/youtube/browser-session/start"
-            ).objectOrEmpty()
-            val url = data.text("url")
-            browserFlow = "youtube"
-            _state.update {
-                it.copy(
-                    youtubeMessage = data.text("message").ifBlank { youtubeLabel(data.text("state")) },
-                    browserUrl = url.takeIf { u -> u.isNotBlank() }?.let(::absolute)
-                )
-            }
-            pollAccount("youtube")
-        }
+        accountPoll?.cancel()
+        browserFlow = "youtube"
+        _state.update { it.copy(browserUrl = absolute("/accounts/youtube"), youtubeMessage = null) }
     }
 
-    /** The account browser was closed. An unfinished YouTube session is stopped on the server. */
     fun browserClosed() {
         val flow = browserFlow
+        browserFlow = null
+        accountPoll?.cancel()
         _state.update { it.copy(browserUrl = null) }
-        if (flow == "youtube" && accountPoll?.isActive == true) {
-            accountPoll?.cancel()
-            browserFlow = null
-            viewModelScope.launch {
-                runCatching { Backend.post("/api/youtube/browser-session/stop") }
-                _state.update { it.copy(youtubeMessage = null) }
-                refreshStatus()
-            }
+        viewModelScope.launch {
+            if (flow == "youtube") runCatching { Backend.post("/api/youtube/browser-session/stop") }
+            _accountsChanged.tryEmit(Unit)
+            refreshStatus()
         }
     }
 

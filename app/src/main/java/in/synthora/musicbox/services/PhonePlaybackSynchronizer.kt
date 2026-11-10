@@ -13,7 +13,9 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
     private val serviceScope: CoroutineScope, private val player: Player,
     private val trackById: suspend (String) -> Track?, private val extendQueue: () -> Unit,
     private val pauseForLease: () -> Unit, private val leaseRenewed: () -> Unit,
+    private val offlineAudioAvailable: () -> Boolean = { false },
     private val recoveryPending: () -> Boolean = { false },
+    private val ownershipOutage: () -> Unit = {},
     private val pauseForHandoff: suspend () -> Pair<Boolean, Long> = {
         val playing = player.playWhenReady
         val position = player.currentPosition.coerceAtLeast(0)
@@ -23,16 +25,23 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
     private val outputPrefs = applicationContext.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE)
     private val TAG = "PhonePlaybackSync"
     fun start() {
+        val publications = CursorPublicationSignal()
+        val listener = object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_IS_PLAYING_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED,
+                        Player.EVENT_PLAYBACK_STATE_CHANGED, Player.EVENT_POSITION_DISCONTINUITY,
+                        Player.EVENT_MEDIA_ITEM_TRANSITION)) publications.changed()
+            }
+        }
+        player.addListener(listener)
+        serviceScope.coroutineContext[Job]?.invokeOnCompletion { player.removeListener(listener) }
         serviceScope.launch {
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val leaseRemaining = PhonePlaybackOwnership.leaseUntilMs - android.os.SystemClock.elapsedRealtime()
                 delay(if (PhonePlaybackOwnership.token.isBlank()) 2_000 else if (leaseRemaining <= 0) 1_000 else leaseRemaining.coerceIn(50, 1_000))
-                if (!PhonePlaybackOwnership.remoteControlled && canContinueDownloadedOffline(`in`.synthora.musicbox.network.NetworkFeedback.online.value, player.currentMediaItem?.localConfiguration?.uri?.scheme) && PhonePlaybackOwnership.token.isNotBlank()) {
-                    // An inaccessible server cannot renew a lease; completed downloads still play offline.
-                    PhonePlaybackOwnership.forget(allowOffline = true)
-                }
+                // Retain the token so reconnect can reconcile a switch made during the outage.
                 if (PhonePlaybackOwnership.token.isNotBlank() && player.playWhenReady &&
-                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs) pauseForLease()
+                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs && !offlineAudioAvailable()) pauseForLease()
             }
         }
         // Ownership remains enforced by the foreground service when the Activity is closed.
@@ -60,8 +69,9 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                 try {
                     if (player.playWhenReady) extendQueue()
                     val attemptAt = android.os.SystemClock.elapsedRealtime()
-                    if (attemptAt - lastOwnershipAttempt < (if (player.playWhenReady || recoveryPending()) 2_000 else 5_000)) continue
+                    if (attemptAt - lastOwnershipAttempt < (if (PhonePlaybackOwnership.serverUnavailable) 5_000 else if (player.playWhenReady || recoveryPending()) 2_000 else 5_000)) continue
                     lastOwnershipAttempt = attemptAt
+                    PhonePlaybackOwnership.checkingOwnership(claim)
                     val status = kotlinx.coroutines.withTimeoutOrNull(4_000) {
                         try {
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputRequest("heartbeat", PhonePlaybackOwnership.ownerId, claim)
@@ -69,6 +79,10 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                             if (e.statusCode != 409) throw e
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputStatus()
                         }
+                    }
+                    if (status == null) {
+                        PhonePlaybackOwnership.ownershipRequestFailed(claim, true)
+                        if (canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff)) ownershipOutage()
                     }
                     if (!canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff)) continue
                     if (status != null && !status.belongsToPhone(PhonePlaybackOwnership.ownerId, claim)) {
@@ -90,12 +104,15 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                     if (status != null) { PhonePlaybackOwnership.accept(status); leaseRenewed() }
                 } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) {
+                    val unavailable = ownershipServerUnavailable(e)
+                    PhonePlaybackOwnership.ownershipRequestFailed(claim, unavailable)
+                    if (unavailable && canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff)) ownershipOutage()
                     if (e is `in`.synthora.musicbox.network.BackendHttpException && e.statusCode == 409 && PhonePlaybackOwnership.token == claim)
                         PhonePlaybackOwnership.queueNeedsSync.tryEmit(Unit)
                     Log.w(TAG, "Playback ownership refresh failed: ${e.javaClass.simpleName}")
                 }
                 if (PhonePlaybackOwnership.token.isNotBlank() &&
-                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs) {
+                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs && !offlineAudioAvailable()) {
                     // During a partition, never keep streaming beyond our exclusive lease.
                     pauseForLease()
                 }
@@ -107,23 +124,24 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
         serviceScope.launch {
             var published: PublishedCursor? = null
             while (currentCoroutineContext().isActive) {
-                delay(3_000)
+                val event = publications.awaitChange()
                 val claim = PhonePlaybackOwnership.token
                 if (claim.isBlank() || PhonePlaybackOwnership.localHandoff || !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                 try {
                     val mediaId = player.currentMediaItem?.mediaId
-                    val current = mediaId?.let { trackById(it) } ?: continue
+                    if (mediaId == null) continue
+                    val cursor = PublishedCursor(claim, mediaId, player.isPlaying,
+                        player.playbackState == Player.STATE_BUFFERING, player.currentPosition.coerceAtLeast(0),
+                        android.os.SystemClock.elapsedRealtime())
+                    if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || (!event && !cursor.needsPublication(published))) continue
+                    val current = trackById(mediaId) ?: continue
                     if (player.currentMediaItem?.mediaId != mediaId ||
                         !canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff) ||
                         !PhonePlaybackOwnership.permitsPlayback(claim)) continue
-                    val cursor = PublishedCursor(claim, current.uuid, player.isPlaying,
-                        player.playbackState == Player.STATE_BUFFERING, player.currentPosition.coerceAtLeast(0),
-                        android.os.SystemClock.elapsedRealtime())
-                    if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || !cursor.needsPublication(published)) continue
                     current.ytVideoId?.takeIf { it.isNotBlank() }?.let { video ->
                         val completed = withTimeoutOrNull(4_000) {
                             `in`.synthora.musicbox.network.AlexaBackendApi.updateQueue("current", video, emptyList(),
-                                player.isPlaying, player.currentPosition.coerceAtLeast(0), player.currentMediaItemIndex,
+                                cursor.playing, cursor.position, player.currentMediaItemIndex,
                                 buffering = cursor.buffering, expectedToken = claim, currentEntryId = current.uuid)
                             true
                         }

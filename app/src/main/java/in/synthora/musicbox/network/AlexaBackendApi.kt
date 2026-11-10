@@ -126,6 +126,7 @@ object AlexaBackendApi {
             AudioCredentials.header().let { header(it.first, it.second) }
             parameter("video_id", videoId)
             parameter("update_queue", 0)
+            parameter("request_id", UUID.randomUUID().toString())
         }
         if (response.status.value !in 200..299) {
             val body = runCatching { response.bodyAsText() }.getOrDefault("")
@@ -159,9 +160,11 @@ object AlexaBackendApi {
         reply["queue_version"]?.let { phoneQueueVersion.set(reply.number("queue_version")) }
     }
 
-    suspend fun phoneQueueSnapshot(): kotlinx.serialization.json.JsonObject {
+    suspend fun phoneQueueSnapshot(queueVersion: Long? = null): kotlinx.serialization.json.JsonObject {
         requireConfigured()
-        return Backend.get("/alexa/now_playing/", mapOf("serial" to "phone")).jsonObject
+        val params = mapOf("serial" to "phone") +
+            (queueVersion?.takeIf { it >= 0 }?.let { mapOf("queue_version" to it.toString()) } ?: emptyMap())
+        return Backend.get("/alexa/now_playing/", params).jsonObject
     }
 
     suspend fun phoneOutputStatus(): `in`.synthora.musicbox.services.SharedPlaybackOutput {

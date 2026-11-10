@@ -49,6 +49,24 @@ class QueueRecoveryRegressionTest {
             assertTrue(prefs.getBoolean("haptics_enabled", false))
         } finally { prefs.edit().putBoolean("haptics_enabled", old).commit() }
     }
+    @Test fun tappedQueueEntryHighlightsWhileStillLoadingWithoutPlaybackConfirmation() {
+        val songs = (0..2).map { Track("q$it", "Queue song $it", "Artist", durationSec = 180) }
+        var state by mutableStateOf(MusicUiState(currentTrack = songs[0], queue = songs, queueIndex = 0))
+        val prepared = PreparedQueueRows.prepare(songs)
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(560.dp)) {
+            QueueBottomSheetContent(state.currentTrack!!, songs, state.queueIndex, state,
+                {}, { _, _ -> }, { _, _ -> }, {}, preparedRows = prepared,
+                onPlayEntry = { track, index ->
+                    state = state.copy(currentTrack = track, queueIndex = index, isLoading = true, isPlaying = false)
+                })
+        } } }
+        compose.onNodeWithText("Queue song 1").performClick()
+        compose.onNodeWithTag("Queue row q1").assertIsSelected()
+        compose.onNodeWithTag("Queue row q0").assertIsNotSelected()
+        assertTrue(state.isLoading)
+        assertFalse(state.isPlaying)
+    }
+
     @Test fun queueDragMovesRowsAndKeepsPlayingSongWithRetryVisible() {
         val songs = (0..5).map { Track("q$it", "Queue song $it", "Artist", durationSec = 180, ytVideoId = "fixture000$it") }
         var queue by mutableStateOf(songs)
@@ -56,12 +74,13 @@ class QueueRecoveryRegressionTest {
         var retried = false
         compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(560.dp)) {
             QueueBottomSheetContent(songs[0], queue, queue.indexOf(songs[0]), MusicUiState(currentTrack = songs[0], queue = queue),
-                {}, { from, to -> move = from to to; queue = queue.toMutableList().apply { add(to, removeAt(from)) } }, {}, {},
+                {}, { from, to -> move = from to to; queue = queue.toMutableList().apply { add(to, removeAt(from)) } }, { _, _ -> }, {},
                 error = "Queue connection interrupted", onRetry = { retried = true })
         } } }
         compose.onNodeWithText("Retry").performClick(); assertTrue(retried)
         compose.onNodeWithContentDescription("Drag to reorder Queue song 1", useUnmergedTree = true).performTouchInput {
             down(center)
+            advanceEventTime(650)
             val distance = 140 * context.resources.displayMetrics.density
             moveBy(androidx.compose.ui.geometry.Offset(0f, distance / 2)); advanceEventTime(32)
             moveBy(androidx.compose.ui.geometry.Offset(0f, distance / 2)); advanceEventTime(100); up()
@@ -77,7 +96,8 @@ class QueueRecoveryRegressionTest {
             val folder = File(context.cacheDir, "preload-test-${UUID.randomUUID()}")
             val cache = SimpleCache(folder, LeastRecentlyUsedCacheEvictor(8L * 1024 * 1024), StandaloneDatabaseProvider(context))
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-            val warmer = UpcomingAudioPreloader(playbackDataSources(context, cache, server.base, "fixture-key"), scope)
+            val warmer = UpcomingAudioPreloader(playbackDataSources(context, cache, server.base, "fixture-key"), scope,
+                policyOverride = { buffering -> preloadPolicy(online = true, metered = false, allowMetered = true, buffering = buffering) })
             lateinit var player: ExoPlayer
             val urls = (0..8).map { deviceAudioUrl(server.base, "video00000$it") }
             try {

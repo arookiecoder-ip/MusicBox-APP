@@ -10,8 +10,17 @@ on:
       - '.github/signing/debug-certificate.sha256'
   workflow_dispatch:
     inputs:
+      test_device:
+        description: Device group for manually requested UI regressions
+        type: choice
+        options: [all, phone, tablet]
+        default: all
       stable_release:
         description: Build a signed, optimized stable APK and run release JVM checks (no emulator)
+        type: boolean
+        default: false
+      performance_tools:
+        description: Build optional debug performance and benchmark tools
         type: boolean
         default: false
       library_player_tests:
@@ -26,6 +35,10 @@ on:
         description: Run only the focused player and feature regression tests
         type: boolean
         default: false
+      local_ui_tests:
+        description: Run local audio and UI fixtures on phone and tablet without live-server credentials
+        type: boolean
+        default: false
       full_ui_tests:
         description: Run the full emulator suite and lint (slower)
         type: boolean
@@ -33,6 +46,7 @@ on:
 
 jobs:
   verify-connect:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,8 +55,8 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - name: Check playback, queue and device protocol (no emulator)
-        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.services.BufferedPlaybackTest' --tests 'in.synthora.musicbox.services.ArchitecturePolicyTest' --tests 'in.synthora.musicbox.services.PlaybackResumeTest' --tests 'in.synthora.musicbox.services.DeviceConnectionServiceTest' --tests 'in.synthora.musicbox.services.ControllerBindingReleaseTest' --tests 'in.synthora.musicbox.services.QueueInstallationTest' --tests 'in.synthora.musicbox.network.ArtworkTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.DeviceQueueStartupTest' --tests 'in.synthora.musicbox.services.PhoneQueuePublicationTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --tests 'in.synthora.musicbox.services.SilentPlaybackWatchdogTest' --tests 'in.synthora.musicbox.services.PhonePlaylistBackfillTest' --tests 'in.synthora.musicbox.viewmodels.PlaylistRemainderTest' --no-daemon
+      - name: Check all JVM regressions, playback events and device protocol (no emulator)
+        run: sh ./gradlew testDebugUnitTest --no-daemon
 
       - name: Upload focused device protocol test results
         if: always()
@@ -52,6 +66,7 @@ jobs:
           path: app/build/test-results/testDebugUnitTest
 
   build:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
 
     steps:
@@ -65,45 +80,20 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Restore stable APK signing key
-        id: signing-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.android/music-box-debug.keystore
-          key: music-box-debug-signing-v1
-
-      - name: Prepare and verify APK signing identity
+      - name: Prepare and verify protected APK signing identity
         env:
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         run: |
+          set -eu
+          umask 077
           signing_store="$HOME/.android/music-box-debug.keystore"
+          test -n "$ANDROID_DEBUG_KEYSTORE_BASE64" || { echo "Configure the protected signing secret; private keys must never be restored from cache."; exit 1; }
           mkdir -p "$HOME/.android"
-          if [ -n "$ANDROID_DEBUG_KEYSTORE_BASE64" ]; then
-            printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$signing_store"
-          elif [ ! -f "$signing_store" ]; then
-            if [ -f .github/signing/debug-certificate.sha256 ]; then
-              echo "The preserved signing key is missing. Restore the original key using ANDROID_DEBUG_KEYSTORE_BASE64; a replacement key would break installed-app updates."
-              exit 1
-            fi
-            keytool -genkeypair -keystore "$signing_store" -storepass android -keypass android -alias androiddebugkey -dname "CN=Music Box Debug,O=Music Box,C=IN" -keyalg RSA -keysize 2048 -validity 10000
-          fi
-          chmod 600 "$signing_store"
+          printf '%s' "$ANDROID_DEBUG_KEYSTORE_BASE64" | base64 --decode > "$signing_store"
           keytool -exportcert -keystore "$signing_store" -storepass android -alias androiddebugkey -file /tmp/music-box-signing-cert.der >/dev/null
           sha256sum /tmp/music-box-signing-cert.der | cut -d ' ' -f 1 > signing-certificate.sha256
-          if [ -f .github/signing/debug-certificate.sha256 ]; then
-            cmp .github/signing/debug-certificate.sha256 signing-certificate.sha256 || {
-              echo "APK signing certificate changed. Restore the original key to keep updates installable."
-              exit 1
-            }
-          fi
+          cmp .github/signing/debug-certificate.sha256 signing-certificate.sha256
           echo "MUSIC_BOX_SIGNING_STORE=$signing_store" >> "$GITHUB_ENV"
-
-      - name: Preserve APK signing key
-        if: steps.signing-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.android/music-box-debug.keystore
-          key: music-box-debug-signing-v1
 
       - name: Upload public signing certificate fingerprint
         uses: actions/upload-artifact@v4
@@ -128,11 +118,11 @@ jobs:
 
       - name: Check audio output handoff and ownership
         if: ${{ inputs.handoff_tests == true }}
-        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --no-daemon
+        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.AudioTransferRegressionTest' --tests 'in.synthora.musicbox.services.PlaybackErrorRecorderTest' --tests 'in.synthora.musicbox.services.PlaybackClockTest' --tests 'in.synthora.musicbox.services.PreparedQueueRowsTest' --tests 'in.synthora.musicbox.services.RemoteStateRefreshTest' --tests 'in.synthora.musicbox.services.PreloadPowerPolicyTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.LibraryTrackPresentationTest' --tests 'in.synthora.musicbox.utils.LyricIndexTest' --tests 'in.synthora.musicbox.utils.LyricsRomanizerTest' --tests 'in.synthora.musicbox.network.ArtistCollectionsTest' --tests 'in.synthora.musicbox.utils.LrcParserTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --no-daemon
 
       - name: Check affected download, playlist and queue logic
         if: ${{ inputs.library_player_tests == true && inputs.stable_release != true }}
-        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.database.DownloadManifestDatabaseTest' --tests 'in.synthora.musicbox.services.ArchitecturePolicyTest' --tests 'in.synthora.musicbox.services.EchoSnapshotTest' --tests 'in.synthora.musicbox.network.CollectionContentTest' --tests 'in.synthora.musicbox.network.ArtworkTest' --tests 'in.synthora.musicbox.services.ArchitecturePolicyTest' --tests 'in.synthora.musicbox.services.PlaybackResumeTest' --tests 'in.synthora.musicbox.services.DeviceConnectionServiceTest' --tests 'in.synthora.musicbox.network.DownloadCookiesTest' --tests 'in.synthora.musicbox.network.RateLimitRetryTest' --tests 'in.synthora.musicbox.network.BrowseParserTest' --tests 'in.synthora.musicbox.network.PhoneQueueRequestTest' --tests 'in.synthora.musicbox.services.DownloadedCollectionTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.SharedQueueTest' --tests 'in.synthora.musicbox.services.QueueContinuationTest' --tests 'in.synthora.musicbox.services.DeviceQueueStartupTest' --tests 'in.synthora.musicbox.services.PhoneQueuePublicationTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --no-daemon
+        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.database.DownloadManifestDatabaseTest' --tests 'in.synthora.musicbox.services.ArchitecturePolicyTest' --tests 'in.synthora.musicbox.services.EchoSnapshotTest' --tests 'in.synthora.musicbox.services.EchoSeekPreviewTest' --tests 'in.synthora.musicbox.services.CallPlaybackGuardTest' --tests 'in.synthora.musicbox.network.CollectionContentTest' --tests 'in.synthora.musicbox.network.ArtworkTest' --tests 'in.synthora.musicbox.services.ArchitecturePolicyTest' --tests 'in.synthora.musicbox.services.PlaybackResumeTest' --tests 'in.synthora.musicbox.services.DeviceConnectionServiceTest' --tests 'in.synthora.musicbox.network.DownloadCookiesTest' --tests 'in.synthora.musicbox.network.RateLimitRetryTest' --tests 'in.synthora.musicbox.network.BrowseParserTest' --tests 'in.synthora.musicbox.network.PhoneQueueRequestTest' --tests 'in.synthora.musicbox.services.DownloadedCollectionTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.SharedQueueTest' --tests 'in.synthora.musicbox.services.QueueContinuationTest' --tests 'in.synthora.musicbox.services.DeviceQueueStartupTest' --tests 'in.synthora.musicbox.services.PhoneQueuePublicationTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.AudioTransferRegressionTest' --tests 'in.synthora.musicbox.services.PlaybackErrorRecorderTest' --tests 'in.synthora.musicbox.services.PlaybackClockTest' --tests 'in.synthora.musicbox.services.PreparedQueueRowsTest' --tests 'in.synthora.musicbox.services.RemoteStateRefreshTest' --tests 'in.synthora.musicbox.services.PreloadPowerPolicyTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.LibraryTrackPresentationTest' --tests 'in.synthora.musicbox.utils.LyricIndexTest' --tests 'in.synthora.musicbox.utils.LyricsRomanizerTest' --tests 'in.synthora.musicbox.network.ArtistCollectionsTest' --tests 'in.synthora.musicbox.utils.LrcParserTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --no-daemon
 
       - name: Check release logic and update channel
         if: ${{ inputs.stable_release == true }}
@@ -140,7 +130,7 @@ jobs:
 
       - name: Check browse, playback presentation and Echo snapshots
         if: ${{ inputs.handoff_tests != true && inputs.library_player_tests != true && inputs.stable_release != true }}
-        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.network.PhoneQueueRequestTest' --tests 'in.synthora.musicbox.network.DownloadCookiesTest' --tests 'in.synthora.musicbox.network.BrowseParserTest' --tests 'in.synthora.musicbox.network.NetworkErrorTest' --tests 'in.synthora.musicbox.models.PlaybackPresentationTest' --tests 'in.synthora.musicbox.services.EchoSnapshotTest' --tests 'in.synthora.musicbox.services.DeviceQueueStartupTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --tests 'in.synthora.musicbox.network.ArtworkTest' --tests 'in.synthora.musicbox.network.DeviceAudioTest' --tests 'in.synthora.musicbox.utils.LogRedactionTest' --tests 'in.synthora.musicbox.services.DownloadedCollectionTest' --tests 'in.synthora.musicbox.services.SharedQueueTest' --tests 'in.synthora.musicbox.services.QueueContinuationTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.PhoneQueuePublicationTest' --tests 'in.synthora.musicbox.network.SearchRankingTest' --tests 'in.synthora.musicbox.network.YoutubeLinkTest' --tests 'in.synthora.musicbox.utils.PlaybackTimeTest' --tests 'in.synthora.musicbox.utils.OfflineNavigationTest' --tests 'in.synthora.musicbox.services.RemoteVolumeKeysTest' --tests 'in.synthora.musicbox.ui.components.player.LyricCenteringTest' --no-daemon
+        run: sh ./gradlew testDebugUnitTest --tests 'in.synthora.musicbox.network.PhoneQueueRequestTest' --tests 'in.synthora.musicbox.network.DownloadCookiesTest' --tests 'in.synthora.musicbox.network.BrowseParserTest' --tests 'in.synthora.musicbox.network.NetworkErrorTest' --tests 'in.synthora.musicbox.models.PlaybackPresentationTest' --tests 'in.synthora.musicbox.services.SessionPlaybackResumptionNotificationTest' --tests 'in.synthora.musicbox.services.EchoSnapshotTest' --tests 'in.synthora.musicbox.services.EchoSeekPreviewTest' --tests 'in.synthora.musicbox.services.CallPlaybackGuardTest' --tests 'in.synthora.musicbox.services.DeviceQueueStartupTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.BackgroundPlaybackRecoveryTest' --tests 'in.synthora.musicbox.services.PlaybackHandoffTest' --tests 'in.synthora.musicbox.services.OutputSwitchRequestsTest' --tests 'in.synthora.musicbox.services.RemoteTransportPreviewTest' --tests 'in.synthora.musicbox.services.OfflinePlaybackTest' --tests 'in.synthora.musicbox.services.HomeFeedCacheTest' --tests 'in.synthora.musicbox.services.HomePersonalizationTest' --tests 'in.synthora.musicbox.services.RemoteTrackEndPreviewTest' --tests 'in.synthora.musicbox.services.AudioResponseValidationTest' --tests 'in.synthora.musicbox.services.AudioTransferRegressionTest' --tests 'in.synthora.musicbox.services.PlaybackErrorRecorderTest' --tests 'in.synthora.musicbox.services.PlaybackClockTest' --tests 'in.synthora.musicbox.services.PreparedQueueRowsTest' --tests 'in.synthora.musicbox.services.RemoteStateRefreshTest' --tests 'in.synthora.musicbox.services.PreloadPowerPolicyTest' --tests 'in.synthora.musicbox.services.UpcomingAudioPreloaderTest' --tests 'in.synthora.musicbox.services.LibraryTrackPresentationTest' --tests 'in.synthora.musicbox.utils.LyricIndexTest' --tests 'in.synthora.musicbox.utils.LyricsRomanizerTest' --tests 'in.synthora.musicbox.network.ArtistCollectionsTest' --tests 'in.synthora.musicbox.utils.LrcParserTest' --tests 'in.synthora.musicbox.services.NotificationRadioTest' --tests 'in.synthora.musicbox.services.CurrentAudioDownloadGuardTest' --tests 'in.synthora.musicbox.network.ArtworkTest' --tests 'in.synthora.musicbox.network.DeviceAudioTest' --tests 'in.synthora.musicbox.utils.LogRedactionTest' --tests 'in.synthora.musicbox.services.DownloadedCollectionTest' --tests 'in.synthora.musicbox.services.SharedQueueTest' --tests 'in.synthora.musicbox.services.QueueContinuationTest' --tests 'in.synthora.musicbox.services.SharedPlaybackOutputTest' --tests 'in.synthora.musicbox.services.PhoneQueuePublicationTest' --tests 'in.synthora.musicbox.network.SearchRankingTest' --tests 'in.synthora.musicbox.network.YoutubeLinkTest' --tests 'in.synthora.musicbox.utils.PlaybackTimeTest' --tests 'in.synthora.musicbox.utils.OfflineNavigationTest' --tests 'in.synthora.musicbox.services.RemoteVolumeKeysTest' --tests 'in.synthora.musicbox.ui.components.player.LyricCenteringTest' --no-daemon
 
       - name: Upload handoff test results
         if: always()
@@ -152,10 +142,36 @@ jobs:
       - name: Build signed APK (SDK runs only in Actions)
         run: |
           chmod +x gradlew
-          ./gradlew ${{ inputs.stable_release == true && 'assembleRelease' || 'assembleDebug' }} --no-daemon
+          ./gradlew :app:${{ inputs.stable_release == true && 'assembleRelease' || 'assembleDebug' }} --no-daemon
 
       - name: Verify APK launch and service entry points
         run: python3 scripts/verify_apk_components.py app/build/outputs/apk/${{ inputs.stable_release == true && 'release/app-release.apk' || 'debug/app-debug.apk' }}
+
+      - name: Upload debug APK
+        if: ${{ inputs.stable_release != true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/*.apk
+
+      - name: Build debug-signed performance tools
+        if: ${{ inputs.stable_release != true && inputs.performance_tools == true }}
+        run: ./gradlew :app:assembleOptimizedDebug :performance:assembleOptimizedDebug --no-daemon
+
+      - name: Verify optimized debug entry points
+        if: ${{ inputs.stable_release != true && inputs.performance_tools == true }}
+        run: python3 scripts/verify_apk_components.py app/build/outputs/apk/optimizedDebug/app-optimizedDebug.apk
+
+      - name: Upload optimized debug and benchmark APKs
+        if: ${{ inputs.stable_release != true && inputs.performance_tools == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-performance-tools
+          path: |
+            app/build/outputs/apk/optimizedDebug/app-optimizedDebug.apk
+            performance/build/outputs/apk/optimizedDebug/*.apk
+            app/build/outputs/mapping/optimizedDebug/mapping.txt
+            docs/PERFORMANCE_MEASUREMENT.md
 
       - name: Verify stable APK and package checksums
         if: ${{ inputs.stable_release == true }}
@@ -182,7 +198,7 @@ jobs:
           if-no-files-found: error
 
       - name: Build optional UI test APK
-        if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true) }}
+        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
         run: ./gradlew assembleDebugAndroidTest --no-daemon
 
       - name: Report lint findings
@@ -201,33 +217,28 @@ jobs:
           name: lint-report
           path: app/build/reports/lint-results-debug.*
 
-      - name: Upload debug APK
-        if: ${{ inputs.stable_release != true }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
-
       - name: Upload UI test APK
-        if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true) }}
+        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
         uses: actions/upload-artifact@v4
         with:
           name: ui-test-apk
           path: app/build/outputs/apk/androidTest/debug/*.apk
 
+      - name: Remove private signing material
+        if: always()
+        run: rm -f "$HOME/.android/music-box-debug.keystore"
+
   ui-tests:
-    if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true) }}
+    timeout-minutes: 20
+    if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - profile: pixel_6
-            tablet: false
-          - profile: pixel_c
-            tablet: true
+        include: ${{ fromJSON(inputs.test_device == 'phone' && '[{"profile":"pixel_6","tablet":false}]' || inputs.test_device == 'tablet' && '[{"profile":"pixel_c","tablet":true}]' || '[{"profile":"pixel_6","tablet":false},{"profile":"pixel_c","tablet":true}]') }}
     steps:
+      - uses: actions/checkout@v4
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
 
@@ -254,11 +265,8 @@ jobs:
           script: |
             adb install apk/app-debug.apk
             adb install test-apk/app-debug-androidTest.apk
-            adb shell am instrument -w -e class ${{ matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }} in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > ui-results.txt
+            bash scripts/run-native-tests.sh "${{ inputs.local_ui_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest#uncachedHttpAudioPlaysThroughProductionPipeline,in.synthora.musicbox.PlaybackStreamRegressionTest#configuredAudioPathPrefixStillAuthenticatesAndPlays,in.synthora.musicbox.PlaybackStreamRegressionTest#largeQueueShuffleAndReorderPreserveEverySongAndCurrentItem,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }}"
             [ "${{ inputs.full_ui_tests }}" != "true" ] || adb pull /sdcard/Android/data/in.synthora.musicbox/files/screenshots screenshots
-            cat ui-results.txt
-            ! grep -E 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' ui-results.txt
-            grep -E 'OK \([0-9]+ tests?\)' ui-results.txt
 
       - name: Upload UI results and screenshots
         if: always()
@@ -266,5 +274,61 @@ jobs:
         with:
           name: native-ui-results-${{ matrix.profile }}
           path: |
+            performance-results/
+            emulator-logcat.txt
+            emulator-activities.txt
+            emulator-gfxinfo.txt
             ui-results.txt
             screenshots
+
+  interaction-regressions:
+    if: ${{ github.event_name == 'push' && inputs.stable_release != true }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Enable KVM
+        run: sudo chmod 666 /dev/kvm
+      - name: Download signed debug APK
+        uses: actions/download-artifact@v4
+        with:
+          name: app-debug
+          path: apk
+      - name: Download UI test APK
+        uses: actions/download-artifact@v4
+        with:
+          name: ui-test-apk
+          path: test-apk
+      - name: Test keyboard, artist portraits, scrolling and playlist presentation
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            adb install apk/app-debug.apk
+            adb install test-apk/app-debug-androidTest.apk
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            adb shell settings put secure show_ime_with_hard_keyboard 1
+            adb shell settings put global hide_error_dialogs 1
+            adb shell am force-stop com.google.android.apps.nexuslauncher
+            adb shell am instrument -w -e class in.synthora.musicbox.RemoteNotificationLifecycleTest,in.synthora.musicbox.InteractionPolishRegressionTest,in.synthora.musicbox.KeyboardArtistPresentationTest,in.synthora.musicbox.QueueSelectionRegressionTest in.synthora.musicbox.test/androidx.test.runner.AndroidJUnitRunner > interaction-results.txt
+            adb shell dumpsys window > interaction-window.txt
+            adb logcat -d -b crash -b system > interaction-system-logcat.txt
+            adb shell dumpsys activity services in.synthora.musicbox > interaction-service-state.txt
+            cat interaction-results.txt
+            ! grep -E 'FAILURES|INSTRUMENTATION_FAILED|Process crashed' interaction-results.txt
+            grep -E 'OK \([0-9]+ tests?\)' interaction-results.txt
+      - name: Upload interaction test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interaction-regressions
+          path: |
+            interaction-results.txt
+            interaction-window.txt
+            interaction-system-logcat.txt
+            interaction-service-state.txt

@@ -19,6 +19,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
@@ -35,7 +37,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-data class EchoDevice(val serial: String, val name: String, val online: Boolean)
+data class EchoDevice(val serial: String, val name: String, val online: Boolean, val controllable: Boolean = true)
 
 /**
  * Echo playback through the server's web-remote endpoints: device list, now-playing polling
@@ -46,7 +48,11 @@ class EchoController(
     private val scope: CoroutineScope,
     private val prefs: SharedPreferences,
     private val onError: (String) -> Unit,
-    private val onSignedOut: () -> Unit
+    private val onSignedOut: () -> Unit,
+    private val read: suspend (String, Map<String, String>) -> JsonElement = Backend::get,
+    private val write: suspend (String, JsonObject) -> JsonElement = Backend::post,
+    private val snapshotDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default,
+    private val events: (String) -> kotlinx.coroutines.flow.Flow<JsonObject> = Backend::playbackEvents
 ) {
     private val _devices = MutableStateFlow<List<EchoDevice>>(emptyList())
     val devices: StateFlow<List<EchoDevice>> = _devices.asStateFlow()
@@ -62,9 +68,101 @@ class EchoController(
     val state: StateFlow<EchoState> = _state.asStateFlow()
 
     private var pollJob: Job? = null
+    private var eventJob: Job? = null
+    private var eventGeneration = 0L
+    private val snapshotLock = Mutex()
+    private var eventConnected = false
+    private var retainEvents = false
+    internal fun hasLiveEvents(): Boolean = eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000
+    internal fun observeEvents(active: Boolean) {
+        retainEvents = active
+        if (active) startEvents()
+        else if (pollJob?.isActive != true) { eventJob?.cancel(); eventJob = null; eventConnected = false }
+    }
+    private var lastEventAt = 0L
+    private val eventOrder = PlaybackEventOrder()
+    private var lastErrorId = ""
+
+    private fun startEvents() {
+        if (eventJob?.isActive == true) return
+        val generation = ++eventGeneration
+        eventJob = scope.launch {
+            var failures = 0
+            while (isActive) {
+                val selected = _serial.value
+                var retryAfter = 0L
+                var unsupported = false
+                try {
+                    events(selected).collect { envelope ->
+                        if (generation != eventGeneration || selected != _serial.value) return@collect
+                        val snapshot = envelope["state"] as? JsonObject ?: return@collect
+                        if (selected == _serial.value && apply(snapshot)) {
+                            eventConnected = true
+                            lastEventAt = SystemClock.elapsedRealtime()
+                            failures = 0
+                            MobileDeviceConnection.acceptPlaybackEvent(snapshot)
+                            handleStateSideEffects(snapshot)
+                        }
+                    }
+                } catch (e: CancellationException) { throw e }
+                catch (e: BackendAuthException) {
+                    // Older servers reject unknown event routes with 401, even
+                    // for a valid owner cookie. An optional channel cannot
+                    // establish that the account session itself has expired.
+                    if (eventSessionExpired(generation)) {
+                        onSignedOut()
+                        return@launch
+                    }
+                    unsupported = true
+                }
+                catch (e: Exception) {
+                    val http = e as? `in`.synthora.musicbox.network.BackendHttpException
+                    unsupported = http?.statusCode in listOf(404, 405, 426)
+                    retryAfter = http?.retryAfterMs ?: 0
+                } finally { if (generation == eventGeneration) eventConnected = false }
+                failures++
+                delay(eventReconnectDelay(failures, unsupported, retryAfter) + kotlin.random.Random.nextLong(0, 500))
+            }
+        }
+    }
+
+    private suspend fun eventSessionExpired(generation: Long): Boolean {
+        val epoch = mutationEpoch
+        return try {
+            withTimeoutOrNull(5_000) { read("/alexa/status/", emptyMap()) }
+            false
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BackendAuthException) {
+            generation == eventGeneration && epoch == mutationEpoch
+        } catch (_: Exception) {
+            // Offline, proxy errors and timeouts do not revoke a saved login.
+            false
+        }
+    }
+
+    private fun handleStateSideEffects(np: JsonObject) {
+        val message = np["playback_error"].objectOrEmpty().text("message")
+        val errorId = np.text("playback_error_id")
+        if (message.isNotBlank() && (errorId.isBlank() || errorId != lastErrorId)) {
+            lastErrorId = errorId
+            onError(message)
+        }
+        if (np["liked_version"] is JsonPrimitive) {
+            val version = np.number("liked_version")
+            if (version != likedVersion) {
+                likedVersion = version
+                scope.launch { safely { AccountRepository.refreshLiked() } }
+            }
+        }
+    }
+
     private var pollingForeground = false
     private val pollLock = Mutex()
     private val transportLock = Mutex()
+    private var seekIntent = 0L
+    private var pendingSeek: EchoSeekPreview? = null
+    private val volumeLock = Mutex()
     private var transportIntent = 0L
     private var transportConfirmationJob: Job? = null
     private var lastVolumeRefresh = 0L
@@ -95,25 +193,31 @@ class EchoController(
 
     /** Load the Echo list and the current now-playing in one request. */
     suspend fun loadDevices(): Boolean {
+        val epoch = mutationEpoch
         val saved = _serial.value
-        val init = Backend.get("/alexa/init/", if (saved.isNotBlank()) mapOf("serial" to saved) else emptyMap()).objectOrEmpty()
+        val init = read("/alexa/init/", if (saved.isNotBlank()) mapOf("serial" to saved) else emptyMap()).objectOrEmpty()
+        if (epoch != mutationEpoch) return false
         val loggedIn = init["status"].objectOrEmpty().flag("logged_in")
         _amazonConnected.value = loggedIn
         val list = init.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
         _devices.value = list
-        val chosen = list.firstOrNull { it.serial == saved }?.serial ?: init.text("serial").ifBlank { list.firstOrNull()?.serial.orEmpty() }
+        val online = list.filter { it.online }
+        val chosen = online.firstOrNull { it.serial == saved }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
         if (chosen != _serial.value) setSerial(chosen)
         init["now_playing"]?.let { np -> if (np is JsonObject) apply(np) }
-        return loggedIn && list.isNotEmpty()
+        return list.any { it.online }
     }
 
     /** Refresh presence without changing playback, artwork or the selected output. */
     suspend fun refreshDeviceStatus() {
-        val response = Backend.get("/alexa/devices/").objectOrEmpty()
+        val epoch = mutationEpoch
+        val response = read("/alexa/devices/", emptyMap()).objectOrEmpty()
+        if (epoch != mutationEpoch) return
+        response["amazon_connected"]?.let { _amazonConnected.value = response.flag("amazon_connected") }
         _devices.value = response.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
     }
 
@@ -125,24 +229,41 @@ class EchoController(
     }
 
     private fun setSerial(serial: String) {
+        pendingSeek = null
+        seekIntent++
+        transportIntent++
+        transportConfirmationJob?.cancel()
+        mutationEpoch++
+        refreshedAt = 0L
         volumeJob?.cancel()
         volumeSeq++
         volumeGraceUntil = 0L
         lastVolumeRefresh = 0L
+        eventJob?.cancel(); eventJob = null; eventConnected = false
+        eventOrder.reset()
         _serial.value = serial
+        if (retainEvents || pollJob?.isActive == true) startEvents()
         prefs.edit().putString(KEY_SERIAL, serial).apply()
     }
 
     /** Poll now-playing while the app is visible ([foreground]) or slower in the background. */
     fun startPolling(foreground: Boolean) {
+        val resumed = foreground && !pollingForeground
         pollingForeground = foreground
+        if (resumed && pollJob?.isActive == true) scope.launch { safely { refresh(force = true) } }
+        startEvents()
         if (pollJob?.isActive == true) return
         pollJob = scope.launch {
+            val changes=kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+            val presence=launch { MobileDeviceConnection.changes.collect { changes.trySend(Unit) } }
+            try {
             var failures = 0
             var lastPresenceRefresh = 0L
             while (isActive) {
+                changes.tryReceive()
                 try {
-                    refresh()
+                    val liveEvents = eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000
+                    if (!liveEvents) refresh()
                     val presenceNow = android.os.SystemClock.elapsedRealtime()
                     val presenceInterval = if (selectedDevice?.online == false) 5_000L else 30_000L
                     if (pollingForeground && presenceNow - lastPresenceRefresh >= presenceInterval) {
@@ -159,12 +280,15 @@ class EchoController(
                     failures++
                     Log.w(TAG, "Now-playing poll failed")
                 }
-                delay(remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures))
+                val interval=if (eventConnected && SystemClock.elapsedRealtime() - lastEventAt < 45_000) 30_000L else remotePollDelayMs(pollingForeground, _state.value.playing, _state.value.processing, failures,MobileDeviceConnection.hasLivePresence())
+                if(failures>0) delay(interval) else withTimeoutOrNull(interval) { changes.receive() }
             }
+            } finally { presence.cancel();changes.close() }
         }
     }
 
     fun stopPolling() {
+        if (!retainEvents) { eventJob?.cancel(); eventJob = null; eventConnected = false }
         pollJob?.cancel()
         pollJob = null
         pollingForeground = false
@@ -176,58 +300,78 @@ class EchoController(
         if (!force && SystemClock.elapsedRealtime() - refreshedAt < 200) return
         val np = pollLock.withLock {
             val epoch = mutationEpoch
-            Backend.get("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty().also {
-                if (serial == _serial.value && epoch == mutationEpoch) {
-                    apply(it)
-                    refreshedAt = SystemClock.elapsedRealtime()
-                }
+            val response = read("/alexa/now_playing/", mapOf("serial" to serial, "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
+            if (serial != _serial.value || epoch != mutationEpoch) null
+            else {
+                val accepted = apply(response)
+                // Decoding suspends. A command or sign-out can invalidate the
+                // poll while apply() is off-thread, including its side effects.
+                if (!accepted || serial != _serial.value || epoch != mutationEpoch) null
+                else response.also { refreshedAt = SystemClock.elapsedRealtime() }
             }
-        }
+        } ?: return
         if (serial != _serial.value) return
-        np["playback_error"].objectOrEmpty().text("message").takeIf { it.isNotBlank() }?.let(onError)
+        if (!stateOnly) handleStateSideEffects(np)
         if (stateOnly) return
-        if (np["liked_version"] is JsonPrimitive) {
-            val version = np.number("liked_version")
-            if (version != likedVersion) {
-                likedVersion = version
-                scope.launch { safely { AccountRepository.refreshLiked() } }
-            }
-        }
         val now = SystemClock.elapsedRealtime()
         if (force || now - lastVolumeRefresh > (if (_state.value.playing && pollingForeground) 15_000 else 60_000)) {
             lastVolumeRefresh = now
+            val epoch = mutationEpoch
             // Volume/account refresh must never hold up playback confirmation.
+            val readSequence = volumeSeq
             scope.launch { safely {
-                val volume = Backend.get("/alexa/volume/", mapOf("serial" to serial)).objectOrEmpty()
+                val volume = read("/alexa/volume/", mapOf("serial" to serial)).objectOrEmpty()
                 val value = (volume["volume"] as? JsonPrimitive)?.intOrNull
-                if (serial == _serial.value && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
+                if (epoch == mutationEpoch && serial == _serial.value && readSequence == volumeSeq && value != null && SystemClock.elapsedRealtime() >= volumeGraceUntil) {
                     _state.update { it.copy(volume = value.coerceIn(0, 100)) }
                 }
             } }
         }
     }
 
-    private suspend fun apply(np: JsonObject) {
+    private suspend fun apply(np: JsonObject): Boolean = snapshotLock.withLock { applySnapshot(np) }
+
+    private suspend fun applySnapshot(np: JsonObject): Boolean {
+        val epoch = mutationEpoch
+        val serverEpoch = np.text("event_epoch")
+        val serverRevision = np.number("event_revision")
+        if (!eventOrder.accepts(serverEpoch, serverRevision)) return false
         val now = SystemClock.elapsedRealtime()
         val previous = _state.value
         val preserveVolume = now < volumeGraceUntil
-        val parsed = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val parsed = kotlinx.coroutines.withContext(snapshotDispatcher) {
             parseEchoSnapshot(np, now, previous.volume, preserveVolume, previous.queue, previous)
         }
-        if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return
-        if (parsed.sharedOutput.mode == "phone" && parsed.sharedOutput.epoch.isNotBlank() &&
-            parsed.sharedOutput.epoch == previous.sharedOutput.epoch && parsed.sharedOutput.owner == previous.sharedOutput.owner &&
-            parsed.playbackRevision >= 0 && parsed.playbackRevision < previous.playbackRevision) return
+        if (epoch != mutationEpoch || !eventOrder.accepts(serverEpoch, serverRevision)) return false
+        if (parsed.sharedOutput.olderThan(MobileDeviceConnection.output.value)) return false
+        if (!parsed.supersedes(previous)) return false
         // A pause, close or volume preview during decoding wins over this response.
-        _state.compareAndSet(previous, parsed)
+        val preview = pendingSeek
+        val reconciled = preview?.reconcile(parsed, now) ?: parsed
+        val accepted = _state.compareAndSet(previous, reconciled)
+        if (accepted) {
+            eventOrder.accepted(serverEpoch, serverRevision)
+            np["amazon_connected"]?.let { if (it.toString() != "null") _amazonConnected.value = np.flag("amazon_connected") }
+            val shared = parsed.sharedOutput
+            if (shared.mode == "alexa" && np["remote_control_available"]?.toString() == "false" && parsed.playing && shared.serial.isNotBlank()) {
+                val known = _devices.value.firstOrNull { it.serial == shared.serial }
+                _devices.value = _devices.value.filter { it.serial != shared.serial } + EchoDevice(shared.serial, known?.name ?: "Alexa", true, false)
+            } else if (shared.mode == "phone") {
+                _devices.value = _devices.value.filter { it.controllable }
+            }
+        }
+        if (accepted && preview != null && reconciled === parsed && pendingSeek === preview)
+            pendingSeek = null
+        return accepted
     }
 
     suspend fun applySharedSnapshot(snapshot: JsonObject) { apply(snapshot) }
 
     suspend fun refreshSharedPhone() {
-        val np = Backend.get("/alexa/now_playing/", mapOf("serial" to "phone",
+        val epoch = mutationEpoch
+        val np = read("/alexa/now_playing/", mapOf("serial" to "phone",
             "queue_version" to _state.value.queueVersion.toString())).objectOrEmpty()
-        apply(np)
+        if (epoch == mutationEpoch) apply(np)
     }
 
     fun phoneDisconnected(output: SharedPlaybackOutput) {
@@ -241,11 +385,13 @@ class EchoController(
     private suspend fun send(path: String, body: JsonObject) {
         mutationEpoch++
         refreshedAt = 0
-        try { Backend.post(path, body) }
+        try { write(path, body) }
         finally { mutationEpoch++; refreshedAt = 0 }
     }
 
     suspend fun command(action: String, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
+        pendingSeek = null
+        seekIntent++
         val previous = _state.value
         val transport = action == "play" || action == "pause"
         val intent = if (transport) ++transportIntent else transportIntent
@@ -290,15 +436,47 @@ class EchoController(
     }
 
     suspend fun seek(positionMs: Long, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
-        send("/alexa/seek/", buildJsonObject {
-            put("serial", requireSerial()); put("position_ms", positionMs)
-            if (expectedPhoneToken != null) {
-                put("output_owner", PhonePlaybackOwnership.ownerId); put("output_token", expectedPhoneToken)
-                put("phone_paused", true)
+        val serial = requireSerial()
+        val previous = _state.value
+        val position = positionMs.coerceIn(0, if (previous.durationMs > 0) (previous.durationMs - 1_000).coerceAtLeast(0) else Long.MAX_VALUE)
+        val intent = ++seekIntent
+        val now = SystemClock.elapsedRealtime()
+        pendingSeek = EchoSeekPreview(previous, position, Long.MAX_VALUE)
+        _state.value = previous.copy(positionMs = position, anchoredAt = now,
+            processing = previous.playing, confirmed = !previous.playing)
+        transportLock.withLock {
+            if (intent != seekIntent || serial != _serial.value) return@withLock
+            try {
+                send("/alexa/seek/", buildJsonObject {
+                    put("serial", serial); put("position_ms", position)
+                    // New servers acknowledge the fenced/coalesced intent without
+                    // holding later scrubs behind Amazon's spoken-command round trip.
+                    put("async", true)
+                    previous.track?.ytVideoId?.let { put("video_id", it) }
+                    if (previous.index >= 0) put("expected_queue_index", previous.index)
+                    if (expectedPhoneToken != null) {
+                        put("output_owner", PhonePlaybackOwnership.ownerId); put("output_token", expectedPhoneToken)
+                        put("phone_paused", true)
+                    }
+                })
+                if (intent == seekIntent && serial == _serial.value)
+                    pendingSeek = pendingSeek?.copy(until = SystemClock.elapsedRealtime() + 8_000)
+            } catch (e: Exception) {
+                if (intent == seekIntent && serial == _serial.value) {
+                    val unconfirmed = pendingSeek != null
+                    pendingSeek = null
+                    if (unconfirmed) _state.update {
+                        if (it.track?.ytVideoId == previous.track?.ytVideoId && it.index == previous.index)
+                            it.copy(positionMs = previous.livePosition(), anchoredAt = SystemClock.elapsedRealtime(),
+                                playing = previous.playing, confirmed = previous.confirmed, processing = previous.processing)
+                        else it
+                    }
+                }
+                throw e
+            } finally {
+                if (refreshAfter && intent == seekIntent && serial == _serial.value) refreshSoon()
             }
-        })
-        _state.update { it.copy(positionMs = positionMs, anchoredAt = SystemClock.elapsedRealtime()) }
-        if (refreshAfter) refreshSoon()
+        }
     }
 
     /** Volume slider: shows the value at once, sends the last value of a drag after 220 ms. */
@@ -306,25 +484,27 @@ class EchoController(
         val value = volume.coerceIn(0, 100)
         val serial = _serial.value.ifBlank { return }
         val seq = ++volumeSeq
-        volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
+        volumeGraceUntil = Long.MAX_VALUE
         _state.update { it.copy(volume = value) }
-        volumeJob?.cancel()
+        // Do not cancel an HTTP request already dispatched: order it before the next value.
         volumeJob = scope.launch {
-            delay(220)
-            if (_serial.value != serial || prefs.getString("playback_output", "PHONE") != "ALEXA") return@launch
-            try {
-                send("/alexa/command/", buildJsonObject {
-                    put("serial", serial); put("action", "volume"); put("value", value)
-                })
-                if (seq == volumeSeq) volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                if (seq != volumeSeq) return@launch
-                volumeGraceUntil = 0
-                onError(e.message ?: "Couldn't change the volume")
-                lastVolumeRefresh = 0
-                safely { refresh(force = true) }
+            delay(120)
+            volumeLock.withLock {
+                if (seq != volumeSeq || _serial.value != serial || prefs.getString("playback_output", "PHONE") != "ALEXA") return@withLock
+                try {
+                    send("/alexa/command/", buildJsonObject {
+                        put("serial", serial); put("action", "volume"); put("value", value)
+                    })
+                    if (seq == volumeSeq) volumeGraceUntil = SystemClock.elapsedRealtime() + VOLUME_GRACE_MS
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    if (seq != volumeSeq || serial != _serial.value) return@withLock
+                    volumeGraceUntil = 0
+                    onError(e.message ?: "Couldn't change the volume")
+                    lastVolumeRefresh = 0
+                    safely { refresh(force = true) }
+                }
             }
         }
     }
@@ -355,7 +535,18 @@ class EchoController(
         require(playable.isNotEmpty()) { "Nothing to play" }
         val targetIndex = playable.indexOf(selected).coerceAtLeast(0)
         val videoId = requireNotNull(playable[targetIndex].ytVideoId)
-        startTransferredAlexaQueue(playing,
+        var transferred = false
+        if (expectedPhoneToken != null && reuseSharedQueue) {
+            try {
+                send("/api/app/devices/", pausedEchoHandoff(PhonePlaybackOwnership.ownerId, expectedPhoneToken,
+                    requireSerial(), videoId, playable[targetIndex].uuid, positionMs, playing))
+                transferred = true
+            } catch (error: `in`.synthora.musicbox.network.BackendHttpException) {
+                // Older servers reject the new action before changing ownership.
+                if (error.statusCode != 400 && error.statusCode != 404) throw error
+            }
+        }
+        if (!transferred) startTransferredAlexaQueue(playing,
             installPaused = {
                 check(expectedPhoneToken == null || PhonePlaybackOwnership.permitsPlayback(expectedPhoneToken)) { "A newer phone play superseded this switch." }
                 AlexaBackendApi.updateQueue(if (reuseSharedQueue) "current" else "start", videoId,
@@ -494,12 +685,21 @@ class EchoController(
     }
 
     fun clear() {
+        mutationEpoch++
+        refreshedAt = 0L
+        retainEvents = false
         stopPolling()
+        pendingSeek = null
+        seekIntent++
+        transportIntent++
+        transportConfirmationJob?.cancel()
         volumeJob?.cancel()
         volumeSeq++
         volumeGraceUntil = 0
         lastVolumeRefresh = 0
         likedVersion = null
+        lastErrorId = ""
+        eventOrder.reset()
         _devices.value = emptyList()
         _amazonConnected.value = null
         _state.value = EchoState()

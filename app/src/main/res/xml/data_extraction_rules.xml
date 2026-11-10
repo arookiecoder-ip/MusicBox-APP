@@ -5,6 +5,7 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="sharedpref" path="backend_session.xml"/>
         <exclude domain="sharedpref" path="alexa_remote_auth.xml"/>
         <exclude domain="sharedpref" path="shared_playback_output.xml"/>
         <!-- TODO: Use <include> and <exclude> to control what is backed up.
@@ -14,6 +15,7 @@
     </cloud-backup>
     <!--
     <device-transfer>
+        <exclude domain="sharedpref" path="backend_session.xml"/>
         <include .../>
         <exclude .../>
     </device-transfer>

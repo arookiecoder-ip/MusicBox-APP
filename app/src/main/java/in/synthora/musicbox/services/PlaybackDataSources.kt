@@ -11,13 +11,11 @@ import `in`.synthora.musicbox.network.Backend
 @UnstableApi
 fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = Backend.audioBaseUrl,
     apiKey: String = Backend.apiKey, transferListener: TransferListener? = null, prefetch: Boolean = false, cacheWarm: Boolean = false, readOnlyCache: Boolean = false): DataSource.Factory {
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
-            .setConnectTimeoutMs(15_000)
-            .setReadTimeoutMs(`in`.synthora.musicbox.network.DEVICE_AUDIO_READ_TIMEOUT_MS)
-            .setAllowCrossProtocolRedirects(true)
+        val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playbackHttpClient)
+        val redirectSafeFactory = DataSource.Factory { SafeAudioRedirectDataSource(httpDataSourceFactory.createDataSource()) }
         transferListener?.let(httpDataSourceFactory::setTransferListener)
         // Keep credentials out of media URIs (including Media3/system error logs).
-        val authenticatedAudio = androidx.media3.datasource.ResolvingDataSource.Factory(httpDataSourceFactory) { spec ->
+        val authenticatedAudio = androidx.media3.datasource.ResolvingDataSource.Factory(redirectSafeFactory) { spec ->
             if (`in`.synthora.musicbox.network.isBackendAudioRequest(audioBaseUrl, spec.uri.toString())) {
                 val credential = if (apiKey.isNotBlank()) "X-Api-Key" to apiKey else
                     kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { `in`.synthora.musicbox.network.AudioCredentials.header() }
@@ -25,17 +23,27 @@ fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = B
             } else spec
         }
         val rawUpstream = DefaultDataSource.Factory(context, authenticatedAudio)
-        val upstreamDataSourceFactory = DataSource.Factory { ValidatingAudioDataSource(rawUpstream.createDataSource()) }
+        val upstreamDataSourceFactory = DataSource.Factory {
+            val checked = ValidatingAudioDataSource(rawUpstream.createDataSource(), cache)
+            if (readOnlyCache) ReadOnlyPlaybackDataSource(checked, cache) else checked
+        }
+        // The writer may reuse partial spans; the player switches only to a full, matching copy.
+        if (readOnlyCache) return upstreamDataSourceFactory
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(cache)
+            .setCacheReadDataSourceFactory { checkedCacheFileSource(cache) }
             .setUpstreamDataSourceFactory(upstreamDataSourceFactory)
             // Cache errors are non-fatal — fall through to the network.
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR or
                 if (cacheWarm) CacheDataSource.FLAG_BLOCK_ON_CACHE else 0)
         if (cacheWarm) cacheDataSourceFactory.setCacheWriteDataSinkFactory(
             androidx.media3.datasource.cache.CacheDataSink.Factory().setCache(cache).setFragmentSize(256 * 1024L))
-        // Playback must not hold a writable hole while its buffer is full: the
-        // independent warmer owns writes and can finish the entire song.
-        if (readOnlyCache) cacheDataSourceFactory.setCacheWriteDataSinkFactory(null)
         return cacheDataSourceFactory
+}
+
+private val playbackHttpClient by lazy {
+    okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
+        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(`in`.synthora.musicbox.network.DEVICE_AUDIO_READ_TIMEOUT_MS.toLong(), java.util.concurrent.TimeUnit.MILLISECONDS)
+        .build()
 }

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -74,7 +75,7 @@ fun PlayerArtwork(
             userSwipe = false
             // An output handoff may rebuild/reorder the same queue. A changed
             // page index alone is not a new song and must not animate artwork.
-            if (!`in`.synthora.musicbox.services.animateSongChange(alignedSong, currentTrack.ytVideoId ?: currentTrack.uuid, switching || handoff != alignedHandoff)) pagerState.scrollToPage(queueIndex)
+            if (!`in`.synthora.musicbox.services.animateSongChange(alignedSong, currentTrack.ytVideoId ?: currentTrack.uuid, switching || handoff != alignedHandoff) || kotlin.math.abs(pagerState.currentPage - queueIndex) > 1) pagerState.scrollToPage(queueIndex)
             else pagerState.animateScrollToPage(queueIndex)
         }
         alignedSong = currentTrack.ytVideoId ?: currentTrack.uuid
@@ -84,7 +85,7 @@ fun PlayerArtwork(
         if (!pagerState.isScrollInProgress && userSwipe) {
             userSwipe = false
             if (pagerState.settledPage != queueIndex && pagerState.settledPage in queue.indices) {
-                musicViewModel.playTrackFromQueue(queue[pagerState.settledPage])
+                musicViewModel.playTrackFromQueue(queue[pagerState.settledPage], pagerState.settledPage)
                 haptic.click()
             }
         }
@@ -170,7 +171,6 @@ private fun ArtworkCardContent(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
             .clickable {
                 haptic.click()
                 onToggleLyrics()
@@ -179,11 +179,6 @@ private fun ArtworkCardContent(
     ) {
         `in`.synthora.musicbox.ui.components.TrackArtwork(track, Modifier.fillMaxSize(), large = true)
 
-        run {
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxSize().background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(androidx.compose.ui.graphics.Color.Transparent, androidx.compose.ui.graphics.Color.Transparent, MaterialTheme.colorScheme.background))))
-        }
-
         Box(Modifier.align(Alignment.TopCenter).fillMaxSize().background(
             androidx.compose.ui.graphics.Brush.verticalGradient(
                 0f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.32f),
@@ -191,13 +186,17 @@ private fun ArtworkCardContent(
                 1f to androidx.compose.ui.graphics.Color.Transparent)))
 
         if (showLyrics) {
-            LyricsOverlay(
-                currentTrack = track,
-                currentPosition = currentPosition,
-                musicViewModel = musicViewModel,
-                isTablet = isTablet,
-                onDismiss = onToggleLyrics
-            )
+            ClockedLyricsOverlay(track, currentPosition, musicViewModel, isTablet, onToggleLyrics)
         }
     }
+}
+
+/** Lyrics own their clock subscription; the cover and artwork pager remain static. */
+@Composable
+private fun ClockedLyricsOverlay(track: Track, fallbackPosition: Long, music: MusicViewModel,
+    tablet: Boolean, dismiss: () -> Unit) {
+    val progress by music.playbackProgress.collectAsStateWithLifecycle()
+    LyricsOverlay(currentTrack = track,
+        currentPosition = if (music.uiState.value.currentTrack?.uuid == track.uuid) progress.positionMs else fallbackPosition,
+        musicViewModel = music, isTablet = tablet, onDismiss = dismiss)
 }

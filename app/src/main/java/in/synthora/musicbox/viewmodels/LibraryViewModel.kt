@@ -75,6 +75,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     private var loadedTracks: List<Track> = emptyList()
     private var nextOffset = 0L
     private var viewJob: Job? = null
+    private var presentationJob: Job? = null
+    private var presentationGeneration = 0L
     private var started = false
     private var playlistsJob: Job? = null
     private val subscriptionPresentation = `in`.synthora.musicbox.services.ArtistSubscriptionPresentation()
@@ -93,6 +95,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun clear() {
         viewJob?.cancel()
+        presentationJob?.cancel()
+        presentationGeneration++
         playlistsJob?.cancel()
         loadedTracks = emptyList()
         nextOffset = 0
@@ -283,17 +287,21 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     /** Apply search, sort and the account's likes to the loaded songs. */
     private fun publishTracks() {
         val state = _uiState.value
+        val tracks = loadedTracks
         val liked = AccountRepository.liked.value
-        val query = state.searchQuery.trim().lowercase()
-        val filtered = if (query.isEmpty()) loadedTracks else loadedTracks.filter {
-            it.title.lowercase().contains(query) || it.artist.lowercase().contains(query)
+        val generation = ++presentationGeneration
+        presentationJob?.cancel()
+        presentationJob = viewModelScope.launch {
+            val presented = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.library) {
+                `in`.synthora.musicbox.services.presentLibraryTracks(tracks, state.searchQuery, state.sortOption, liked)
+            }
+            if (generation != presentationGeneration || loadedTracks !== tracks) return@launch
+            _uiState.update { current ->
+                if (current.searchQuery == state.searchQuery && current.sortOption == state.sortOption)
+                    current.copy(tracks = presented)
+                else current
+            }
         }
-        val sorted = when (state.sortOption) {
-            SortOption.DEFAULT -> filtered
-            SortOption.TITLE -> filtered.sortedBy { it.title.lowercase() }
-            SortOption.ARTIST -> filtered.sortedBy { it.artist.lowercase() }
-        }
-        _uiState.update { it.copy(tracks = sorted.map { t -> t.copy(isFavourite = t.ytVideoId in liked) }) }
     }
 
     fun updateSearchQuery(query: String) {

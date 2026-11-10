@@ -14,7 +14,8 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 
-private val lrcTimestampRegex = """^(\s*\[\d{2}:\d{2}\.\d{1,3}]\s*)(.*)$""".toRegex()
+private val lrcTimestampRegex = Regex("^\uFEFF?\\s*(?:${lrcTimeTag.pattern}\\s*)+")
+private val lrcMetadataRegex = Regex("""^\s*\[[a-zA-Z]+:.*]\s*$""")
 
 object LyricsRomanizer {
     private const val BASE_URL = "https://translate.googleapis.com/translate_a/single"
@@ -38,9 +39,16 @@ object LyricsRomanizer {
      * saved as the track's romanized lyrics.
      */
     fun isFullyRomanized(lyrics: String): Boolean = lyrics.lineSequence().none { line ->
-        val text = lrcTimestampRegex.find(line)?.groupValues?.get(2) ?: line
-        needsRomanization(text.trim())
+        val text = lrcTimestampRegex.find(line)?.let { line.substring(it.range.last + 1) } ?: line
+        !lrcMetadataRegex.matches(line.trim().removePrefix("\uFEFF")) && needsRomanization(text.trim())
     }
+
+    /** Reject old cached text that lost timestamps, repeated entries or source offsets. */
+    fun isValidSyncedRomanization(source: String, candidate: String): Boolean =
+        isFullyRomanized(candidate) &&
+            parseLrc(source).map { it.timeMs } == parseLrc(candidate).map { it.timeMs } &&
+            lrcTimeTag.findAll(source).map { it.value }.toList() ==
+                lrcTimeTag.findAll(candidate).map { it.value }.toList()
 
     suspend fun getRomanization(
         text: String,
@@ -125,32 +133,39 @@ object LyricsRomanizer {
     suspend fun romanizeSyncedLyrics(
         syncedLyrics: String,
         sourceLanguage: String = DEFAULT_SOURCE_LANGUAGE
+    ): String = romanizeSyncedLyricsUsing(syncedLyrics) { getRomanization(it, sourceLanguage) }
+
+    internal suspend fun romanizeSyncedLyricsUsing(
+        syncedLyrics: String,
+        romanize: suspend (String) -> String?
     ): String = coroutineScope {
         val lines = syncedLyrics.split("\n")
         val deferredResults = lines.map { line ->
             async {
                 val match = lrcTimestampRegex.find(line)
                 if (match != null) {
-                    val prefix = match.groupValues[1]
-                    val lyricText = match.groupValues[2].trim()
+                    val prefix = match.value
+                    val lyricText = line.substring(match.range.last + 1).trim()
                     if (lyricText.isEmpty()) {
                         prefix
                     } else if (!needsRomanization(lyricText)) {
                         // Skip English/Latin lyrics, preserving casing and punctuation
                         prefix + lyricText
                     } else {
-                        val romanized = getRomanization(lyricText, sourceLanguage) ?: lyricText
+                        val romanized = romanize(lyricText)?.replace(Regex("[\\r\\n]+"), " ") ?: lyricText
                         prefix + romanized
                     }
                 } else {
                     val trimmedLine = line.trim()
-                    if (trimmedLine.isEmpty()) {
+                    if (lrcMetadataRegex.matches(trimmedLine)) {
+                        line
+                    } else if (trimmedLine.isEmpty()) {
                         ""
                     } else if (!needsRomanization(trimmedLine)) {
                         // Skip English/Latin lines completely
                         trimmedLine
                     } else {
-                        getRomanization(trimmedLine, sourceLanguage) ?: trimmedLine
+                        romanize(trimmedLine)?.replace(Regex("[\\r\\n]+"), " ") ?: trimmedLine
                     }
                 }
             }

@@ -17,17 +17,38 @@ internal class GuardedMediaNotificationProvider(
     private val active: () -> Boolean,
     private val onDenied: () -> Unit,
     private val onRecoveryUpdate: () -> Boolean = { false },
-    private val onUpdated: () -> Unit = {}
+    private val onUpdated: () -> Unit = {},
+    private val publishForegroundUpdate: (MediaNotification) -> Boolean = { false }
 ) : MediaNotification.Provider {
     private val main = Handler(Looper.getMainLooper())
+    private var lastActions: MediaNotification.ActionFactory? = null
+    private var generation = 0L
+
+    /** Rebuild controls using the existing service action factory, without asking
+     * Media3 to promote/demote the service during a remote receiver transition. */
+    fun refresh(session: MediaSession, publish: (MediaNotification) -> Unit): Boolean {
+        val actions = lastActions ?: return false
+        val buttons = session.mediaButtonPreferences.ifEmpty { session.customLayout }
+        val notification = createNotification(session, ImmutableList.copyOf(buttons), actions) { publish(it) }
+        publish(notification)
+        onUpdated()
+        return true
+    }
     override fun createNotification(session: MediaSession, buttons: ImmutableList<CommandButton>,
-        actions: MediaNotification.ActionFactory, callback: MediaNotification.Provider.Callback): MediaNotification =
-        delegate.createNotification(session, buttons, actions) { notification ->
+        actions: MediaNotification.ActionFactory, callback: MediaNotification.Provider.Callback): MediaNotification {
+        lastActions = actions
+        val expected = ++generation
+        return delegate.createNotification(session, buttons, actions) { notification ->
             main.post {
-                deliverNotificationUpdate({ if (!onRecoveryUpdate()) { callback.onNotificationChanged(notification); onUpdated() } },
+                if (expected != generation) return@post
+                deliverNotificationUpdate({ if (!onRecoveryUpdate()) {
+                        if (!publishForegroundUpdate(notification)) callback.onNotificationChanged(notification)
+                        onUpdated()
+                    } },
                     { Build.VERSION.SDK_INT >= 31 && it is android.app.ForegroundServiceStartNotAllowedException }, onDenied, active)
             }
         }
+    }
     override fun handleCustomCommand(session: MediaSession, action: String, extras: Bundle): Boolean =
         delegate.handleCustomCommand(session, action, extras)
 }

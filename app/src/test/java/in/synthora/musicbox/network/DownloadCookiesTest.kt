@@ -2,6 +2,8 @@ package `in`.synthora.musicbox.network
 
 import io.ktor.http.HttpMethod
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.*
@@ -81,6 +83,28 @@ class DownloadCookiesTest {
         }
         assertTrue(api.check().valid)
         assertEquals(2, attempts)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun stalledAudioCheckTimesOutAndCanBeRetried() = kotlinx.coroutines.test.runTest {
+        var calls = 0
+        val api = DownloadCookies { _, _, _ ->
+            if (++calls == 1) kotlinx.coroutines.awaitCancellation()
+            Json.parseToJsonElement("""{"valid":true,"message":"Audio passed"}""")
+        }
+        try { api.check(); fail("Stalled probe never timed out") }
+        catch (error: IllegalStateException) { assertTrue(error.message!!.contains("timed out")) }
+        assertEquals(65_000L, testScheduler.currentTime)
+        assertTrue(api.check().valid)
+    }
+
+    @Test fun cancellingScreenDoesNotBecomeAnAudioFailure() = kotlinx.coroutines.test.runTest {
+        val api = DownloadCookies { _, _, _ -> kotlinx.coroutines.awaitCancellation() }
+        val job = launch { api.check() }
+        runCurrent()
+        job.cancel()
+        job.join()
+        assertTrue(job.isCancelled)
     }
 
 }

@@ -38,7 +38,10 @@ class MediaMenuController {
     var extraOptions by mutableStateOf<List<ExtraSongOption>>(emptyList())
     var queueActions by mutableStateOf<QueueSongActions?>(null)
     fun show(track: Track, queueActions: QueueSongActions? = null, extras: List<ExtraSongOption> = emptyList(), playerOnly: Boolean = false) { this.playerOnly = playerOnly; item = null; this.track = track; this.queueActions = queueActions; extraOptions = extras }
-    fun show(item: BrowseItem, extras: List<ExtraSongOption> = emptyList()) { playerOnly = false; extraOptions = extras; track = null; queueActions = null; this.item = item }
+    fun show(item: BrowseItem, extras: List<ExtraSongOption> = emptyList()) {
+        if (item.kind == "track" && item.videoId.isNotBlank()) { show(item.toTrack(), extras = extras); return }
+        playerOnly = false; extraOptions = extras; track = null; queueActions = null; this.item = item
+    }
     fun dismiss() { extraOptions = emptyList(); track = null; item = null; queueActions = null }
 }
 val LocalMediaMenu = staticCompositionLocalOf<MediaMenuController?> { null }
@@ -60,7 +63,6 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
     var playlists by remember { mutableStateOf<List<BrowseItem>?>(null) }
     var playlistError by remember { mutableStateOf<String?>(null) }
     var create by remember { mutableStateOf(false) }
-    var name by remember { mutableStateOf("") }
     var deletingCollection by remember { mutableStateOf<`in`.synthora.musicbox.services.DownloadedCollection?>(null) }
     fun resolve(block: suspend () -> Unit) {
         scope.launch {
@@ -112,6 +114,7 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
                     MusicMenuOption(icon, label, enabled = label != "Downloading…", showProgress = label == "Downloading…") { menu.dismiss(); run() }
                 }
                 if (track != null) {
+                    if (queueActions == null && !menu.playerOnly) action("Play now") { music.playTrack(track) }
                     queueActions?.let { actions ->
                         action("Play now", actions.play)
                         actions.select?.let { action("Select", it) }
@@ -196,10 +199,9 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
     }
     saveTrack?.let { selected ->
         if (create) {
-            GlassAlertDialog(shape = RectangleShape, onDismissRequest = { create = false; saveTrack = null }, title = { Text("New playlist") },
-                text = { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Playlist name") }) },
-                confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { library.createPlaylist(name.trim(), listOf(selected)); create = false; saveTrack = null; name = "" }) { Text("Create") } },
-                dismissButton = { TextButton(onClick = { create = false }) { Text("Back") } })
+            CreatePlaylistDialog(onDismiss = { create = false }, onCreate = { playlistName ->
+                library.createPlaylist(playlistName, listOf(selected)); create = false; saveTrack = null
+            })
         } else {
             AddToPlaylistDialog(playlists, listOf(selected), onDismiss = { saveTrack = null },
                 onAddToPlaylist = { library.addTracksToPlaylist(it, listOf(selected)); saveTrack = null }, onCreatePlaylist = { create = true }, error = playlistError,

@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -48,6 +49,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
@@ -75,7 +77,7 @@ fun GlassNavBar(items: List<GlassNavItem>, modifier: Modifier = Modifier) {
     GlassTabGroup(
         items = items,
         vertical = false,
-        modifier = modifier.fillMaxWidth().clip(GlassShapes.Bar).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF303034), Color(0xFF252529)))).stableNavigationBarsPadding().padding(6.dp)
+        modifier = modifier.fillMaxWidth().clip(GlassShapes.Bar).background(`in`.synthora.musicbox.ui.theme.dockColor()).stableNavigationBarsPadding().padding(4.dp)
     )
 }
 
@@ -87,6 +89,7 @@ fun GlassNavBar(items: List<GlassNavItem>, modifier: Modifier = Modifier) {
  */
 @Composable
 private fun GlassTabGroup(items: List<GlassNavItem>, vertical: Boolean, modifier: Modifier = Modifier) {
+    val currentItems by rememberUpdatedState(items)
     val accent = LocalGlassAccent.current
     val scope = rememberCoroutineScope()
     val bounds = remember { mutableStateMapOf<Int, Pair<IntOffset, IntSize>>() }
@@ -111,11 +114,22 @@ private fun GlassTabGroup(items: List<GlassNavItem>, vertical: Boolean, modifier
     )
     val cross = selected?.first?.let { if (vertical) it.x else it.y } ?: 0
 
-    val dragModifier = if (vertical) Modifier else Modifier.pointerInput(items) {
+    val dragModifier = if (vertical) Modifier else Modifier.pointerInput(Unit) {
         detectHorizontalDragGestures(
             onDragStart = { dragging = true },
-            onDragCancel = { dragging = false },
-            onDragEnd = { dragging = false },
+            onDragCancel = {
+                dragging = false
+                val active = currentItems.indexOfFirst { it.selected }
+                bounds[active]?.let { target -> scope.launch { pos.animateTo(target.first.x.toFloat(), lensSpring) } }
+            },
+            onDragEnd = {
+                dragging = false
+                val nearest = bounds.entries.minByOrNull { kotlin.math.abs(it.value.first.x - pos.value) }?.key
+                if (nearest != null) currentItems.getOrNull(nearest)?.let { item ->
+                    if (!item.selected) item.onClick()
+                    else bounds[nearest]?.let { target -> scope.launch { pos.animateTo(target.first.x.toFloat(), lensSpring) } }
+                }
+            },
             onHorizontalDrag = { change, dx ->
                 change.consume()
                 val lo = bounds.values.minOfOrNull { it.first.x }?.toFloat() ?: 0f
@@ -123,14 +137,6 @@ private fun GlassTabGroup(items: List<GlassNavItem>, vertical: Boolean, modifier
                 scope.launch { pos.snapTo((pos.value + dx).coerceIn(lo, hi)) }
             }
         )
-    }
-    // On release, land on whichever tab the lens is nearest to (projected a little by its velocity).
-    LaunchedEffect(dragging) {
-        if (dragging || !placed) return@LaunchedEffect
-        val p = pos.value
-        val nearest = bounds.entries.minByOrNull { (_, v) -> kotlin.math.abs(v.first.x - p) }?.key ?: return@LaunchedEffect
-        if (nearest != selectedIndex) items.getOrNull(nearest)?.onClick?.invoke()
-        else bounds[nearest]?.let { pos.animateTo(it.first.x.toFloat(), lensSpring) }
     }
 
     Box(modifier = modifier.then(dragModifier)) {
@@ -185,7 +191,8 @@ private fun GlassNavTab(item: GlassNavItem, modifier: Modifier = Modifier) {
     )
     Column(
         modifier = modifier
-            .heightIn(min = 52.dp)
+            .testTag("Navigation tab ${item.label}")
+            .heightIn(min = 48.dp)
             .clip(GlassShapes.Control)
             .selectable(
                 selected = item.selected,
@@ -194,7 +201,7 @@ private fun GlassNavTab(item: GlassNavItem, modifier: Modifier = Modifier) {
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
             )
-            .padding(vertical = 6.dp),
+            .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {

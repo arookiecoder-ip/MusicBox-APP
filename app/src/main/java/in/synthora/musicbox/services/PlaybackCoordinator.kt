@@ -21,7 +21,7 @@ object PlaybackCoordinator {
     fun echo(context: Context): EchoController = controller ?: EchoController(scope,
         context.applicationContext.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE),
         onError = { _errors.tryEmit(it) }, onSignedOut = {
-            consumers.clear(); controller?.stopPolling(); _signedOut.tryEmit(Unit)
+            consumers.clear(); controller?.observeEvents(false); controller?.stopPolling(); _signedOut.tryEmit(Unit)
         }).also { controller = it }
 
     fun observe(context: Context, consumer: String, active: Boolean, foreground: Boolean = false) {
@@ -39,11 +39,11 @@ object PlaybackCoordinator {
 }
 
 /** State reads are separate from the short, mandatory phone ownership lease. */
-fun remotePollDelayMs(foreground: Boolean, playing: Boolean, processing: Boolean, failures: Int): Long {
+fun remotePollDelayMs(foreground: Boolean, playing: Boolean, processing: Boolean, failures: Int, livePresence: Boolean = false): Long {
     val base = when {
-        processing -> 3_000L
-        foreground && playing -> 3_000L
-        foreground -> 10_000L
+        foreground && livePresence && !processing -> 5_000L
+        foreground -> 500L
+        processing -> 1_000L
         playing -> 10_000L
         else -> 30_000L
     }

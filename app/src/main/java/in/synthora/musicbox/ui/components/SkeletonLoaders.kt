@@ -2,6 +2,12 @@ package `in`.synthora.musicbox.ui.components
 
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 
+import `in`.synthora.musicbox.ui.theme.glassFloat
+import `in`.synthora.musicbox.ui.theme.GlassShapes
+import `in`.synthora.musicbox.ui.theme.GlassLevel
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -45,6 +51,23 @@ private fun ShapedSkeletonBlock(
             .clip(shape)
             .shimmerEffect()
     )
+}
+
+/** Reserves the normal player footprint while initial playback metadata is restored. */
+@Composable
+fun MiniPlayerSkeleton(modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth().glassFloat(GlassShapes.Bar, GlassLevel.Regular)
+        .testTag("Mini player loading")
+        .semantics { contentDescription = "Loading playback" }
+        .padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        ShapedSkeletonBlock(Modifier.size(46.dp), RoundedCornerShape(8.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ShapedSkeletonBlock(Modifier.fillMaxWidth(.65f).height(14.dp))
+            ShapedSkeletonBlock(Modifier.fillMaxWidth(.4f).height(10.dp))
+        }
+        ShapedSkeletonBlock(Modifier.size(32.dp), CircleShape)
+    }
 }
 
 @Composable

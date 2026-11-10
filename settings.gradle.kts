@@ -23,4 +23,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "JUKE"
-include(":app")
+include(":app", ":performance")
