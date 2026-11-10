@@ -1,0 +1,111 @@
+name: Android Multi-User Build
+
+# Dedicated to the multi-user line. Its APK identity is intentionally different
+# from the old Alexa-backend/app key: new cache key, keystore path, alias and
+# passwords. No existing workflow or signing cache is read or written here.
+#
+# Production should move this keystore into a protected repository secret once a
+# maintainer with Actions-secrets permission can set it. Until then the CI cache
+# is the only persistent storage available to the automation account.
+on:
+  push:
+    branches:
+      - feat/multi-user
+  workflow_dispatch:
+    inputs:
+      ui_tests:
+        description: Compile the instrumented UI test APK (emulator run is not enabled yet)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-multiuser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-and-build:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore the multi-user CI signing identity
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/musicbox-multiuser.jks
+          key: musicbox-multiuser-signing-v1
+
+      - name: Create the signing identity only if this cache is empty
+        run: |
+          set -eu
+          umask 077
+          store="$HOME/.android/musicbox-multiuser.jks"
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$store" ]; then
+            keytool -genkeypair \
+              -keystore "$store" \
+              -storepass musicbox-multiuser-ci \
+              -keypass musicbox-multiuser-ci \
+              -alias musicbox-multiuser \
+              -keyalg RSA -keysize 4096 -validity 10000 \
+              -dname "CN=Music Box Multi-User CI, OU=Android, O=Synthora, L=India, C=IN"
+          fi
+          keytool -exportcert -keystore "$store" -storepass musicbox-multiuser-ci \
+            -alias musicbox-multiuser -file "$RUNNER_TEMP/multiuser-cert.der" >/dev/null
+          sha256sum "$RUNNER_TEMP/multiuser-cert.der" | cut -d ' ' -f 1 > signing-certificate.sha256
+          {
+            echo "MUSIC_BOX_SIGNING_STORE=$store"
+            echo "MUSIC_BOX_SIGNING_ALIAS=musicbox-multiuser"
+            echo "MUSIC_BOX_SIGNING_STORE_PASSWORD=musicbox-multiuser-ci"
+            echo "MUSIC_BOX_SIGNING_KEY_PASSWORD=musicbox-multiuser-ci"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate local.properties
+        run: |
+          cat > local.properties <<EOF
+          POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
+          POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}
+          ALEXA_SESSION_BASE_URL=https://alexa.synthora.in
+          ALEXA_BASE_URL=https://alexa.synthora.in
+          ALEXA_API_KEY=${{ secrets.ALEXA_API_KEY }}
+          EOF
+
+      - name: Compile and run JVM regressions
+        run: sh ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Compile the instrumented account/UI tests
+        if: ${{ github.event_name == 'push' || inputs.ui_tests == true }}
+        run: sh ./gradlew assembleDebugAndroidTest --no-daemon
+
+      - name: Build the signed debug APK
+        run: sh ./gradlew assembleDebug --no-daemon
+
+      - name: Verify APK entry points
+        run: python3 scripts/verify_apk_components.py app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiuser-test-results
+          path: app/build/test-results/testDebugUnitTest
+
+      - name: Upload APK and signing fingerprint
+        uses: actions/upload-artifact@v4
+        with:
+          name: multiuser-debug-apk
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            signing-certificate.sha256

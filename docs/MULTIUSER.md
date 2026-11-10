@@ -1,141 +1,103 @@
-# Multi-user backend — client notes
+# Multi-user Android client
 
-**Status:** planning only. The Android app on this branch is unchanged; this
-document records the contract the client will build against so app work does not
-start from assumptions.
+**Status:** implemented on `feat/multi-user`. The app now signs in as an
+individual account, creates accounts natively, recovers passwords and manages
+the account and its devices. No backend endpoint was added or changed; the app
+rides the existing web session and the existing self-service doors.
 
 - Backend branch: `feat/multi-user`
-- Backend test origin: `https://testalexa.synthora.in`
-- Production origin: `https://alexa.synthora.in` (unchanged, single-owner)
-- Backend admin panel: `https://testalexa.synthora.in/admin/` (deployed and
-  smoke-tested on this branch; not linked from the app)
+- Test origin: `https://testalexa.synthora.in`
+- Production origin: `https://alexa.synthora.in`
 
-## What exists today
+## What the app uses
 
-1. **Admin identities.** The backend can create, disable, delete and restore
-   users; assign `owner`/`admin`/`user` roles; verify email addresses; send
-   invitations; reset passwords; and issue magic sign-in links.
-2. **Isolated storage.** Users, sessions, email tokens, encrypted provider
-   credentials, preferences and audit events have their own tables.
-3. **No client-facing account API yet.** The current app continues to use the
-   existing `API_KEY` + single-owner `/login/`/`/remote/` contract. The test
-   deployment keeps that contract working under the same API key.
-4. **No playback scoping yet.** Playlists, history, likes, queues and current
-   playback are still shared. Do not assume two accounts see different music.
-
-## Client roadmap
-
-| Phase | App work | Gate |
+| Flow | Transport | Why |
 | --- | --- | --- |
-| 0 (current) | None. Keep using the existing owner configuration. | Backend Phase 1 deployed on the test origin. |
-| 1 | Freeze the auth/profile contract with the backend. | Backend Phase 3 API merged. |
-| 2 | Add a debug-only account layer: sign-in, token storage, refresh, sign-out. | Contract tests against `testalexa`. |
-| 3 | Move user-visible profile and provider status into the account screen. | Per-user YouTube/Amazon linking available. |
-| 4 | Scope playlists, history, likes and queues to the signed-in account. | Backend Phase 2 data migration rehearsed on a production copy. |
-| 5 | Remove the debug flag and ship the account release. | Security review, backup/restore drill, rollback plan. |
+| Sign in / TOTP | `POST /login/` JSON (existing) | Already supports both steps. |
+| Sign up | `GET`/`POST /signup` HTML | The server's CSRF, sign-up nonce, honeypot, minimum fill time and rate limits stay in force. |
+| Confirm email | `GET`/`POST /verify`, `/resend-code` | Same reason; the code proves the mailbox, not the password. |
+| Forgot / reset | `GET`/`POST /forgot-password`, `/reset-password` | Enumeration-safe replies are preserved. |
+| Profile and controls | `/api/account*` JSON with `X-CSRF-Token` | The token is read from `data-csrf` on `/account`. |
+| Provider linking | Existing browser flow and `/api/account/providers/...` | Unchanged provider-code paths. |
 
-No app code changes start before Phase 1, so the current release keeps pointing
-at production.
+The app deliberately does **not** invent `/api/v1/auth` or a bearer-token
+session. The existing encrypted-at-rest cookie jar is the session.
 
-## Non-goals on this branch
+## Client structure
 
-- No change to `alexa.synthora.in`.
-- No change to the Alexa skill, Lambda, interaction model or
-  `lambda/api_key.py`.
-- No production migration.
-- No client code changes until the Phase 2/3 API contract is accepted.
+- `network/Backend.kt` — session client, HTML form requests, encrypted cookie jar.
+- `network/AccountWebApi.kt` — typed doors, profile parsing, account mutations, CSRF handling.
+- `utils/SecureStore.kt` — Keystore-backed AES-GCM for the cookie jar and remembered identity.
+- `viewmodels/AccountViewModel.kt` — sign-up/verify/recovery stages and account actions.
+- `ui/screens/AuthDoorScreens.kt` — native create/verify/forgot/reset screens.
+- `ui/screens/AccountSettingsScreen.kt` — profile, email, password, TOTP, devices, deletion.
+- `services/AccountScope.kt` — account-switch fence.
 
-## Planned client contract (Phase 3)
+## Account changes and local data
 
-The exact payloads will be frozen with the backend implementation. The intended
-shape:
+The server already partitions playback state and provider credentials by
+identity. On this phone, `AccountScope` detects a different user id and clears:
 
-### Sign in
+- Room music data (queue, likes, history, lyrics cache)
+- Home feed cache
+- Recent searches
+- In-memory liked songs and the active queue
 
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
+Downloads remain device-level media. They are not used to infer identity and
+are not deleted on a switch. Signing out also clears the remembered identity and
+the same local metadata.
 
-{"identifier": "user@synthora.in", "password": "…", "device_name": "Pixel 9"}
+`MainActivity` observes `accountSwitched` and pauses/restarts playback around
+the cleared state so the previous account's queue cannot flash on screen.
+
+## Security properties
+
+- Session cookies are AES-GCM encrypted with a non-exportable Android Keystore
+  key (`musicbox.session.v1`). Encryption failure fails closed; nothing falls
+  back to plaintext.
+- Passwords exist only in composable-local state during entry. They are never
+  kept in `AccountUiState` or saved state.
+- Sign-up forms wait out the server's minimum fill time instead of defeating it.
+- CSRF is read live from the door/account page. A stale token is refreshed once
+  on a `400`, then the request is retried once.
+- Signup/recovery errors are parsed from the rendered page; HTML is stripped
+  before display.
+- Account deletion uses the server's password + exact username + emailed code
+  proof. It cannot be completed from a single tap.
+
+## Signing identity
+
+The multi-user APK must not share the old Alexa-backend/app signature. The
+Gradle signing block now accepts:
+
+```text
+MUSIC_BOX_SIGNING_STORE
+MUSIC_BOX_SIGNING_ALIAS
+MUSIC_BOX_SIGNING_STORE_PASSWORD
+MUSIC_BOX_SIGNING_KEY_PASSWORD
 ```
 
-Response (short-lived access token + rotating refresh token):
+When the alias variables are absent, older branches keep the old
+`androiddebugkey`/`android` defaults so their installs still update. The
+multi-user CI job (`.github/workflows/android-multiuser.yml`) uses a separate
+cache key (`musicbox-multiuser-signing-v1`), keystore path
+(`musicbox-multiuser.jks`), alias (`musicbox-multiuser`) and password. It never
+reads `musicbox-debug-signing-v1` or `ANDROID_DEBUG_KEYSTORE_BASE64`.
 
-```json
-{
-  "user": {"id": "…", "username": "…", "display_name": "…", "role": "user"},
-  "access_token": "…",
-  "expires_in": 900,
-  "refresh_token": "…"
-}
-```
+The keystore is generated once and persisted only in that Actions cache. Move it
+to a protected repository secret (and delete the cache) before production; a
+cache is not a substitute for a secret store and any key generated by CI is still
+a development identity, not a Play Store upload key.
 
-### Refresh / sign out
+## Verification
 
-```http
-POST /api/v1/auth/refresh   {"refresh_token": "…"}
-POST /api/v1/auth/logout    Authorization: Bearer <access>
-```
+Everything runs in GitHub Actions; this branch does not build locally.
 
-### Current account
+- Full JVM suite: `testDebugUnitTest`
+- Instrumented APK compilation: `assembleDebugAndroidTest`
+- Phone and tablet UI subsets: `local_ui_tests`
+- APK entry-point check: `scripts/verify_apk_components.py`
 
-```http
-GET /api/v1/me
-Authorization: Bearer <access>
-```
-
-### Profile and provider accounts
-
-```http
-PATCH /api/v1/me            {"display_name": "…"}
-GET   /api/v1/me/providers
-POST  /api/v1/me/providers/youtube/connect
-DELETE /api/v1/me/providers/youtube
-```
-
-Provider secrets never travel back to the app; the backend stores encrypted
-credentials and only exposes status/metadata.
-
-### Playback scoping (Phase 2)
-
-Once scoped, every existing playback endpoint will accept the authenticated
-user (bearer token or session cookie) and operate on that user's data. The
-legacy `API_KEY` device path remains for the Alexa integration. The app should
-not send both an API key and a user token to the same endpoint.
-
-## Migration strategy for the app
-
-1. Keep the current release pointed at production.
-2. Add the account/session layer behind a debug-only or remote feature flag.
-3. Mint a token only when the user explicitly signs in; anonymous mode keeps
-   using the existing owner configuration.
-4. Migrate local playlists/history to the server account only after Phase 2
-   scoping is live and a dry-run import has been verified.
-5. Cut over only after the backend's backup/restore drill and security review.
-
-## Testing the test deployment
-
-The test host is reachable at `https://testalexa.synthora.in`. A debug build can
-point at it with:
-
-```properties
-ALEXA_SESSION_BASE_URL=https://testalexa.synthora.in
-ALEXA_BASE_URL=https://testalexa.synthora.in
-ALEXA_API_KEY=<test deployment API_KEY>
-```
-
-Never ship those test values in a release build. The production Lambda and API
-key are intentionally not reused.
-
-## Open questions
-
-- Invitation-only onboarding vs. self-service registration.
-- Whether Google OAuth should be the primary sign-in for YouTube linking.
-- How to represent an account on shared Alexa devices without changing the
-  skill.
-- Offline behavior when a refresh token expires while the app is backgrounded.
-- Data export/deletion requirements for personal data.
-
-Answers belong in the backend roadmap
-(`docs/multi-user/ROADMAP.md` in `youtube-music-alexa-skill`) before client
-implementation starts.
+The current CI run is on the `feat/multi-user` branch. Physical-device behavior
+that CI cannot cover (real Keystore access after app-data restore, biometric-free
+unlock on OEM builds, carrier email delivery latency) still needs a manual pass.
