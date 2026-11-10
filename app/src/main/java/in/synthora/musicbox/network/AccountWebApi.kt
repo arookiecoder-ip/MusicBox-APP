@@ -62,6 +62,10 @@ object AccountWebApi {
         val minPasswordLength: Int
     )
 
+    internal const val DOORS_MISSING =
+        "This server doesn't have multi-user accounts yet, so sign-up, verification and password recovery are unavailable. " +
+            "Sign in with the owner account, or ask the administrator to enable MULTI_USER_ENABLED and redeploy."
+
     class AccountActionException(
         message: String,
         val fields: Map<String, String> = emptyMap(),
@@ -313,10 +317,12 @@ object AccountWebApi {
 
     private fun requireOk(response: FormResponse, message: String) {
         if (response.status !in 200..299) {
-            throw BackendAuthException(
-                message.ifBlank { "The account server rejected the request (${response.status})." },
-                statusCode = response.status
-            )
+            // A 404 here is the server's own "page not found" page, which is not
+            // about this app's request: the deployment simply has no multi-user
+            // routes. Saying so beats echoing "We couldn't find that page".
+            val text = if (response.status == 404) DOORS_MISSING
+                else message.ifBlank { "The account server rejected the request (${response.status})." }
+            throw BackendAuthException(text, statusCode = response.status)
         }
     }
 
