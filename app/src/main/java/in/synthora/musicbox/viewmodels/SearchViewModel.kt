@@ -128,6 +128,12 @@ class SearchViewModel(application: Application) : AndroidViewModel(application) 
     private val suggestionPrefixCache =
         LinkedHashMap<String, List<String>>(SUGGESTION_CACHE_MAX_ENTRIES)
 
+    /** Another account must not inherit this phone's recent searches. */
+    fun clearAccountData() {
+        searchPrefs.edit().clear().apply()
+        _uiState.update { it.copy(recentSearches = emptyList()) }
+    }
+
     fun updateQuery(query: String) {
         // Skip duplicate consecutive input values (distinctUntilChanged behavior).
         if (query == _uiState.value.query) return

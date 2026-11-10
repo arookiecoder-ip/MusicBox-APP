@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 117
-        versionName = "2.4.65"
+        versionCode = 118
+        versionName = "2.5.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -64,21 +64,26 @@ android {
     }
 
     signingConfigs {
+        // The multi-user line has its own identity. Older branches keep the old
+        // alias/password fallback so their existing installs still upgrade.
+        val signingAlias = System.getenv("MUSIC_BOX_SIGNING_ALIAS")?.takeIf { it.isNotBlank() } ?: "androiddebugkey"
+        val signingStorePassword = System.getenv("MUSIC_BOX_SIGNING_STORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "android"
+        val signingKeyPassword = System.getenv("MUSIC_BOX_SIGNING_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: signingStorePassword
         // Keep the installed app's identity when moving from beta/debug to release.
         create("release") {
             System.getenv("MUSIC_BOX_SIGNING_STORE")?.takeIf { it.isNotBlank() }?.let { path ->
                 storeFile = file(path)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                storePassword = signingStorePassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
             }
         }
         getByName("debug") {
             System.getenv("MUSIC_BOX_SIGNING_STORE")?.takeIf { it.isNotBlank() }?.let { path ->
                 storeFile = file(path)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                storePassword = signingStorePassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
             }
         }
     }

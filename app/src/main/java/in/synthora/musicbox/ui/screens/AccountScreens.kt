@@ -104,6 +104,11 @@ import `in`.synthora.musicbox.viewmodels.AuthStage
 /** Sign in with the web remote's owner account: username and password, then the authenticator code. */
 @Composable
 fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
+    if (state.stage == AuthStage.SIGNUP || state.stage == AuthStage.VERIFY_EMAIL ||
+        state.stage == AuthStage.FORGOT_PASSWORD || state.stage == AuthStage.RESET_PASSWORD) {
+        AuthDoorScreen(state, account)
+        return
+    }
     val haptic = rememberJukeHaptics()
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -196,6 +201,26 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                                 keyboard?.hide()
                                 account.login(username, password)
                             }
+                            state.door.message.takeIf { it.isNotBlank() }?.let { notice ->
+                                Spacer(Modifier.height(14.dp))
+                                Text(
+                                    notice,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                            Row(
+                                Modifier.fillMaxWidth().padding(top = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                TextButton(onClick = account::openSignup, enabled = !state.busy) {
+                                    Text("Create account")
+                                }
+                                TextButton(onClick = account::openForgotPassword, enabled = !state.busy) {
+                                    Text("Forgot password?")
+                                }
+                            }
                         }
                         AuthStage.NEEDS_CODE -> {
                             Icon(
@@ -251,7 +276,7 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
 }
 
 @Composable
-private fun SubmitButton(text: String, busy: Boolean, onClick: () -> Unit) {
+internal fun SubmitButton(text: String, busy: Boolean, onClick: () -> Unit) {
     GlassPillButton(
         text = if (busy) "" else text,
         onClick = onClick,
@@ -265,7 +290,7 @@ private fun SubmitButton(text: String, busy: Boolean, onClick: () -> Unit) {
 
 /** A text field drawn as a glass pill, matching the search header. */
 @Composable
-private fun GlassTextField(
+internal fun GlassTextField(
     value: String,
     onValueChange: (String) -> Unit,
     placeholder: String,

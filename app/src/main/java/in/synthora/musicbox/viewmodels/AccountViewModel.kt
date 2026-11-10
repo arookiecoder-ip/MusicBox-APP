@@ -4,9 +4,11 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import `in`.synthora.musicbox.network.Backend
+import `in`.synthora.musicbox.network.AccountWebApi
 import `in`.synthora.musicbox.network.DownloadCookies
 import `in`.synthora.musicbox.network.BackendAuthException
 import `in`.synthora.musicbox.network.LoginStep
+import `in`.synthora.musicbox.services.AccountScope
 import `in`.synthora.musicbox.network.flag
 import `in`.synthora.musicbox.network.objectOrEmpty
 import `in`.synthora.musicbox.network.text
@@ -25,7 +27,39 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-enum class AuthStage { CHECKING, SIGNED_OUT, NEEDS_CODE, SIGNED_IN }
+enum class AuthStage {
+    CHECKING,
+    SIGNED_OUT,
+    SIGNUP,
+    VERIFY_EMAIL,
+    FORGOT_PASSWORD,
+    RESET_PASSWORD,
+    NEEDS_CODE,
+    SIGNED_IN
+}
+
+/** Values a door needs while it is open. Passwords never enter this state. */
+data class AuthDoorState(
+    val csrf: String = "",
+    val username: String = "",
+    val email: String = "",
+    val maskedEmail: String = "",
+    val message: String = "",
+    val fieldErrors: Map<String, String> = emptyMap(),
+    val minPasswordLength: Int = 10,
+    val signupOpen: Boolean = true
+)
+
+data class TotpEnrollment(
+    val secret: String,
+    val account: String,
+    val issuer: String,
+    val message: String
+) {
+    val otpauthUri: String
+        get() = "otpauth://totp/${java.net.URLEncoder.encode(issuer, "UTF-8")}:${java.net.URLEncoder.encode(account, "UTF-8")}" +
+            "?secret=$secret&issuer=${java.net.URLEncoder.encode(issuer, "UTF-8")}&algorithm=SHA1&digits=6&period=30"
+}
 
 /** The server's view of the linked accounts (GET /api/profile_status/). */
 data class AccountStatus(
@@ -43,6 +77,11 @@ data class AccountStatus(
 
 data class AccountUiState(
     val stage: AuthStage = AuthStage.CHECKING,
+    val door: AuthDoorState = AuthDoorState(),
+    val profile: AccountWebApi.AccountProfile? = null,
+    val profileLoading: Boolean = false,
+    val actionMessage: String? = null,
+    val totp: TotpEnrollment? = null,
     val busy: Boolean = false,
     val cookieBusy: Boolean = false,
     val cookieMessage: String? = null,
@@ -70,6 +109,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     /** Fires when Amazon or YouTube was (re)connected, so Home, library and Echo reload. */
     private val _accountsChanged = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val accountsChanged: SharedFlow<Unit> = _accountsChanged.asSharedFlow()
+
+    /** Another account signed in on this phone; cached queues and metadata were fenced. */
+    private val _accountSwitched = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val accountSwitched: SharedFlow<Unit> = _accountSwitched.asSharedFlow()
 
     private var codeToken = ""
     private var busyJob: Job? = null
@@ -104,7 +147,10 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 AuthStage.SIGNED_IN
             }
             _state.update { it.copy(stage = stage) }
-            if (stage == AuthStage.SIGNED_IN) refreshStatus()
+            if (stage == AuthStage.SIGNED_IN) {
+                refreshStatus()
+                refreshProfile()
+            }
         }
     }
 
@@ -153,8 +199,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun onSignedIn() {
-        _state.update { it.copy(stage = AuthStage.SIGNED_IN, showAccountCheck = true, status = null, error = null) }
+        _state.update { it.copy(stage = AuthStage.SIGNED_IN, showAccountCheck = true, status = null, error = null, door = AuthDoorState()) }
         refreshStatus()
+        refreshProfile()
     }
 
     /** Leave the account check and open the app. */
@@ -344,12 +391,16 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         accountPoll?.cancel()
         codeToken = ""
         browserFlow = null
+        AccountWebApi.clearSecrets()
         _state.value = AccountUiState(stage = AuthStage.SIGNED_OUT, busy = true)
         busyJob = viewModelScope.launch {
             try { Backend.logout() }
             catch (e: CancellationException) { throw e }
             catch (_: Exception) { /* Local session is cleared even if the server is offline. */ }
-            finally { _state.update { it.copy(busy = false) } }
+            finally {
+                AccountScope.forget(getApplication())
+                _state.update { it.copy(busy = false, profile = null) }
+            }
         }
     }
 
@@ -357,6 +408,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     fun sessionEnded() {
         if (_state.value.stage == AuthStage.SIGNED_OUT) return
         Backend.clearSession()
+        AccountWebApi.clearSecrets()
         cookieJob?.cancel()
         busyJob?.cancel()
         codeToken = ""
@@ -364,10 +416,324 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         accountPoll?.cancel()
         statusJob?.cancel()
         _state.value = AccountUiState(stage = AuthStage.SIGNED_OUT, error = "Your session ended. Sign in again.")
+        viewModelScope.launch { AccountScope.forget(getApplication()) }
     }
 
     fun dismissError() {
         _state.update { it.copy(error = null) }
+    }
+
+    fun dismissActionMessage() {
+        _state.update { it.copy(actionMessage = null) }
+    }
+
+    // ------------------------------------------------------------ sign-up / recovery
+
+    private var signupOpenedAt = 0L
+
+    fun openSignup() = runBusy {
+        val gate = AccountWebApi.openSignup()
+        if (!gate.open) {
+            _state.update { it.copy(error = gate.message) }
+            return@runBusy
+        }
+        signupOpenedAt = android.os.SystemClock.elapsedRealtime()
+        _state.update {
+            it.copy(
+                stage = AuthStage.SIGNUP,
+                door = AuthDoorState(csrf = gate.csrf, signupOpen = true),
+                error = null
+            )
+        }
+    }
+
+    fun submitSignup(username: String, email: String, password: String, confirmPassword: String) {
+        val cleanUser = username.trim()
+        val cleanEmail = email.trim()
+        val errors = buildMap {
+            if (!cleanUser.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{2,31}"))) {
+                put("username", "Use 3–32 letters, numbers, dots, dashes or underscores.")
+            }
+            if (!cleanEmail.contains('@') || cleanEmail.length < 5) put("email", "Enter a valid email address.")
+            if (password.length < 10) put("password", "Use at least 10 characters.")
+            if (password != confirmPassword) put("confirm_password", "The two passwords do not match.")
+        }
+        if (errors.isNotEmpty()) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = errors), error = null) }
+            return
+        }
+        runBusy {
+            // The server rejects forms filled faster than a person can type. Wait out
+            // the remainder instead of letting a password-manager fill fake a success.
+            val elapsed = android.os.SystemClock.elapsedRealtime() - signupOpenedAt
+            if (elapsed in 0 until 3_200) delay(3_200 - elapsed)
+            val result = AccountWebApi.signup(_state.value.door.csrf, cleanUser, cleanEmail, password, confirmPassword)
+            if (!result.ok) {
+                _state.update {
+                    it.copy(
+                        door = it.door.copy(username = cleanUser, email = cleanEmail, message = result.message, fieldErrors = result.fieldErrors),
+                        error = null
+                    )
+                }
+                return@runBusy
+            }
+            val verifyCsrf = runCatching { AccountWebApi.openVerification() }.getOrDefault("")
+            _state.update {
+                it.copy(
+                    stage = AuthStage.VERIFY_EMAIL,
+                    door = AuthDoorState(csrf = verifyCsrf, username = cleanUser, message = result.notice),
+                    error = null
+                )
+            }
+        }
+    }
+
+    fun submitVerification(code: String) {
+        val digits = code.filter(Char::isDigit)
+        if (digits.length != 6) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = mapOf("code" to "Enter the 6-digit code from your email."))) }
+            return
+        }
+        runBusy {
+            val csrf = _state.value.door.csrf.ifBlank { AccountWebApi.openVerification() }
+            val result = AccountWebApi.verifyEmail(csrf, _state.value.door.username, digits)
+            if (!result.ok) {
+                _state.update { it.copy(door = it.door.copy(csrf = csrf, message = result.message, fieldErrors = result.fieldErrors)) }
+                return@runBusy
+            }
+            _state.update {
+                it.copy(
+                    stage = AuthStage.SIGNED_OUT,
+                    door = AuthDoorState(message = result.notice.ifBlank { "Email confirmed. Sign in." }),
+                    error = null
+                )
+            }
+        }
+    }
+
+    fun resendVerification() = runBusy {
+        val identifier = _state.value.door.username
+        if (identifier.isBlank()) {
+            _state.update { it.copy(error = "Enter the username you signed up with.") }
+            return@runBusy
+        }
+        val result = AccountWebApi.resendVerification(identifier)
+        _state.update { it.copy(door = it.door.copy(message = result.notice.ifBlank { result.message })) }
+    }
+
+    fun openForgotPassword() = runBusy {
+        val csrf = AccountWebApi.openRecovery()
+        _state.update {
+            it.copy(stage = AuthStage.FORGOT_PASSWORD, door = AuthDoorState(csrf = csrf), error = null)
+        }
+    }
+
+    fun submitForgotPassword(identifier: String) = runBusy {
+        val clean = identifier.trim()
+        if (clean.isBlank()) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = mapOf("identifier" to "Enter your email or username."))) }
+            return@runBusy
+        }
+        val result = AccountWebApi.requestPasswordReset(_state.value.door.csrf, clean)
+        if (!result.ok) {
+            _state.update { it.copy(door = it.door.copy(message = result.message, fieldErrors = result.fieldErrors)) }
+            return@runBusy
+        }
+        val resetCsrf = runCatching { AccountWebApi.openReset() }.getOrDefault("")
+        _state.update {
+            it.copy(
+                stage = AuthStage.RESET_PASSWORD,
+                door = AuthDoorState(csrf = resetCsrf, username = clean, message = result.notice.ifBlank { result.message }),
+                error = null
+            )
+        }
+    }
+
+    fun openResetPassword() = runBusy {
+        val csrf = AccountWebApi.openReset()
+        _state.update { it.copy(stage = AuthStage.RESET_PASSWORD, door = AuthDoorState(csrf = csrf), error = null) }
+    }
+
+    fun submitResetPassword(code: String, password: String, confirmPassword: String) = runBusy {
+        val identifier = _state.value.door.username
+        val errors = buildMap {
+            if (identifier.isBlank()) put("identifier", "Enter the account you requested a code for.")
+            if (code.filter(Char::isDigit).length != 6) put("code", "Enter the 6-digit code from your email.")
+            if (password.length < 10) put("password", "Use at least 10 characters.")
+            if (password != confirmPassword) put("confirm_password", "The two passwords do not match.")
+        }
+        if (errors.isNotEmpty()) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = errors)) }
+            return@runBusy
+        }
+        val result = AccountWebApi.resetPassword(
+            _state.value.door.csrf, identifier, code.filter(Char::isDigit), password, confirmPassword
+        )
+        if (!result.ok) {
+            _state.update { it.copy(door = it.door.copy(message = result.message, fieldErrors = result.fieldErrors)) }
+            return@runBusy
+        }
+        _state.update {
+            it.copy(
+                stage = AuthStage.SIGNED_OUT,
+                door = AuthDoorState(message = result.notice.ifBlank { "Password changed. Sign in with the new one." }),
+                error = null
+            )
+        }
+    }
+
+    fun backToSignIn() {
+        _state.update { it.copy(stage = AuthStage.SIGNED_OUT, door = AuthDoorState(), error = null) }
+    }
+
+    // ------------------------------------------------------------- account control
+
+    fun refreshProfile() {
+        if (_state.value.stage != AuthStage.SIGNED_IN) return
+        viewModelScope.launch {
+            _state.update { it.copy(profileLoading = true) }
+            try {
+                val profile = AccountWebApi.profile()
+                val switched = AccountScope.adopt(getApplication(), profile.id, profile.username, profile.email)
+                _state.update { it.copy(profile = profile) }
+                if (switched) _accountSwitched.tryEmit(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: BackendAuthException) {
+                sessionEnded()
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message ?: "Couldn't load your account details.") }
+            } finally {
+                _state.update { it.copy(profileLoading = false) }
+            }
+        }
+    }
+
+    private fun accountAction(success: String = "Saved.", block: suspend () -> JsonObject) {
+        if (busyJob?.isActive == true) return
+        busyJob = viewModelScope.launch {
+            _state.update { it.copy(busy = true, error = null, actionMessage = null) }
+            try {
+                val result = block()
+                _state.update {
+                    it.copy(actionMessage = result.text("message").ifBlank { success })
+                }
+                refreshProfile()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: BackendAuthException) {
+                sessionEnded()
+            } catch (e: AccountWebApi.AccountActionException) {
+                _state.update { it.copy(error = e.message) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message ?: "Couldn't update your account.") }
+            } finally {
+                _state.update { it.copy(busy = false) }
+            }
+        }
+    }
+
+    fun changePassword(currentPassword: String, newPassword: String, confirmPassword: String) =
+        accountAction("Password changed.") {
+            AccountWebApi.changePassword(currentPassword, newPassword, confirmPassword)
+        }
+
+    fun sendPasswordResetCode() = accountAction("Reset code sent.") {
+        AccountWebApi.sendPasswordResetCode()
+    }
+
+    fun resetPasswordWithCode(code: String, newPassword: String, confirmPassword: String, signOutOthers: Boolean = true) =
+        accountAction("Password changed.") {
+            AccountWebApi.resetPasswordSignedIn(code, newPassword, confirmPassword, signOutOthers)
+        }
+
+    fun sendEmailCode() = accountAction("Verification code sent.") {
+        AccountWebApi.sendEmailCode()
+    }
+
+    fun changeEmail(email: String, currentPassword: String, emailCode: String) =
+        accountAction("Check your new address for a confirmation code.") {
+            AccountWebApi.updateEmail(email, currentPassword, emailCode)
+        }
+
+    fun resendEmailVerification() = accountAction("Verification code sent.") {
+        AccountWebApi.resendVerificationCode()
+    }
+
+    fun confirmEmail(code: String) = accountAction("Email confirmed.") {
+        AccountWebApi.confirmVerificationCode(code)
+    }
+
+    fun revokeSession(sessionId: String) = accountAction("Device signed out.") {
+        AccountWebApi.revokeSessions(sessionId = sessionId)
+    }
+
+    fun signOutOtherSessions() = accountAction("Other devices signed out.") {
+        AccountWebApi.revokeSessions(others = true)
+    }
+
+    fun beginTotp(currentPassword: String, emailCode: String = "") = accountAction("Two-factor setup started.") {
+        val result = AccountWebApi.beginTotp(currentPassword, emailCode)
+        _state.update {
+            it.copy(
+                totp = TotpEnrollment(
+                    secret = result.text("secret"),
+                    account = result.text("account"),
+                    issuer = result.text("issuer").ifBlank { "Music Box" },
+                    message = result.text("message")
+                )
+            )
+        }
+        result
+    }
+
+    fun cancelTotp() = accountAction("Two-factor setup cancelled.") {
+        _state.update { it.copy(totp = null) }
+        AccountWebApi.cancelTotp()
+    }
+
+    fun confirmTotp(code: String) = accountAction("Two-factor is on.") {
+        val result = AccountWebApi.confirmTotp(code)
+        _state.update { it.copy(totp = null) }
+        result
+    }
+
+    fun disableTotp(currentPassword: String, emailCode: String = "") = accountAction("Two-factor is off.") {
+        _state.update { it.copy(totp = null) }
+        AccountWebApi.disableTotp(currentPassword, emailCode)
+    }
+
+    fun disconnectProvider(provider: String) = accountAction("Disconnected.") {
+        val result = AccountWebApi.disconnectProvider(provider)
+        _accountsChanged.tryEmit(Unit)
+        result
+    }
+
+    fun deleteAccount(currentPassword: String, username: String, emailCode: String) {
+        if (busyJob?.isActive == true) return
+        busyJob = viewModelScope.launch {
+            _state.update { it.copy(busy = true, error = null) }
+            try {
+                AccountWebApi.deleteAccount(currentPassword, username, emailCode)
+                Backend.clearSession()
+                AccountWebApi.clearSecrets()
+                AccountScope.forget(getApplication())
+                _state.value = AccountUiState(
+                    stage = AuthStage.SIGNED_OUT,
+                    door = AuthDoorState(message = "Your account and its data were deleted.")
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: BackendAuthException) {
+                sessionEnded()
+            } catch (e: AccountWebApi.AccountActionException) {
+                _state.update { it.copy(error = e.message) }
+            } catch (e: Exception) {
+                _state.update { it.copy(error = e.message ?: "Couldn't delete the account.") }
+            } finally {
+                _state.update { it.copy(busy = false) }
+            }
+        }
     }
 
     private fun absolute(url: String) = if (url.startsWith("/")) Backend.baseUrl + url else url

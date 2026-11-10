@@ -112,6 +112,7 @@ import `in`.synthora.musicbox.ui.screens.AlbumDetailScreen
 import `in`.synthora.musicbox.ui.screens.ArtistSongsScreen
 import `in`.synthora.musicbox.ui.screens.ArtistDetailScreen
 import `in`.synthora.musicbox.ui.screens.AccountCheckScreen
+import `in`.synthora.musicbox.ui.screens.AccountSettingsScreen
 import `in`.synthora.musicbox.ui.screens.SettingsScreen
 import `in`.synthora.musicbox.ui.screens.SignInScreen
 import `in`.synthora.musicbox.ui.screens.HomeScreen
@@ -283,6 +284,18 @@ class MainActivity : ComponentActivity() {
                         musicViewModel.onSignedIn()
                         homeViewModel.reload()
                         libraryViewModel.refresh()
+                    }
+                }
+                LaunchedEffect(Unit) {
+                    account.accountSwitched.collect {
+                        // AccountScope has already erased account metadata; drop the
+                        // in-memory queue and lists so the previous person's music
+                        // cannot flash on screen before the next fetch returns.
+                        musicViewModel.onSignedOut()
+                        homeViewModel.clear()
+                        libraryViewModel.clear()
+                        searchViewModel.clearAccountData()
+                        musicViewModel.onSignedIn()
                     }
                 }
 
@@ -708,6 +721,15 @@ class MainActivity : ComponentActivity() {
                                     music = musicViewModel,
                                     onNavigateBack = { navController.popBackStack() },
                                     onNavigateToPowerTools = { navController.navigate("settings/power") },
+                                    onNavigateToAccount = { navController.navigate("settings/account") },
+                                    bottomPadding = bottomPadding
+                                )
+                            }
+                            composable("settings/account") {
+                                AccountSettingsScreen(
+                                    account = account,
+                                    state = accountState,
+                                    onNavigateBack = { navController.popBackStack() },
                                     bottomPadding = bottomPadding
                                 )
                             }
@@ -839,7 +861,8 @@ class MainActivity : ComponentActivity() {
                             color = `in`.synthora.musicbox.ui.theme.glassSheetColor()) {
                             SettingsScreen(account = account, music = musicViewModel, jam = jamViewModel,
                                 onNavigateBack = { showProfile = false },
-                                onNavigateToPowerTools = { showProfile = false; navController.navigate("settings/power") })
+                                onNavigateToPowerTools = { showProfile = false; navController.navigate("settings/power") },
+                                onNavigateToAccount = { showProfile = false; navController.navigate("settings/account") })
                         }
                     }
                 }

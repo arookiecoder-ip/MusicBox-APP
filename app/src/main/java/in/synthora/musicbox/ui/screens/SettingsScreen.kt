@@ -57,6 +57,7 @@ fun SettingsScreen(
     music: `in`.synthora.musicbox.viewmodels.MusicViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToPowerTools: () -> Unit,
+    onNavigateToAccount: () -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp,
     jam: `in`.synthora.musicbox.viewmodels.JamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
@@ -171,6 +172,21 @@ fun SettingsScreen(
                 }
             } }
             item { Box(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) { AccountStatusCard(state, account) } }
+            item {
+                GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape).clickable { haptic.click(); onNavigateToAccount() }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Profile and security", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Email, password, two-factor and signed-in devices",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("›", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+            }
 
             if (powerUnlocked) {
                 item {
