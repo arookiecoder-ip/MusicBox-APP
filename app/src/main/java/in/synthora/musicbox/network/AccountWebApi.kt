@@ -297,10 +297,11 @@ object AccountWebApi {
     private fun BackendHttpException.toAccountAction(): AccountActionException {
         val root = payload.objectOrEmpty()
         val detail = root["error"]
+        val fallback = message.orEmpty()
         val message = when (detail) {
-            is JsonObject -> detail.text("message").ifBlank { message }
-            is JsonPrimitive -> detail.contentOrNull.orEmpty().ifBlank { message }
-            else -> message
+            is JsonObject -> detail.text("message").ifBlank { fallback }
+            is JsonPrimitive -> detail.contentOrNull.orEmpty().ifBlank { fallback }
+            else -> fallback
         }
         val fields = (detail as? JsonObject)?.get("fields").objectOrEmpty().mapNotNull { (key, value) ->
             ((value as? JsonPrimitive)?.contentOrNull ?: (value as? JsonObject)?.text("message"))

@@ -294,7 +294,7 @@ fun AccountSettingsScreen(
         AccountDialog.TOTP_BEGIN -> BeginTotpDialog(state, account) { dialog = null }
         AccountDialog.TOTP_CONFIRM -> state.totp?.let { TotpConfirmDialog(it, state, account) { dialog = null } }
         AccountDialog.TOTP_DISABLE -> DisableTotpDialog(state, account) { dialog = null }
-        AccountDialog.DELETE -> DeleteAccountDialog(profile, state, account) { dialog = null }
+        AccountDialog.DELETE -> state.profile?.let { DeleteAccountDialog(it, state, account) { dialog = null } }
         null -> Unit
     }
 }

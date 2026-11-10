@@ -168,6 +168,7 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                             Spacer(Modifier.height(32.dp))
                             CircularProgressIndicator()
                         }
+                        AuthStage.SIGNUP, AuthStage.VERIFY_EMAIL, AuthStage.FORGOT_PASSWORD, AuthStage.RESET_PASSWORD -> Unit
                         AuthStage.SIGNED_OUT -> {
                             Text(
                                 "Sign in with your web remote account",
