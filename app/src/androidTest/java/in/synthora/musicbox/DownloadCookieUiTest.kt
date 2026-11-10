@@ -24,7 +24,7 @@ class DownloadCookieUiTest {
         val state = mutableStateOf(AccountUiState(status = AccountStatus(youtubeCookies = true), checkingStatus = true))
         val account = AccountViewModel(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application)
         compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountStatusCard(state.value, account) } } }
-        compose.onNodeWithText("Test audio download").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Check again").performScrollTo().assertIsEnabled()
         compose.onNodeWithText("Replace cookies").performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithText("Replace download cookies").assertIsDisplayed()
         compose.onNodeWithText("Test and save").assertIsNotEnabled()
