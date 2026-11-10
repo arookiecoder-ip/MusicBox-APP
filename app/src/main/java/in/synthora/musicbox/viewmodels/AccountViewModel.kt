@@ -81,6 +81,8 @@ data class AccountUiState(
     val profile: AccountWebApi.AccountProfile? = null,
     val profileLoading: Boolean = false,
     val actionMessage: String? = null,
+    /** Which account action produced [actionMessage], so a sheet can close itself on success. */
+    val actionKey: String? = null,
     val totp: TotpEnrollment? = null,
     val busy: Boolean = false,
     val cookieBusy: Boolean = false,
@@ -96,6 +98,12 @@ data class AccountUiState(
     /** A vendor sign-in page to open in the account browser. */
     val browserUrl: String? = null
 )
+
+const val ACTION_PASSWORD = "password"
+const val ACTION_EMAIL = "email"
+const val ACTION_VERIFY = "verify"
+const val ACTION_TOTP_ON = "totp_on"
+const val ACTION_TOTP_OFF = "totp_off"
 
 /**
  * Web-remote sign-in (username, password, authenticator code) and the account checks the web
@@ -424,7 +432,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun dismissActionMessage() {
-        _state.update { it.copy(actionMessage = null) }
+        _state.update { it.copy(actionMessage = null, actionKey = null) }
     }
 
     // ------------------------------------------------------------ sign-up / recovery
@@ -609,14 +617,14 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun accountAction(success: String = "Saved.", block: suspend () -> JsonObject) {
+    private fun accountAction(success: String = "Saved.", key: String? = null, block: suspend () -> JsonObject) {
         if (busyJob?.isActive == true) return
         busyJob = viewModelScope.launch {
-            _state.update { it.copy(busy = true, error = null, actionMessage = null) }
+            _state.update { it.copy(busy = true, error = null, actionMessage = null, actionKey = null) }
             try {
                 val result = block()
                 _state.update {
-                    it.copy(actionMessage = result.text("message").ifBlank { success })
+                    it.copy(actionMessage = result.text("message").ifBlank { success }, actionKey = key)
                 }
                 refreshProfile()
             } catch (e: CancellationException) {
@@ -634,7 +642,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun changePassword(currentPassword: String, newPassword: String, confirmPassword: String) =
-        accountAction("Password changed.") {
+        accountAction("Password changed.", key = ACTION_PASSWORD) {
             AccountWebApi.changePassword(currentPassword, newPassword, confirmPassword)
         }
 
@@ -652,7 +660,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun changeEmail(email: String, currentPassword: String, emailCode: String) =
-        accountAction("Check your new address for a confirmation code.") {
+        accountAction("Check your new address for a confirmation code.", key = ACTION_EMAIL) {
             AccountWebApi.updateEmail(email, currentPassword, emailCode)
         }
 
@@ -660,7 +668,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         AccountWebApi.resendVerificationCode()
     }
 
-    fun confirmEmail(code: String) = accountAction("Email confirmed.") {
+    fun confirmEmail(code: String) = accountAction("Email confirmed.", key = ACTION_VERIFY) {
         AccountWebApi.confirmVerificationCode(code)
     }
 
@@ -692,16 +700,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         AccountWebApi.cancelTotp()
     }
 
-    fun confirmTotp(code: String) = accountAction("Two-factor is on.") {
+    fun confirmTotp(code: String) = accountAction("Two-factor is on.", key = ACTION_TOTP_ON) {
         val result = AccountWebApi.confirmTotp(code)
         _state.update { it.copy(totp = null) }
         result
     }
 
-    fun disableTotp(currentPassword: String, emailCode: String = "") = accountAction("Two-factor is off.") {
-        _state.update { it.copy(totp = null) }
-        AccountWebApi.disableTotp(currentPassword, emailCode)
-    }
+    fun disableTotp(currentPassword: String, emailCode: String = "") =
+        accountAction("Two-factor is off.", key = ACTION_TOTP_OFF) {
+            _state.update { it.copy(totp = null) }
+            AccountWebApi.disableTotp(currentPassword, emailCode)
+        }
 
     fun disconnectProvider(provider: String) = accountAction("Disconnected.") {
         val result = AccountWebApi.disconnectProvider(provider)

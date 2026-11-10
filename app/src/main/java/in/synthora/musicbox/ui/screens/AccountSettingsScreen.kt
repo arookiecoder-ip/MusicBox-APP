@@ -51,6 +51,11 @@ import `in`.synthora.musicbox.ui.theme.GlassLevel
 import `in`.synthora.musicbox.ui.theme.glassPane
 import `in`.synthora.musicbox.ui.theme.isGlassDark
 import `in`.synthora.musicbox.utils.rememberJukeHaptics
+import `in`.synthora.musicbox.viewmodels.ACTION_EMAIL
+import `in`.synthora.musicbox.viewmodels.ACTION_PASSWORD
+import `in`.synthora.musicbox.viewmodels.ACTION_TOTP_OFF
+import `in`.synthora.musicbox.viewmodels.ACTION_TOTP_ON
+import `in`.synthora.musicbox.viewmodels.ACTION_VERIFY
 import `in`.synthora.musicbox.viewmodels.AccountUiState
 import `in`.synthora.musicbox.viewmodels.AccountViewModel
 
@@ -72,6 +77,10 @@ fun AccountSettingsScreen(
     var dialog by remember { mutableStateOf<AccountDialog?>(null) }
     LaunchedEffect(state.totp) {
         if (state.totp != null) dialog = AccountDialog.TOTP_CONFIRM
+    }
+    // Opening a sheet starts a fresh action: drop the note left by the previous one.
+    LaunchedEffect(dialog) {
+        if (dialog != null) account.dismissActionMessage()
     }
 
     Column(
@@ -350,12 +359,21 @@ private fun DialogError(state: AccountUiState) {
     }
 }
 
+/** The matching action succeeded: the note is shown on the screen behind the sheet. */
+@Composable
+private fun DismissOnAction(state: AccountUiState, key: String, onDismiss: () -> Unit) {
+    LaunchedEffect(state.actionKey, state.actionMessage) {
+        if (state.actionMessage != null && state.actionKey == key) onDismiss()
+    }
+}
+
 @Composable
 private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var current by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    DismissOnAction(state, ACTION_PASSWORD, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text("Change password") },
@@ -385,6 +403,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
     var code by rememberSaveable { mutableStateOf("") }
     var sent by rememberSaveable { mutableStateOf(false) }
     val keyboard = LocalSoftwareKeyboardController.current
+    DismissOnAction(state, ACTION_EMAIL, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text("Change email") },
@@ -428,6 +447,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
 private fun VerifyEmailDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var code by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    DismissOnAction(state, ACTION_VERIFY, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text("Confirm email") },
@@ -470,6 +490,7 @@ private fun BeginTotpDialog(state: AccountUiState, account: AccountViewModel, on
                     emailCode, { value -> emailCode = value.filter(Char::isDigit).take(6) }, "Email code (if required)",
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
                 )
+                TextButton(onClick = account::sendEmailCode, enabled = !state.busy) { Text("Send email code") }
                 DialogError(state)
             }
         },
@@ -492,6 +513,7 @@ private fun TotpConfirmDialog(
 ) {
     var code by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    DismissOnAction(state, ACTION_TOTP_ON, onDismiss)
     val bitmap = remember(enrollment.otpauthUri) {
         runCatching {
             val matrix = com.google.zxing.MultiFormatWriter()
@@ -534,7 +556,7 @@ private fun TotpConfirmDialog(
         },
         confirmButton = {
             TextButton(
-                onClick = { keyboard?.hide(); account.confirmTotp(code); onDismiss() },
+                onClick = { keyboard?.hide(); account.confirmTotp(code) },
                 enabled = !state.busy && code.length == 6
             ) { Text("Turn on") }
         },
@@ -547,6 +569,7 @@ private fun DisableTotpDialog(state: AccountUiState, account: AccountViewModel, 
     var password by remember { mutableStateOf("") }
     var emailCode by rememberSaveable { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
+    DismissOnAction(state, ACTION_TOTP_OFF, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text("Turn off two-factor") },
@@ -555,6 +578,7 @@ private fun DisableTotpDialog(state: AccountUiState, account: AccountViewModel, 
                 Text("Confirm the password on this account. An emailed code may also be required.")
                 GlassTextField(password, { password = it }, "Current password", password = true)
                 GlassTextField(emailCode, { value -> emailCode = value.filter(Char::isDigit).take(6) }, "Email code (if required)")
+                TextButton(onClick = account::sendEmailCode, enabled = !state.busy) { Text("Send email code") }
                 DialogError(state)
             }
         },

@@ -140,7 +140,7 @@ object AccountWebApi {
             "/forgot-password",
             mapOf("_csrf" to csrf, "identifier" to identifier, "website" to "")
         )
-        return DoorHtml.doorResult(response, listOf("if an account matches", "not configured"))
+        return DoorHtml.doorResult(response, listOf("if an account matches"))
     }
 
     suspend fun openReset(): String {

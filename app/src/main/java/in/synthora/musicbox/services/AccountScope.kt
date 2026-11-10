@@ -24,18 +24,19 @@ object AccountScope {
 
     data class Identity(val id: String, val username: String, val email: String)
 
-    suspend fun adopt(context: Context, id: String, username: String, email: String): Boolean {
-        if (id.isBlank()) return false
-        val previous = read(context)
-        if (previous?.id == id) {
+    suspend fun adopt(context: Context, id: String, username: String, email: String): Boolean =
+        withContext(Dispatchers.IO) {
+            if (id.isBlank()) return@withContext false
+            val previous = read(context)
+            if (previous?.id == id) {
+                write(context, Identity(id, username, email))
+                return@withContext false
+            }
+            val switched = previous != null
+            if (switched) clearLocal(context)
             write(context, Identity(id, username, email))
-            return false
+            switched
         }
-        val switched = previous != null
-        if (switched) clearLocal(context)
-        write(context, Identity(id, username, email))
-        return switched
-    }
 
     fun current(context: Context): Identity? = read(context)
 
