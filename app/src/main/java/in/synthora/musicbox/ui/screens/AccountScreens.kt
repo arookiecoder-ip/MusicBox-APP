@@ -272,6 +272,7 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                 Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .imePadding()
                     .stableNavigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly
