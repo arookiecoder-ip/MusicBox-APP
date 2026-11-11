@@ -405,7 +405,7 @@ fun AccountCheckScreen(state: AccountUiState, account: AccountViewModel) {
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                if (state.status == null) "Checking Amazon and YouTube Music…"
+                if (state.status == null) "Checking your connected services…"
                 else if (state.status.allConnected) "Everything is connected"
                 else "Connect what's missing, or continue",
                 style = MaterialTheme.typography.bodyLarge,
@@ -440,7 +440,7 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
 
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(vertical = 8.dp)) {
-            AccountRow(
+            if (status?.alexaAccessEnabled == true) AccountRow(
                 icon = Icons.Outlined.Speaker,
                 title = "Echo (Amazon)",
                 detail = state.amazonMessage ?: if (status?.amazonConnected == true) "Controls your Echo devices" else "Needed to play on Echo",
@@ -643,6 +643,9 @@ private fun AmazonSignInDialog(busy: Boolean, onDismiss: () -> Unit, onConnect: 
 
 /** Small status line for an account that still has work to do (used where space is short). */
 fun AccountStatus.summary(): String = when {
+    !alexaAccessEnabled && allConnected -> "YouTube Music connected"
+    !alexaAccessEnabled && !youtubeLibrary -> "YouTube Music needs connecting"
+    !alexaAccessEnabled -> "YouTube cookies need renewing"
     allConnected -> "Amazon and YouTube Music connected"
     !amazonConnected && !youtubeLibrary -> "Amazon and YouTube Music need connecting"
     !amazonConnected -> "Amazon needs connecting"

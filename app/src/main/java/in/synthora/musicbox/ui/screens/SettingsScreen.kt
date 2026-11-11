@@ -145,7 +145,7 @@ fun SettingsScreen(
                     Text("Cache size applies after restarting the app.", style = MaterialTheme.typography.bodySmall)
                 }
             } }
-            item { GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) {
+            if (state.status?.alexaAccessEnabled == true) item { GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Alexa", fontWeight = FontWeight.SemiBold)
                     if (amazonConnected == null && echoDevices.isEmpty()) `in`.synthora.musicbox.ui.components.StatusSkeleton(Modifier.padding(top = 12.dp))

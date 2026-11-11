@@ -2006,7 +2006,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) {
                 val expired = `in`.synthora.musicbox.network.confirmSessionExpired {
-                    Backend.get("/alexa/status/")
+                    Backend.get("/api/account")
                 }
                 _queueLoadError.value = if (expired) "Your session expired. Sign in again to sync the queue."
                     else "Queue sync rejected at ${e.endpoint ?: "the queue endpoint"} (HTTP ${e.statusCode}). Your login has been kept."

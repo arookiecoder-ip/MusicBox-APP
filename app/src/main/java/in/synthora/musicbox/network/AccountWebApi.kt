@@ -59,7 +59,8 @@ object AccountWebApi {
         val mustChangePassword: Boolean,
         val sessions: List<AccountSession>,
         val providers: List<LinkedProvider>,
-        val minPasswordLength: Int
+        val minPasswordLength: Int,
+        val alexaAccessEnabled: Boolean = false
     )
 
     internal const val DOORS_MISSING =
@@ -382,7 +383,8 @@ object AccountWebApi {
             totpPending = root.flag("totp_pending") || user.flag("totp_pending"),
             mustChangePassword = root.flag("must_change_password") || user.flag("must_change_password"),
             sessions = sessions,
-            providers = providers,
+            providers = providers.filter { it.provider != "amazon" || root.flag("alexa_access_enabled") },
+            alexaAccessEnabled = root.flag("alexa_access_enabled"),
             minPasswordLength = root.number("password_min_length").toInt().takeIf { it >= 8 } ?: 10
         )
     }

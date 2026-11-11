@@ -64,6 +64,7 @@ data class TotpEnrollment(
 /** The server's view of the linked accounts (GET /api/profile_status/). */
 data class AccountStatus(
     val amazonConnected: Boolean = false,
+    val alexaAccessEnabled: Boolean = false,
     /** YouTube Music browser headers work: personalized Home, library, likes. */
     val youtubeLibrary: Boolean = false,
     /** An actual audio sample download passed on the configured audio server. */
@@ -72,7 +73,7 @@ data class AccountStatus(
     val youtubeBrowserAvailable: Boolean = false,
     val youtubeReconnectRequired: Boolean = false
 ) {
-    val allConnected get() = amazonConnected && youtubeLibrary && youtubeCookies
+    val allConnected get() = (!alexaAccessEnabled || amazonConnected) && youtubeLibrary && youtubeCookies
 }
 
 data class AccountUiState(
@@ -147,7 +148,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(stage = AuthStage.SIGNED_IN) }
         viewModelScope.launch {
             val stage = try {
-                Backend.get("/alexa/status/")
+                Backend.get("/api/account")
                 AuthStage.SIGNED_IN
             } catch (e: CancellationException) {
                 throw e
@@ -245,7 +246,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val profile = Backend.get("/api/profile_status/", mapOf("audio_check" to "0")).objectOrEmpty()
                 val status = AccountStatus(
-                    amazonConnected = profile.flag("amazon_connected"),
+                    amazonConnected = profile.flag("alexa_access_enabled") && profile.flag("amazon_connected"),
+                    alexaAccessEnabled = profile.flag("alexa_access_enabled"),
                     youtubeLibrary = profile.flag("youtube_auth_working"),
                     youtubeCookies = _state.value.status?.youtubeCookies ?: false,
                     youtubeCookiesPresent = profile.flag("youtube_cookies_present"),
@@ -303,12 +305,14 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     // ---------- Amazon (Echo control) ----------
 
     fun connectAmazon(email: String = "", password: String = "") {
+        if (_state.value.status?.alexaAccessEnabled != true) return
         accountPoll?.cancel()
         browserFlow = "amazon"
         _state.update { it.copy(browserUrl = absolute("/accounts/amazon"), amazonMessage = null) }
     }
 
     fun disconnectAmazon() {
+        if (_state.value.status?.alexaAccessEnabled != true) return
         runBusy {
             Backend.post("/alexa/amazon_signout/")
             _accountsChanged.tryEmit(Unit)

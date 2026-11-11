@@ -253,7 +253,7 @@ fun AccountSettingsScreen(
 
             if (profile.providers.isNotEmpty()) {
                 AccountSection("Connected services") {
-                    profile.providers.forEach { provider ->
+                    profile.providers.filter { it.provider != "amazon" || profile.alexaAccessEnabled }.forEach { provider ->
                         val label = when (provider.provider) {
                             "amazon" -> "Amazon / Alexa"
                             "youtube" -> "YouTube Music"
