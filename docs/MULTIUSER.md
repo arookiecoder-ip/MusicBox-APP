@@ -9,6 +9,14 @@ rides the existing web session and the existing self-service doors.
 - Test origin: `https://testalexa.synthora.in`
 - Production origin: `https://alexa.synthora.in`
 
+Builds from this branch target the test origin: `app/build.gradle.kts` defaults
+`ALEXA_SESSION_BASE_URL` and `ALEXA_BASE_URL` to `https://testalexa.synthora.in`
+(override with `MULTIUSER_SESSION_BASE_URL` / `MULTIUSER_BASE_URL` in
+`local.properties`), and `Backend.DEFAULT_SERVER` / `AlexaRemotePolicy.DEFAULT_SERVER`
+fall back to the same host. Point them back at production only once
+`alexa.synthora.in` serves the account pages, otherwise the app has no sign-up or
+password recovery and says so on the sign-in screen.
+
 ## What the app uses
 
 | Flow | Transport | Why |

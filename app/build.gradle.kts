@@ -41,15 +41,18 @@ android {
             "\"${properties.getProperty("POSTHOG_HOST", "")}\""
         )
         // Account sessions need a server with web login enabled. Audio can use a separate keyed server.
+        // The multi-user account pages (sign-up, verification, password recovery) only exist on the
+        // multi-user origin, so that origin is the default for this branch; alexa.synthora.in still runs
+        // the pre-multi-user build, whose /signup answers 404.
         buildConfigField(
             "String",
             "ALEXA_SESSION_BASE_URL",
-            "\"${properties.getProperty("ALEXA_SESSION_BASE_URL", "")}\""
+            "\"${properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://testalexa.synthora.in")}\""
         )
         buildConfigField(
             "String",
             "ALEXA_BASE_URL",
-            "\"${properties.getProperty("ALEXA_BASE_URL", "")}\""
+            "\"${properties.getProperty("MULTIUSER_BASE_URL", "https://testalexa.synthora.in")}\""
         )
         buildConfigField(
             "String",
