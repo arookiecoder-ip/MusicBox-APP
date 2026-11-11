@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -135,6 +136,20 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private var browserFlow: String? = null
 
     init {
+        viewModelScope.launch {
+            `in`.synthora.musicbox.services.AmazonAccess.enabled.collect { enabled ->
+                if (!enabled && browserFlow == "amazon") {
+                    accountPoll?.cancel()
+                    browserFlow = null
+                }
+                _state.update { it.copy(
+                    status = it.status?.copy(alexaAccessEnabled = enabled, amazonConnected = enabled && it.status.amazonConnected),
+                    profile = it.profile?.copy(alexaAccessEnabled = enabled, providers = it.profile.providers.filter { row -> row.provider != "amazon" || enabled }),
+                    browserUrl = if (!enabled && it.browserUrl?.contains("/accounts/amazon") == true) null else it.browserUrl,
+                    amazonMessage = if (enabled) it.amazonMessage else null
+                ) }
+            }
+        }
         checkSession()
     }
 
@@ -254,6 +269,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                     youtubeBrowserAvailable = profile.flag("youtube_browser_available"),
                     youtubeReconnectRequired = profile.flag("youtube_browser_reconnect_required")
                 )
+                `in`.synthora.musicbox.services.AmazonAccess.update(status.alexaAccessEnabled)
                 _state.update { it.copy(status = status) }
                 if (checkAudio) {
                     val result = downloadCookies.check()
@@ -416,6 +432,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun signOut() {
+        `in`.synthora.musicbox.services.AmazonAccess.update(false)
         busyJob?.cancel()
         statusJob?.cancel()
         cookieJob?.cancel()
@@ -438,6 +455,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
 
     /** The server no longer accepts the session (expired, revoked or signed out elsewhere). */
     fun sessionEnded() {
+        `in`.synthora.musicbox.services.AmazonAccess.update(false)
         if (_state.value.stage == AuthStage.SIGNED_OUT) return
         Backend.clearSession()
         AccountWebApi.clearSecrets()
@@ -628,6 +646,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             try {
                 val profile = AccountWebApi.profile()
                 val switched = AccountScope.adopt(getApplication(), profile.id, profile.username, profile.email)
+                `in`.synthora.musicbox.services.AmazonAccess.update(profile.alexaAccessEnabled)
                 _state.update { it.copy(profile = profile) }
                 if (switched) _accountSwitched.tryEmit(Unit)
             } catch (e: CancellationException) {

@@ -65,6 +65,7 @@ class EchoController(
 
     private fun applyAccess(enabled: Boolean) {
         _alexaAccessEnabled.value = enabled
+        AmazonAccess.update(enabled)
         if (!enabled) {
             _devices.value = emptyList()
             _amazonConnected.value = null
@@ -721,6 +722,7 @@ class EchoController(
         eventOrder.reset()
         _devices.value = emptyList()
         _alexaAccessEnabled.value = false
+        AmazonAccess.update(false)
         _amazonConnected.value = null
         _state.value = EchoState()
     }
