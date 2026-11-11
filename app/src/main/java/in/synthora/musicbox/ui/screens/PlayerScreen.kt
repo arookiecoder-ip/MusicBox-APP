@@ -178,7 +178,7 @@ fun PlayerScreen(
     val presentation = remember(musicViewModel) {
         musicViewModel.uiState.map { it.copy(position = 0L, queue = emptyList(), queueIndex = -1) }.distinctUntilChanged()
     }
-    val uiState by presentation.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.copy(position = 0L, queue = emptyList(), queueIndex = -1))
+    val uiState by presentation.collectAsStateWithLifecycle(initialValue = remember(musicViewModel) { musicViewModel.uiState.value.copy(position = 0L, queue = emptyList(), queueIndex = -1) })
     val currentTrack = uiState.currentTrack
     var showQueue by remember { mutableStateOf(false) }
     LaunchedEffect(showQueue) { if (showQueue) musicViewModel.refreshQueue() }
@@ -314,7 +314,7 @@ fun PlayerScreen(
             musicViewModel.uiState.map { Triple(it.queue, it.queueIndex, it.currentTrack) }.distinctUntilChanged()
         }
         val queueState by queuePresentation.collectAsStateWithLifecycle(
-            initialValue = musicViewModel.uiState.value.let { Triple(it.queue, it.queueIndex, it.currentTrack) })
+            initialValue = remember(musicViewModel) { musicViewModel.uiState.value.let { Triple(it.queue, it.queueIndex, it.currentTrack) } })
         val prepared by musicViewModel.queueRows.collectAsStateWithLifecycle()
         val preparingRows = queueState.first.isNotEmpty() && prepared.tracks != queueState.first
         val rec by musicViewModel.recStatus.collectAsStateWithLifecycle()
@@ -428,7 +428,7 @@ fun PlayerScreen(
                         PlayerControls(uiState = uiState, musicViewModel = musicViewModel, isLarge = tabletLandscape,
                             modifier = Modifier.padding(top = 8.dp), playButtonSize = if (compact) 60.dp else 72.dp, buttonSize = 48.dp, iconSize = 32.dp, smallIconSize = 24.dp, onSaveToPlaylist = { showAddToPlaylistDialog = currentTrack })
                         Spacer(Modifier.height(16.dp))
-                        if (isAlexa) EchoVolumeRow(volume = echoVolume, enabled = musicViewModel.echo.serial.value.isNotBlank(), onVolumeChange = musicViewModel::setEchoVolume)
+                        if (isAlexa) EchoVolumeRow(volume = echoVolume, enabled = echoSerial.isNotBlank(), onVolumeChange = musicViewModel::setEchoVolume)
                         else if (output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.REMOTE_PHONE)
                             EchoVolumeRow(volume = mobileDevices.firstOrNull { it.id == remoteMobileOutput.owner }?.volume,
                                 enabled = mobileDevices.any { it.id == remoteMobileOutput.owner }, onVolumeChange = musicViewModel::setRemotePhoneVolume)
@@ -832,7 +832,7 @@ private fun ClockedPlayerArtwork(state: MusicUiState, track: Track, lyrics: Bool
         music.uiState.map { it.queue to it.queueIndex }.distinctUntilChanged()
     }
     val queue by queuePresentation.collectAsStateWithLifecycle(
-        initialValue = music.uiState.value.let { it.queue to it.queueIndex })
+        initialValue = remember(music) { music.uiState.value.let { it.queue to it.queueIndex } })
     PlayerArtwork(queue = queue.first, queueIndex = queue.second, currentTrack = track,
         currentPosition = state.position, showLyrics = lyrics, musicViewModel = music,
         isTablet = tablet, onToggleLyrics = toggleLyrics)

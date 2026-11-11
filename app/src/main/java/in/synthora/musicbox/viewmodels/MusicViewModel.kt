@@ -95,6 +95,7 @@ data class MusicUiState(
     val phase: `in`.synthora.musicbox.services.PlaybackPhase = `in`.synthora.musicbox.services.PlaybackPhase.IDLE
 )
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = MusicDatabase.getDatabase(application)

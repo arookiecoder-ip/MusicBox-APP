@@ -1878,9 +1878,9 @@ class PlaybackService : MediaLibraryService() {
             args: Bundle
         ): ListenableFuture<SessionResult> {
             if (controller.uid != android.os.Process.myUid()) return Futures.immediateFuture(
-                SessionResult(SessionResult.RESULT_ERROR_PERMISSION_DENIED))
+                SessionResult(androidx.media3.session.SessionError.ERROR_PERMISSION_DENIED))
             if (customCommand.customAction == NotificationRadio.ACTION) return Futures.immediateFuture(
-                SessionResult(if (NotificationRadio.start(this@PlaybackService)) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_INVALID_STATE))
+                SessionResult(if (NotificationRadio.start(this@PlaybackService)) SessionResult.RESULT_SUCCESS else androidx.media3.session.SessionError.ERROR_INVALID_STATE))
             if (customCommand.customAction == CUSTOM_COMMAND_TOGGLE_FAVORITE_ACTION_ID) {
                 val currentTrackId = player.currentMediaItem?.mediaId
                 if (currentTrackId != null) {

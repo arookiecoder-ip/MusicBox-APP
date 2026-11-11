@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * Controls audio effects (Equalizer and Volume Booster) for media playback.
  * Attaches to ExoPlayer via audio session ID.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class AudioEffectController private constructor(private val context: Context) {
 
     companion object {

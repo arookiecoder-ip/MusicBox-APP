@@ -208,7 +208,7 @@ class MainActivity : ComponentActivity() {
             val themeColorsFlow = remember(musicViewModel) {
                 musicViewModel.uiState.map { it.extractedColors }.distinctUntilChanged()
             }
-            val themeColors by themeColorsFlow.collectAsStateWithLifecycle(initialValue = musicViewModel.uiState.value.extractedColors)
+            val themeColors by themeColorsFlow.collectAsStateWithLifecycle(initialValue = remember(musicViewModel) { musicViewModel.uiState.value.extractedColors })
             val homeViewModel: HomeViewModel = viewModel()
             val libraryViewModel: LibraryViewModel = viewModel()
             val searchViewModel: SearchViewModel = viewModel()
