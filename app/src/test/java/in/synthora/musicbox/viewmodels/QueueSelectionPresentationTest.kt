@@ -35,6 +35,14 @@ class QueueSelectionPresentationTest {
         assertEquals("offline",unavailableEchoSerial(listOf(offline),"removed-serial"))
     }
 
+    @Test fun uncertainEchoAvailabilityDoesNotForceAnOutputFallback() {
+        val unknown=`in`.synthora.musicbox.services.EchoDevice("unknown","Echo",false,availabilityUnknown=true)
+        assertFalse(unknown.online)
+        assertTrue(unknown.canConnect)
+        assertNull(unavailableEchoSerial(listOf(unknown),"unknown"))
+        assertNull(unavailableEchoSerial(listOf(unknown),""))
+    }
+
     @Test fun failedBRemainsSelectedDespiteLatePlayingAndPositionEventsFromA() {
         repeat(5) { event ->
             val old = MusicUiState(currentTrack=a,queue=listOf(a,b),queueIndex=0,isPlaying=true,position=event*1000L)
