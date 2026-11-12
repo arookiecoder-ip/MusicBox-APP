@@ -146,4 +146,29 @@ class EchoControllerLifecycleTest {
         } finally { release.complete(Unit); controller.clear() }
     }
 
+    @Test fun uncertainAvailabilityPreservesOnlyAnExplicitlySavedDevice() = runBlocking {
+        for (saved in listOf("", "uncertain")) {
+            val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("uncertain-default-$saved", Context.MODE_PRIVATE)
+            prefs.edit().clear().putString("echo_serial", saved).commit()
+            val controller = EchoController(this, prefs, { fail(it) }, {}, read = { path, _ ->
+                assertEquals("/alexa/init/", path)
+                buildJsonObject {
+                    put("alexa_access_enabled", true)
+                    put("status", buildJsonObject { put("logged_in", true) })
+                    put("serial", "uncertain")
+                    put("devices", buildJsonArray { add(buildJsonObject {
+                        put("serial", "uncertain"); put("name", "Echo")
+                        put("online", false); put("availability_unknown", true)
+                    }) })
+                }
+            }, write = { _, _ -> error("unexpected write") })
+            try {
+                assertEquals(saved.isNotBlank(), controller.loadDevices())
+                assertEquals(saved, controller.serial.value)
+                assertTrue(controller.devices.value.single().canConnect)
+                assertFalse(controller.devices.value.single().online)
+            } finally { controller.clear() }
+        }
+    }
+
 }

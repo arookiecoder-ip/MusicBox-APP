@@ -225,7 +225,7 @@ class EchoController(
         val chosen = list.firstOrNull { it.serial == saved && it.canConnect }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
         if (chosen != _serial.value) setSerial(chosen)
         init["now_playing"]?.let { np -> if (np is JsonObject) apply(np) }
-        return list.any { it.canConnect }
+        return chosen.isNotBlank()
     }
 
     /** Refresh presence without changing playback, artwork or the selected output. */
