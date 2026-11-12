@@ -698,7 +698,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (!outputChosen) setOutputPreference(if (hasEcho) PlaybackOutput.ALEXA else PlaybackOutput.PHONE)
             val latest = echo.state.value.sharedOutput
-            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null && echo.devices.value.any { it.canConnect && it.serial == latest.serial }) {
+            if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "alexa" && echo.state.value.track != null && echo.devices.value.any { it.online && it.serial == latest.serial }) {
                 adoptRemoteAlexa(latest)
             } else if (initialRequest == playbackRequestId && initialClaim == `in`.synthora.musicbox.services.PhonePlaybackOwnership.token && latest.mode == "phone") {
                 `in`.synthora.musicbox.services.PhonePlaybackOwnership.restoreIfCurrent(latest)
@@ -792,7 +792,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Unknown/removed devices are not a valid renderer either. Discovery or the
         // next foreground reconciliation can restore an online selection.
-        if (echo.devices.value.none { it.canConnect && (output.serial.isBlank() || it.serial == output.serial) }) return
+        if (echo.devices.value.none { it.online && (output.serial.isBlank() || it.serial == output.serial) }) return
         if (expectedClaim != null && expectedClaim != `in`.synthora.musicbox.services.PhonePlaybackOwnership.token) return
         phoneQueueSyncJob?.cancel()
         playlistBackfillJob?.cancel()
@@ -2852,5 +2852,5 @@ internal fun selectionPresented(state: MusicUiState, trackId: String, index: Int
 
 /** An empty server serial after restart must not strand a saved queue on an offline Echo. */
 internal fun unavailableEchoSerial(devices: List<`in`.synthora.musicbox.services.EchoDevice>, selected: String): String? =
-    devices.firstOrNull { it.serial == selected && !it.canConnect }?.serial
-        ?: devices.takeIf { it.isNotEmpty() && it.none { device -> device.canConnect } }?.first()?.serial
+    devices.firstOrNull { it.serial == selected && !it.online }?.serial
+        ?: devices.takeIf { it.isNotEmpty() && it.none { device -> device.online } }?.first()?.serial

@@ -37,10 +37,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-data class EchoDevice(val serial: String, val name: String, val online: Boolean,
-    val controllable: Boolean = true, val availabilityUnknown: Boolean = false) {
-    val canConnect: Boolean get() = online || availabilityUnknown
-}
+data class EchoDevice(val serial: String, val name: String, val online: Boolean, val controllable: Boolean = true)
 
 /**
  * Echo playback through the server's web-remote endpoints: device list, now-playing polling
@@ -218,14 +215,14 @@ class EchoController(
         val loggedIn = init["status"].objectOrEmpty().flag("logged_in")
         _amazonConnected.value = loggedIn
         val list = init.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"), it.flag("availability_unknown"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
         _devices.value = list
         val online = list.filter { it.online }
-        val chosen = list.firstOrNull { it.serial == saved && it.canConnect }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
+        val chosen = online.firstOrNull { it.serial == saved }?.serial ?: online.firstOrNull { it.serial == init.text("serial") }?.serial ?: online.firstOrNull()?.serial.orEmpty()
         if (chosen != _serial.value) setSerial(chosen)
         init["now_playing"]?.let { np -> if (np is JsonObject) apply(np) }
-        return list.any { it.canConnect }
+        return list.any { it.online }
     }
 
     /** Refresh presence without changing playback, artwork or the selected output. */
@@ -239,7 +236,7 @@ class EchoController(
         if (epoch != mutationEpoch) return
         response["amazon_connected"]?.let { _amazonConnected.value = response.flag("amazon_connected") }
         _devices.value = response.array("devices").map { it.objectOrEmpty() }.map {
-            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"), it.flag("availability_unknown"))
+            EchoDevice(it.text("serial"), it.text("name").ifBlank { it.text("serial") }, it.flag("online"), !it.flag("logged_out"))
         }.filter { it.serial.isNotBlank() }
     }
 
