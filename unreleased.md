@@ -1,5 +1,12 @@
 # Unreleased
 
+## 2.5.1
+
+- Guide password, email and authenticator updates through verified steps with code timers.
+- Group account settings and keep each connected service in one place.
+- Remove download-cookie controls from account screens.
+
+
 ## Overview
 
 This document tracks changes, features, and bug fixes implemented after the **v2.3.2-beta** release (2026-04-27).

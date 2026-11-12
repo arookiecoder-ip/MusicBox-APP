@@ -22,10 +22,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -75,6 +77,9 @@ fun AccountSettingsScreen(
     val profile = state.profile
     val haptic = rememberJukeHaptics()
     var dialog by remember { mutableStateOf<AccountDialog?>(null) }
+    LaunchedEffect(state.actionKey, state.actionMessage) {
+        if (state.actionKey == ACTION_EMAIL && state.actionMessage != null) dialog = AccountDialog.VERIFY_EMAIL
+    }
     LaunchedEffect(state.totp) {
         if (state.totp != null) dialog = AccountDialog.TOTP_CONFIRM
     }
@@ -123,7 +128,7 @@ fun AccountSettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(56.dp).glassPane(RoundedCornerShape(4.dp), GlassLevel.Thick),
+                    Modifier.size(56.dp).glassPane(RoundedCornerShape(8.dp), GlassLevel.Thick),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -184,11 +189,12 @@ fun AccountSettingsScreen(
                 AccountActionRow("Email", profile.email.ifBlank { "Not set" }, "Change") {
                     dialog = AccountDialog.CHANGE_EMAIL
                 }
-                AccountActionRow("Password", "Last changed by you or an administrator", "Change") {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                AccountActionRow("Password", "Verify your identity to choose a new password", "Change") {
                     dialog = AccountDialog.CHANGE_PASSWORD
                 }
                 Text(
-                    "Changing your email signs out other devices. Changing your password does too if you choose.",
+                    "Security changes can sign out other devices. This device stays signed in.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp)
@@ -204,6 +210,9 @@ fun AccountSettingsScreen(
                 if (profile.totpPending) {
                     Text("A new authenticator is waiting to be confirmed.", color = MaterialTheme.colorScheme.primary,
                         style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                }
+                if (profile.totpEnabled) {
+                    TextButton(onClick = { dialog = AccountDialog.TOTP_BEGIN }, enabled = !state.busy) { Text("Change authenticator") }
                 }
                 TextButton(
                     onClick = {
@@ -251,36 +260,6 @@ fun AccountSettingsScreen(
                 }
             }
 
-            if (profile.providers.isNotEmpty()) {
-                AccountSection("Connected services") {
-                    profile.providers.filter { it.provider != "amazon" || profile.alexaAccessEnabled }.forEach { provider ->
-                        val label = when (provider.provider) {
-                            "amazon" -> "Amazon / Alexa"
-                            "youtube" -> "YouTube Music"
-                            else -> provider.provider.replaceFirstChar(Char::uppercase)
-                        }
-                        Row(
-                            Modifier.fillMaxWidth().padding(vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(label, style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    provider.detail.ifBlank { if (provider.connected) "Connected" else "Not connected" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            if (provider.connected) {
-                                TextButton(
-                                    onClick = { haptic.click(); account.disconnectProvider(provider.provider) },
-                                    enabled = !state.busy
-                                ) { Text("Disconnect") }
-                            }
-                        }
-                    }
-                }
-            }
 
             AccountSection("Delete account", danger = true) {
                 Text(
@@ -321,14 +300,14 @@ private fun AccountSection(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .glassPane(RoundedCornerShape(4.dp), GlassLevel.Regular)
+            .padding(vertical = 10.dp)
+            .glassPane(RoundedCornerShape(8.dp), GlassLevel.Regular)
             .border(
                 1.dp,
                 if (danger) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
-                RoundedCornerShape(4.dp)
+                RoundedCornerShape(8.dp)
             )
-            .padding(16.dp)
+            .padding(20.dp)
     ) {
         Text(
             title,
@@ -343,7 +322,7 @@ private fun AccountSection(
 
 @Composable
 private fun AccountActionRow(title: String, detail: String, action: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -368,29 +347,56 @@ private fun DismissOnAction(state: AccountUiState, key: String, onDismiss: () ->
 }
 
 @Composable
+private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel, purpose: String, code: String, onCode: (String) -> Unit) {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.codeExpiresAt, state.codeResendAt) {
+        while (true) { now = System.currentTimeMillis(); delay(1000) }
+    }
+    val wait = ((state.codeResendAt - now + 999) / 1000).coerceAtLeast(0)
+    val remaining = ((state.codeExpiresAt - now + 999) / 1000).coerceAtLeast(0)
+    val destination = if (purpose == "verify") state.profile?.pendingEmail?.ifBlank { state.profile?.email.orEmpty() }.orEmpty() else state.profile?.email.orEmpty()
+    Text("Code delivery: $destination", style = MaterialTheme.typography.bodyMedium)
+    TextButton(onClick = { when (purpose) { "reset" -> account.sendPasswordResetCode(); "verify" -> account.resendEmailVerification(); else -> account.sendEmailCode() } }, enabled = !state.busy && wait == 0L) {
+        Text(if (wait > 0) "Resend in ${wait}s" else "Send code")
+    }
+    GlassTextField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Verification code", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+    if (state.codeExpiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
 private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var current by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
-    val keyboard = LocalSoftwareKeyboardController.current
+    var verified by remember { mutableStateOf(false) }
+    val mailbox = !state.profile?.email.isNullOrBlank()
     DismissOnAction(state, ACTION_PASSWORD, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
-        title = { Text("Change password") },
+        title = { Text(if (verified) "Choose your password" else "Verify your identity") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Use at least ${state.profile?.minPasswordLength ?: 10} characters.")
-                GlassTextField(current, { current = it }, "Current password", password = true)
-                GlassTextField(password, { password = it }, "New password", password = true)
-                GlassTextField(confirm, { confirm = it }, "Repeat the new password", password = true)
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (verified) "Step 2 of 2" else "Step 1 of 2", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!verified) {
+                    if (mailbox) SecurityCodeFields(state, account, "reset", code, { code = it })
+                    else GlassTextField(current, { current = it }, "Current password", password = true)
+                } else {
+                    Text("Use at least ${state.profile?.minPasswordLength ?: 10} characters.")
+                    GlassTextField(password, { password = it }, "New password", password = true)
+                    GlassTextField(confirm, { confirm = it }, "Confirm new password", password = true)
+                }
                 DialogError(state)
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { keyboard?.hide(); account.changePassword(current, password, confirm) },
-                enabled = !state.busy && current.isNotBlank() && password.length >= 8 && password == confirm
-            ) { Text("Change password") }
+            TextButton(onClick = {
+                if (!verified) {
+                    if (mailbox) account.verifySecurityCode("reset", code) { verified = true }
+                    else account.verifyIdentity(current) { verified = true }
+                } else if (mailbox) account.resetPasswordWithCode(code, password, confirm)
+                else account.changePassword(current, password, confirm)
+            }, enabled = !state.busy) { Text(if (verified) "Save password" else "Verify and continue") }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
@@ -398,46 +404,30 @@ private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewMode
 
 @Composable
 private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
-    var email by rememberSaveable { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var code by rememberSaveable { mutableStateOf("") }
-    var sent by rememberSaveable { mutableStateOf(false) }
-    val keyboard = LocalSoftwareKeyboardController.current
-    DismissOnAction(state, ACTION_EMAIL, onDismiss)
+    var code by remember { mutableStateOf("") }
+    var verified by remember { mutableStateOf(state.profile?.email.isNullOrBlank()) }
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
-        title = { Text("Change email") },
+        title = { Text(if (verified) "New email address" else "Verify your current email") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    if (sent) "Enter the code sent to your current address."
-                    else "We first send a code to the address on the account."
-                )
-                GlassTextField(
-                    email, { email = it.trimStart() }, "New email address",
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Email)
-                )
-                GlassTextField(password, { password = it }, "Current password", password = true)
-                if (sent) {
-                    GlassTextField(
-                        code, { value -> code = value.filter(Char::isDigit).take(6) }, "6-digit code",
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(if (verified) "Step 2 of 3" else "Step 1 of 3", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!verified) SecurityCodeFields(state, account, "reauth", code, { code = it })
+                else {
+                    GlassTextField(email, { email = it.trimStart() }, "New email address", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Email))
+                    GlassTextField(password, { password = it }, "Current password", password = true)
+                    Text("A code will be sent to your new address to finish the change.")
                 }
                 DialogError(state)
-                if (!sent) {
-                    TextButton(
-                        onClick = { keyboard?.hide(); account.sendEmailCode(); sent = true },
-                        enabled = !state.busy
-                    ) { Text("Send code to current address") }
-                }
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = { keyboard?.hide(); account.changeEmail(email, password, code) },
-                enabled = !state.busy && sent && email.contains('@') && password.isNotBlank() && code.length == 6
-            ) { Text("Save email") }
+            TextButton(onClick = {
+                if (!verified) account.verifySecurityCode("reauth", code) { verified = true }
+                else account.changeEmail(email, password, code)
+            }, enabled = !state.busy) { Text(if (verified) "Send confirmation code" else "Verify and continue") }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
@@ -445,7 +435,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
 
 @Composable
 private fun VerifyEmailDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
-    var code by rememberSaveable { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
     val keyboard = LocalSoftwareKeyboardController.current
     DismissOnAction(state, ACTION_VERIFY, onDismiss)
     GlassAlertDialog(
@@ -453,15 +443,8 @@ private fun VerifyEmailDialog(state: AccountUiState, account: AccountViewModel, 
         title = { Text("Confirm email") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Type the 6-digit code from your inbox.")
-                GlassTextField(
-                    code, { value -> code = value.filter(Char::isDigit).take(6) }, "000000", centered = true,
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                        keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done
-                    )
-                )
+                SecurityCodeFields(state, account, "verify", code, { code = it })
                 DialogError(state)
-                TextButton(onClick = account::resendEmailVerification, enabled = !state.busy) { Text("Send a new code") }
             }
         },
         confirmButton = {
@@ -477,29 +460,20 @@ private fun VerifyEmailDialog(state: AccountUiState, account: AccountViewModel, 
 @Composable
 private fun BeginTotpDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
-    var emailCode by rememberSaveable { mutableStateOf("") }
-    val keyboard = LocalSoftwareKeyboardController.current
+    var emailCode by remember { mutableStateOf("") }
+    var verified by remember { mutableStateOf(state.profile?.email.isNullOrBlank()) }
     GlassAlertDialog(
-        onDismissRequest = { if (!state.busy) onDismiss() },
-        title = { Text("Set up two-factor") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Confirm your password. If this account has an email address, the server may also ask for an emailed code.")
-                GlassTextField(password, { password = it }, "Current password", password = true)
-                GlassTextField(
-                    emailCode, { value -> emailCode = value.filter(Char::isDigit).take(6) }, "Email code (if required)",
-                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-                )
-                TextButton(onClick = account::sendEmailCode, enabled = !state.busy) { Text("Send email code") }
-                DialogError(state)
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { keyboard?.hide(); account.beginTotp(password, emailCode) },
-                enabled = !state.busy && password.isNotBlank()
-            ) { Text("Continue") }
-        },
+        onDismissRequest = { if (!state.busy) onDismiss() }, title = { Text("Set up authenticator") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (verified) "Confirm your password to create a setup key." else "First, verify your email.")
+            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it })
+            else GlassTextField(password, { password = it }, "Current password", password = true)
+            DialogError(state)
+        } },
+        confirmButton = { TextButton(onClick = {
+            if (!verified) account.verifySecurityCode("reauth", emailCode) { verified = true }
+            else account.beginTotp(password, emailCode)
+        }, enabled = !state.busy) { Text(if (verified) "Create setup key" else "Verify and continue") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
@@ -567,27 +541,23 @@ private fun TotpConfirmDialog(
 @Composable
 private fun DisableTotpDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var password by remember { mutableStateOf("") }
-    var emailCode by rememberSaveable { mutableStateOf("") }
-    val keyboard = LocalSoftwareKeyboardController.current
+    var emailCode by remember { mutableStateOf("") }
+    var verified by remember { mutableStateOf(false) }
     DismissOnAction(state, ACTION_TOTP_OFF, onDismiss)
     GlassAlertDialog(
-        onDismissRequest = { if (!state.busy) onDismiss() },
-        title = { Text("Turn off two-factor") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Confirm the password on this account. An emailed code may also be required.")
+        onDismissRequest = { if (!state.busy) onDismiss() }, title = { Text("Remove authenticator") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it })
+            else {
+                Text("Confirm your password to turn off two-factor sign-in.")
                 GlassTextField(password, { password = it }, "Current password", password = true)
-                GlassTextField(emailCode, { value -> emailCode = value.filter(Char::isDigit).take(6) }, "Email code (if required)")
-                TextButton(onClick = account::sendEmailCode, enabled = !state.busy) { Text("Send email code") }
-                DialogError(state)
             }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { keyboard?.hide(); account.disableTotp(password, emailCode) },
-                enabled = !state.busy && password.isNotBlank()
-            ) { Text("Turn off") }
-        },
+            DialogError(state)
+        } },
+        confirmButton = { TextButton(onClick = {
+            if (!verified) account.verifySecurityCode("reauth", emailCode) { verified = true }
+            else account.disableTotp(password, emailCode)
+        }, enabled = !state.busy) { Text(if (verified) "Remove authenticator" else "Verify and continue") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }

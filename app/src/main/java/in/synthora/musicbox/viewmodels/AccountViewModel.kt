@@ -74,7 +74,7 @@ data class AccountStatus(
     val youtubeBrowserAvailable: Boolean = false,
     val youtubeReconnectRequired: Boolean = false
 ) {
-    val allConnected get() = (!alexaAccessEnabled || amazonConnected) && youtubeLibrary && youtubeCookies
+    val allConnected get() = (!alexaAccessEnabled || amazonConnected) && youtubeLibrary
 }
 
 data class AccountUiState(
@@ -89,6 +89,8 @@ data class AccountUiState(
     val actionKey: String? = null,
     val totp: TotpEnrollment? = null,
     val busy: Boolean = false,
+    val codeExpiresAt: Long = 0,
+    val codeResendAt: Long = 0,
     val cookieBusy: Boolean = false,
     val cookieMessage: String? = null,
     val cookieSaved: Long = 0,
@@ -605,6 +607,12 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update { it.copy(stage = AuthStage.RESET_PASSWORD, door = AuthDoorState(csrf = csrf), error = null) }
     }
 
+    fun verifyResetCode(identifier: String, code: String, onVerified: () -> Unit) = runBusy {
+        AccountWebApi.checkResetCode(_state.value.door.csrf, identifier.trim(), code)
+        _state.update { it.copy(door = it.door.copy(username = identifier.trim(), message = "", fieldErrors = emptyMap())) }
+        onVerified()
+    }
+
     fun submitResetPassword(code: String, password: String, confirmPassword: String) = runBusy {
         val identifier = _state.value.door.username
         val errors = buildMap {
@@ -676,7 +684,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: BackendAuthException) {
                 sessionEnded()
             } catch (e: AccountWebApi.AccountActionException) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = e.message,
+                    codeResendAt = if (e.retryAfterSeconds > 0) System.currentTimeMillis() + e.retryAfterSeconds * 1000 else it.codeResendAt) }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: "Couldn't update your account.") }
             } finally {
@@ -690,30 +699,57 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             AccountWebApi.changePassword(currentPassword, newPassword, confirmPassword)
         }
 
+    private fun recordCodeTiming(result: JsonObject): JsonObject {
+        _state.update { it.copy(
+            codeExpiresAt = ((result.text("expires_at").toDoubleOrNull() ?: 0.0) * 1000).toLong(),
+            codeResendAt = ((result.text("resend_at").toDoubleOrNull() ?: 0.0) * 1000).toLong()
+        ) }
+        return result
+    }
+
+    fun verifySecurityCode(purpose: String, code: String, onVerified: () -> Unit) = accountAction("Code verified.") {
+        AccountWebApi.checkAccountCode(purpose, code).also { onVerified() }
+    }
+
+    fun verifyIdentity(password: String, onVerified: () -> Unit) = accountAction("Identity verified.") {
+        AccountWebApi.checkIdentity(password).also { onVerified() }
+    }
+
     fun sendPasswordResetCode() = accountAction("Reset code sent.") {
-        AccountWebApi.sendPasswordResetCode()
+        recordCodeTiming(AccountWebApi.sendPasswordResetCode())
     }
 
     fun resetPasswordWithCode(code: String, newPassword: String, confirmPassword: String, signOutOthers: Boolean = true) =
-        accountAction("Password changed.") {
+        accountAction("Password changed.", key = ACTION_PASSWORD) {
             AccountWebApi.resetPasswordSignedIn(code, newPassword, confirmPassword, signOutOthers)
         }
 
     fun sendEmailCode() = accountAction("Verification code sent.") {
-        AccountWebApi.sendEmailCode()
+        recordCodeTiming(AccountWebApi.sendEmailCode())
     }
 
     fun changeEmail(email: String, currentPassword: String, emailCode: String) =
         accountAction("Check your new address for a confirmation code.", key = ACTION_EMAIL) {
-            AccountWebApi.updateEmail(email, currentPassword, emailCode)
+            recordCodeTiming(AccountWebApi.updateEmail(email, currentPassword, emailCode))
         }
 
     fun resendEmailVerification() = accountAction("Verification code sent.") {
-        AccountWebApi.resendVerificationCode()
+        recordCodeTiming(AccountWebApi.resendVerificationCode())
     }
 
     fun confirmEmail(code: String) = accountAction("Email confirmed.", key = ACTION_VERIFY) {
-        AccountWebApi.confirmVerificationCode(code)
+        AccountWebApi.confirmVerificationCode(code).also { result ->
+            if (result.text("sign_in_required") == "true") {
+                Backend.clearSession()
+                AccountWebApi.clearSecrets()
+                accountPoll?.cancel()
+                statusJob?.cancel()
+                `in`.synthora.musicbox.services.AmazonAccess.update(false)
+                AccountScope.forget(getApplication())
+                _state.update { it.copy(stage = AuthStage.SIGNED_OUT, profile = null, error = null,
+                    door = AuthDoorState(message = "Your email was updated. Sign in with your new address.")) }
+            }
+        }
     }
 
     fun revokeSession(sessionId: String) = accountAction("Device signed out.") {
@@ -780,7 +816,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             } catch (e: BackendAuthException) {
                 sessionEnded()
             } catch (e: AccountWebApi.AccountActionException) {
-                _state.update { it.copy(error = e.message) }
+                _state.update { it.copy(error = e.message,
+                    codeResendAt = if (e.retryAfterSeconds > 0) System.currentTimeMillis() + e.retryAfterSeconds * 1000 else it.codeResendAt) }
             } catch (e: Exception) {
                 _state.update { it.copy(error = e.message ?: "Couldn't delete the account.") }
             } finally {

@@ -174,6 +174,15 @@ object AccountWebApi {
             ?: throw AccountActionException("The password reset page could not be read. Try again.")
     }
 
+    suspend fun checkResetCode(csrf: String, identifier: String, code: String) {
+        val response = Backend.formPost("/reset-password", mapOf("_csrf" to csrf, "identifier" to identifier, "code" to code, "verify_only" to "1"))
+        val payload = runCatching { kotlinx.serialization.json.Json.parseToJsonElement(response.body) as? JsonObject }.getOrNull()
+        if (response.status !in 200..299 || payload?.get("ok")?.toString() != "true") {
+            val detail = payload?.get("error") as? JsonObject
+            throw AccountActionException(detail?.text("message") ?: "This code could not be verified. Check the account and code, or send a new one.")
+        }
+    }
+
     suspend fun resetPassword(
         csrf: String,
         identifier: String,
@@ -239,6 +248,12 @@ object AccountWebApi {
         put("confirm_password", confirmPassword)
         put("sign_out_others", signOutOthers)
     })
+
+    suspend fun checkAccountCode(purpose: String, code: String): JsonObject =
+        mutate("/api/account/code/check", buildJsonObject { put("purpose", purpose); put("code", code) })
+
+    suspend fun checkIdentity(password: String): JsonObject =
+        mutate("/api/account/identity/check", buildJsonObject { put("current_password", password) })
 
     suspend fun sendEmailCode(): JsonObject = mutate("/api/account/email/reauth", JsonObject(emptyMap()))
 

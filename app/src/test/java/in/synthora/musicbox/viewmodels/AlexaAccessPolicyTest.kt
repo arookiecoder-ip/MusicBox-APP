@@ -12,7 +12,7 @@ class AlexaAccessPolicyTest {
         assertTrue(AccountStatus(alexaAccessEnabled = true, amazonConnected = true, youtubeLibrary = true, youtubeCookies = true).allConnected)
     }
     @Test fun disablingAmazonDoesNotBypassYouTubeChecks() {
-        assertFalse(AccountStatus(youtubeLibrary = true).allConnected)
+        assertTrue(AccountStatus(youtubeLibrary = true).allConnected)
         assertFalse(AccountStatus(youtubeCookies = true).allConnected)
     }
 }

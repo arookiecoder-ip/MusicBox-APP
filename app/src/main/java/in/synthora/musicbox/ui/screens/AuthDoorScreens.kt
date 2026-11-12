@@ -255,13 +255,15 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
     var code by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
+    var verified by remember { mutableStateOf(false) }
     val busy = state.busy
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val haptic = rememberJukeHaptics()
 
-    DoorTitle("Choose a new password", "Enter the code from your email and a new password. Every other device is signed out.")
+    DoorTitle(if (verified) "Choose a new password" else "Verify your reset code", if (verified) "Your code is verified. Set a new password to finish." else "Enter your account and the six-digit code from your email.")
     DoorMessage(state)
+    if (!verified) {
     GlassTextField(
         value = identifier,
         onValueChange = { identifier = it.trimStart().take(254) },
@@ -278,6 +280,7 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Next)
     )
     DoorFieldError(state, "code")
+    } else {
     Spacer(Modifier.height(10.dp))
     GlassTextField(
         value = password,
@@ -302,11 +305,13 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
         })
     )
     DoorFieldError(state, "confirm_password")
+    }
     Spacer(Modifier.height(20.dp))
-    SubmitButton("Change password", busy) {
+    SubmitButton(if (verified) "Change password" else "Verify code", busy) {
         haptic.click()
         keyboard?.hide()
-        account.submitResetPassword(code, password, confirmPassword)
+        if (verified) account.submitResetPassword(code, password, confirmPassword)
+        else account.verifyResetCode(identifier, code) { verified = true }
     }
     TextButton(onClick = account::backToSignIn) { Text("Back to sign in") }
 }

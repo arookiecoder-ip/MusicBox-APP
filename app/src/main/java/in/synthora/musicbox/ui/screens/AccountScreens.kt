@@ -43,24 +43,13 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.Speaker
-import androidx.compose.material.icons.outlined.Cookie
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.platform.LocalContext
-import `in`.synthora.musicbox.network.Backend
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -433,137 +422,45 @@ fun AccountCheckScreen(state: AccountUiState, account: AccountViewModel) {
 /** Amazon and YouTube Music connection rows with their connect actions (sign-in check and Settings). */
 @Composable
 fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
-    var showAmazonDialog by remember { mutableStateOf(false) }
-    var showCookies by remember { mutableStateOf(false) }
+    var managing by remember { mutableStateOf<String?>(null) }
     val status = state.status
     val checking = status == null || state.checkingStatus
-
     GlassCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(vertical = 8.dp)) {
             if (status?.alexaAccessEnabled == true) AccountRow(
                 icon = Icons.Outlined.Speaker,
                 title = "Echo (Amazon)",
-                detail = state.amazonMessage ?: if (status?.amazonConnected == true) "Controls your Echo devices" else "Needed to play on Echo",
-                ok = status?.amazonConnected,
+                detail = state.amazonMessage ?: if (status.amazonConnected) "Connected to your Echo devices" else "Needed to play on Echo",
+                ok = status.amazonConnected,
                 checking = checking && status == null,
-                action = if (status?.amazonConnected == true) "Change account" else "Sign in",
-                onAction = { account.connectAmazon() }
+                action = if (status.amazonConnected) "Manage" else "Sign in",
+                onAction = { if (status.amazonConnected) managing = "amazon" else account.connectAmazon() }
             )
             AccountRow(
                 icon = Icons.Outlined.MusicNote,
                 title = "YouTube Music",
-                detail = state.youtubeMessage ?: if (status?.youtubeLibrary == true) "Personalized Home, library and likes"
-                else "Home shows trending music until you connect",
+                detail = state.youtubeMessage ?: if (status?.youtubeLibrary == true) "Connected to your library and likes" else "Connect for your playlists and likes",
                 ok = status?.youtubeLibrary,
                 checking = checking && status == null,
-                action = if (status?.youtubeLibrary == true) "Change account" else "Sign in",
-                onAction = { account.connectYouTube(retry = status?.youtubeReconnectRequired == true) }
+                action = if (status?.youtubeLibrary == true) "Manage" else "Sign in",
+                onAction = { if (status?.youtubeLibrary == true) managing = "youtube" else account.connectYouTube(retry = status?.youtubeReconnectRequired == true) }
             )
-            DownloadCookieControls(state, account::testDownloadCookies, { showCookies = true })
         }
     }
-
-    if (showCookies) {
-        DownloadCookiesDialog(state, account, onDismiss = { showCookies = false })
-    }
-    if (showAmazonDialog) {
-        AmazonSignInDialog(
-            busy = state.busy,
-            onDismiss = { showAmazonDialog = false },
-            onConnect = { email, password ->
-                account.connectAmazon(email, password)
-                showAmazonDialog = false
-            }
+    managing?.let { provider ->
+        GlassAlertDialog(
+            onDismissRequest = { managing = null },
+            title = { Text(if (provider == "amazon") "Amazon connection" else "YouTube Music connection") },
+            text = { Column {
+                Text("Change the connected account or disconnect this service.")
+                TextButton(onClick = { managing = null; account.disconnectProvider(provider) }, enabled = !state.busy) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
+            } },
+            confirmButton = { TextButton(onClick = {
+                managing = null
+                if (provider == "amazon") account.connectAmazon() else account.connectYouTube()
+            }, enabled = !state.busy) { Text("Change account") } },
+            dismissButton = { TextButton(onClick = { managing = null }) { Text("Cancel") } }
         )
-    }
-}
-
-@Composable
-private fun DownloadCookiesDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
-    // Export text remains in memory only and is discarded on close or successful save.
-    var export by remember { mutableStateOf("") }
-    var fileError by remember { mutableStateOf<String?>(null) }
-    var reading by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val keyboard = LocalSoftwareKeyboardController.current
-    val initialSaved = remember { state.cookieSaved }
-    val busy = state.cookieBusy || reading
-    LaunchedEffect(state.cookieSaved) {
-        if (state.cookieSaved != initialSaved) { export = ""; onDismiss() }
-    }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch {
-            reading = true
-            try {
-                val contents = withContext(Dispatchers.IO) {
-                    context.contentResolver.openInputStream(uri)?.use { stream ->
-                        val output = java.io.ByteArrayOutputStream()
-                        val buffer = ByteArray(4096)
-                        while (output.size() <= 128 * 1024) {
-                            val count = stream.read(buffer, 0, minOf(buffer.size, 128 * 1024 + 1 - output.size()))
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
-                        }
-                        val bytes = output.toByteArray()
-                        require(bytes.size <= 128 * 1024) { "Cookie export must be smaller than 128 KB." }
-                        bytes.toString(Charsets.UTF_8)
-                    } ?: error("Could not open the cookie file.")
-                }
-                export = contents; fileError = null
-            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { fileError = e.message ?: "Could not read cookie file." }
-            finally { reading = false }
-        }
-    }
-    GlassAlertDialog(
-        shape = RoundedCornerShape(4.dp),
-        onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("Replace download cookies") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Server: ${Backend.audioBaseUrl}")
-                Text("Upload or paste a Netscape cookies.txt export. The server tests an audio download before saving. A failed test keeps the existing cookies. Library sign-in is separate.")
-                OutlinedTextField(export, { export = it; fileError = null }, label = { Text("Cookie export") },
-                    modifier = Modifier.fillMaxWidth().testTag("download-cookie-export"), minLines = 3, maxLines = 6,
-                    enabled = !busy, visualTransformation = PasswordVisualTransformation())
-                TextButton(onClick = {
-                    val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                    export = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
-                    fileError = if (export.isBlank()) "The clipboard is empty." else null
-                    keyboard?.hide()
-                }, enabled = !busy) { Text("Paste from clipboard") }
-                TextButton(onClick = { keyboard?.hide(); picker.launch(arrayOf("*/*")) }, enabled = !busy) { Text("Choose cookies.txt") }
-                if (export.isNotBlank()) Text("${export.lineSequence().count()} lines loaded", style = MaterialTheme.typography.bodySmall)
-                (fileError ?: state.cookieMessage)?.let { Text(it) }
-                if (busy) CircularProgressIndicator(Modifier.size(24.dp))
-            }
-        },
-        confirmButton = { TextButton(onClick = { keyboard?.hide(); account.replaceDownloadCookies(export) },
-            enabled = !busy && export.isNotBlank()) { Text("Test and save") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") } }
-    )
-}
-
-/** Audio access is an explicit action, independent of account-library status refresh. */
-@Composable
-internal fun DownloadCookieControls(state: AccountUiState, onCheck: () -> Unit, onReplace: () -> Unit) {
-    AccountRow(
-        icon = Icons.Outlined.Cookie,
-        title = "Download cookies",
-        detail = state.cookieMessage ?: if (state.status?.youtubeCookies == true) "Audio download passed"
-            else "Test audio access or upload replacement cookies",
-        ok = state.status?.youtubeCookies,
-        checking = state.cookieBusy,
-        action = null,
-        onAction = {}
-    )
-    Text("Audio server: ${Backend.audioBaseUrl}", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        androidx.compose.material3.Button(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp),
-            onClick = onCheck, enabled = !state.cookieBusy) { Text(if (state.cookieBusy) "Checking…" else "Check again") }
-        androidx.compose.material3.FilledTonalButton(modifier = Modifier.weight(1f), shape = RoundedCornerShape(4.dp),
-            onClick = onReplace, enabled = !state.cookieBusy) { Text("Replace cookies") }
     }
 }
 
@@ -645,10 +542,10 @@ private fun AmazonSignInDialog(busy: Boolean, onDismiss: () -> Unit, onConnect: 
 fun AccountStatus.summary(): String = when {
     !alexaAccessEnabled && allConnected -> "YouTube Music connected"
     !alexaAccessEnabled && !youtubeLibrary -> "YouTube Music needs connecting"
-    !alexaAccessEnabled -> "YouTube cookies need renewing"
+    !alexaAccessEnabled -> "Your music accounts are connected"
     allConnected -> "Amazon and YouTube Music connected"
     !amazonConnected && !youtubeLibrary -> "Amazon and YouTube Music need connecting"
     !amazonConnected -> "Amazon needs connecting"
     !youtubeLibrary -> "YouTube Music needs connecting"
-    else -> "YouTube cookies need renewing"
+    else -> "Your music accounts are connected"
 }
