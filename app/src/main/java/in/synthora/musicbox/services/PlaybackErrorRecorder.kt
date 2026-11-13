@@ -11,6 +11,7 @@ import kotlinx.coroutines.channels.Channel
 import java.io.File
 
 /** One process-wide consumer; no polling, wake locks, or writes for ordinary playback. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal object PlaybackErrorRecorder {
     private const val LIMIT = 24_000
     private val diskLock = Any()

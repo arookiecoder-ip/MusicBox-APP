@@ -27,7 +27,7 @@ class PlaybackEventAuthenticationTest {
         val context = RuntimeEnvironment.getApplication()
         val preferences = context.getSharedPreferences("legacy-event-auth", Context.MODE_PRIVATE)
         preferences.edit().clear().putString("echo_serial", "speaker").commit()
-        val cookies = PersistentCookieJar(preferences)
+        val cookies = PersistentCookieJar(preferences, { it }, { it })
         val server = MockWebServer()
         val validated = CompletableDeferred<Unit>()
         val headers = mutableListOf<String?>()
@@ -36,7 +36,7 @@ class PlaybackEventAuthenticationTest {
                 synchronized(headers) { headers += request.getHeader("Cookie") }
                 if (request.path?.startsWith("/api/app/events/") == true) return MockResponse().setResponseCode(401)
                 if (request.getHeader("Cookie") != "session=valid-owner") return MockResponse().setResponseCode(401)
-                if (request.path == "/alexa/status/") return MockResponse().setBody("{}")
+                if (request.path == "/api/account") return MockResponse().setBody("{}")
                 return MockResponse().setBody("""{"video_id":"abcdefghijk","title":"Polling still works"}""")
             }
         }
@@ -54,7 +54,7 @@ class PlaybackEventAuthenticationTest {
                         Json.parseToJsonElement(it.body!!.string())
                     }
                 }
-                if (path == "/alexa/status/") validated.complete(Unit)
+                if (path == "/api/account") validated.complete(Unit)
                 result
             }, events = { playbackEventStream(client, server.url("/api/app/events/")) })
         try {
@@ -64,7 +64,7 @@ class PlaybackEventAuthenticationTest {
             assertEquals("Polling still works", controller.state.value.track?.title)
             assertEquals(0, signOuts)
             assertTrue(cookies.hasCookies())
-            assertTrue(PersistentCookieJar(preferences).hasCookies())
+            assertTrue(PersistentCookieJar(preferences, { it }, { it }).hasCookies())
             assertTrue(synchronized(headers) { headers.size >= 3 && headers.all { it == "session=valid-owner" } })
         } finally {
             controller.clear(); owner.cancel()
@@ -78,7 +78,7 @@ class PlaybackEventAuthenticationTest {
         var probes = 0
         val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("expired-event-auth", Context.MODE_PRIVATE)
         val controller = EchoController(owner, prefs, {}, { signedOut.complete(Unit) }, read = { path, _ ->
-            assertEquals("/alexa/status/", path); probes++
+            assertEquals("/api/account", path); probes++
             throw BackendAuthException("Expired owner cookie", path)
         }, events = { flow { throw BackendAuthException("Socket rejected") } })
         try {

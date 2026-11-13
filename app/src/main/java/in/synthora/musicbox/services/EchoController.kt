@@ -60,6 +60,19 @@ class EchoController(
     private val _serial = MutableStateFlow(prefs.getString(KEY_SERIAL, "").orEmpty())
     val serial: StateFlow<String> = _serial.asStateFlow()
 
+    private val _alexaAccessEnabled = MutableStateFlow(false)
+    val alexaAccessEnabled: StateFlow<Boolean> = _alexaAccessEnabled.asStateFlow()
+
+    private fun applyAccess(enabled: Boolean) {
+        _alexaAccessEnabled.value = enabled
+        AmazonAccess.update(enabled)
+        if (!enabled) {
+            _devices.value = emptyList()
+            _amazonConnected.value = null
+            setSerial("")
+        }
+    }
+
     /** Amazon session on the server: null until known. */
     private val _amazonConnected = MutableStateFlow<Boolean?>(null)
     val amazonConnected: StateFlow<Boolean?> = _amazonConnected.asStateFlow()
@@ -129,7 +142,7 @@ class EchoController(
     private suspend fun eventSessionExpired(generation: Long): Boolean {
         val epoch = mutationEpoch
         return try {
-            withTimeoutOrNull(5_000) { read("/alexa/status/", emptyMap()) }
+            withTimeoutOrNull(5_000) { read("/api/account", emptyMap()) }
             false
         } catch (e: CancellationException) {
             throw e
@@ -197,6 +210,8 @@ class EchoController(
         val saved = _serial.value
         val init = read("/alexa/init/", if (saved.isNotBlank()) mapOf("serial" to saved) else emptyMap()).objectOrEmpty()
         if (epoch != mutationEpoch) return false
+        applyAccess(init.flag("alexa_access_enabled"))
+        if (!_alexaAccessEnabled.value) return false
         val loggedIn = init["status"].objectOrEmpty().flag("logged_in")
         _amazonConnected.value = loggedIn
         val list = init.array("devices").map { it.objectOrEmpty() }.map {
@@ -213,6 +228,10 @@ class EchoController(
     /** Refresh presence without changing playback, artwork or the selected output. */
     suspend fun refreshDeviceStatus() {
         val epoch = mutationEpoch
+        val access = read("/api/account", emptyMap()).objectOrEmpty()
+        if (epoch != mutationEpoch) return
+        applyAccess(access.flag("alexa_access_enabled"))
+        if (!_alexaAccessEnabled.value) return
         val response = read("/alexa/devices/", emptyMap()).objectOrEmpty()
         if (epoch != mutationEpoch) return
         response["amazon_connected"]?.let { _amazonConnected.value = response.flag("amazon_connected") }
@@ -351,9 +370,10 @@ class EchoController(
         val accepted = _state.compareAndSet(previous, reconciled)
         if (accepted) {
             eventOrder.accepted(serverEpoch, serverRevision)
+            np["alexa_access_enabled"]?.let { applyAccess(np.flag("alexa_access_enabled")) }
             np["amazon_connected"]?.let { if (it.toString() != "null") _amazonConnected.value = np.flag("amazon_connected") }
             val shared = parsed.sharedOutput
-            if (shared.mode == "alexa" && np["remote_control_available"]?.toString() == "false" && parsed.playing && shared.serial.isNotBlank()) {
+            if (_alexaAccessEnabled.value && shared.mode == "alexa" && np["remote_control_available"]?.toString() == "false" && parsed.playing && shared.serial.isNotBlank()) {
                 val known = _devices.value.firstOrNull { it.serial == shared.serial }
                 _devices.value = _devices.value.filter { it.serial != shared.serial } + EchoDevice(shared.serial, known?.name ?: "Alexa", true, false)
             } else if (shared.mode == "phone") {
@@ -701,6 +721,8 @@ class EchoController(
         lastErrorId = ""
         eventOrder.reset()
         _devices.value = emptyList()
+        _alexaAccessEnabled.value = false
+        AmazonAccess.update(false)
         _amazonConnected.value = null
         _state.value = EchoState()
     }

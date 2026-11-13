@@ -38,6 +38,7 @@ fun waveformPeakDeviation(waveform: ByteArray): Int {
  * steady battery cost. Checks are skipped while muted, in a call, or when the
  * session/effects state can't be read (treated as unknown, never as silent).
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class SilentPlaybackWatchdog(
     private val scope: CoroutineScope,
     private val audioManager: AudioManager,

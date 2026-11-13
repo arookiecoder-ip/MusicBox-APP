@@ -8,6 +8,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.IOException
 
 /** The HTTP client must disable automatic redirects so credentials never cross a boundary. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class SafeAudioRedirectDataSource(private val upstream: DataSource) : DataSource by upstream {
     override fun open(dataSpec: DataSpec): Long {
         var current = dataSpec

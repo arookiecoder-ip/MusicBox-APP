@@ -110,7 +110,7 @@ class RemotePlaybackService : MediaSessionService() {
                 override fun onCustomCommand(session: MediaSession, controller: MediaSession.ControllerInfo,
                     customCommand: SessionCommand, args: Bundle): ListenableFuture<SessionResult> {
                     if (customCommand.customAction == NotificationRadio.ACTION) return Futures.immediateFuture(
-                        SessionResult(if (NotificationRadio.start(this@RemotePlaybackService)) SessionResult.RESULT_SUCCESS else SessionResult.RESULT_ERROR_INVALID_STATE))
+                        SessionResult(if (NotificationRadio.start(this@RemotePlaybackService)) SessionResult.RESULT_SUCCESS else androidx.media3.session.SessionError.ERROR_INVALID_STATE))
                     if (customCommand.customAction != LIKE) return super.onCustomCommand(session, controller, customCommand, args)
                     val result = SettableFuture.create<SessionResult>()
                     scope.launch {

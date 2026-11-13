@@ -25,6 +25,7 @@ class JukeHaptics(private val view: View, context: Context) {
         context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
 
+    @androidx.annotation.ChecksSdkIntAtLeast(api = Build.VERSION_CODES.Q)
     private fun hasPremiumVibration(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         val currentVibrator = vibrator ?: return false

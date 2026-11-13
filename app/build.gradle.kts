@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 117
-        versionName = "2.4.65"
+        versionCode = 119
+        versionName = "2.5.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -41,15 +41,18 @@ android {
             "\"${properties.getProperty("POSTHOG_HOST", "")}\""
         )
         // Account sessions need a server with web login enabled. Audio can use a separate keyed server.
+        // The multi-user account pages (sign-up, verification, password recovery) only exist on the
+        // multi-user origin, so that origin is the default for this branch; alexa.synthora.in still runs
+        // the pre-multi-user build, whose /signup answers 404.
         buildConfigField(
             "String",
             "ALEXA_SESSION_BASE_URL",
-            "\"${properties.getProperty("ALEXA_SESSION_BASE_URL", "")}\""
+            "\"${properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://testalexa.synthora.in")}\""
         )
         buildConfigField(
             "String",
             "ALEXA_BASE_URL",
-            "\"${properties.getProperty("ALEXA_BASE_URL", "")}\""
+            "\"${properties.getProperty("MULTIUSER_BASE_URL", "https://testalexa.synthora.in")}\""
         )
         buildConfigField(
             "String",
@@ -64,21 +67,26 @@ android {
     }
 
     signingConfigs {
+        // The multi-user line has its own identity. Older branches keep the old
+        // alias/password fallback so their existing installs still upgrade.
+        val signingAlias = System.getenv("MUSIC_BOX_SIGNING_ALIAS")?.takeIf { it.isNotBlank() } ?: "androiddebugkey"
+        val signingStorePassword = System.getenv("MUSIC_BOX_SIGNING_STORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "android"
+        val signingKeyPassword = System.getenv("MUSIC_BOX_SIGNING_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: signingStorePassword
         // Keep the installed app's identity when moving from beta/debug to release.
         create("release") {
             System.getenv("MUSIC_BOX_SIGNING_STORE")?.takeIf { it.isNotBlank() }?.let { path ->
                 storeFile = file(path)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                storePassword = signingStorePassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
             }
         }
         getByName("debug") {
             System.getenv("MUSIC_BOX_SIGNING_STORE")?.takeIf { it.isNotBlank() }?.let { path ->
                 storeFile = file(path)
-                storePassword = "android"
-                keyAlias = "androiddebugkey"
-                keyPassword = "android"
+                storePassword = signingStorePassword
+                keyAlias = signingAlias
+                keyPassword = signingKeyPassword
             }
         }
     }

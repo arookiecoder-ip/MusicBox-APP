@@ -235,21 +235,11 @@ class InteractionPolishRegressionTest {
         compose.runOnIdle { assertEquals(1, removals) }
     }
 
-    @Test fun cookieControlsStayUsableDuringUnrelatedAccountRefreshAndRecoverAfterFailure() {
-        var state by mutableStateOf(`in`.synthora.musicbox.viewmodels.AccountUiState(checkingStatus = true))
-        var checks = 0
-        var replacements = 0
-        compose.setContent { JUKETheme { Column {
-            `in`.synthora.musicbox.ui.screens.DownloadCookieControls(state, { checks++; state = state.copy(cookieBusy = true) }, { replacements++ })
-        } } }
-        compose.onNodeWithText("Replace cookies").assertIsEnabled().performClick()
-        compose.onNodeWithText("Check again").assertIsEnabled().performClick()
-        compose.onNodeWithText("Checking…").assertIsNotEnabled()
-        compose.onNodeWithText("Replace cookies").assertIsNotEnabled()
-        compose.runOnIdle { state = state.copy(cookieBusy = false, cookieMessage = "Audio check timed out. Try again.") }
-        compose.onNodeWithText("Audio check timed out. Try again.").assertIsDisplayed()
-        compose.onNodeWithText("Check again").assertIsEnabled()
-        compose.runOnIdle { assertEquals(1, checks); assertEquals(1, replacements) }
+    @Test fun connectedLibraryIsReadyWithoutCookieDiagnostics() {
+        val status = `in`.synthora.musicbox.viewmodels.AccountStatus(youtubeLibrary = true)
+        assertTrue(status.allConnected)
+        assertTrue(status.copy(alexaAccessEnabled = true, amazonConnected = true).allConnected)
+        assertFalse(status.copy(alexaAccessEnabled = true, amazonConnected = false).allConnected)
     }
 
     @Test fun configuredOfflineEchoDoesNotShowConnectionInstructions() {

@@ -105,6 +105,7 @@ object NetworkFeedback {
     }
 }
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 fun networkErrorMessage(error: Throwable): String? {
     if (error is CancellationException) return null
     val causes = generateSequence(error) { it.cause }.take(8).toList()

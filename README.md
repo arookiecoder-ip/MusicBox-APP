@@ -38,11 +38,13 @@ The [self-hosted companion](https://github.com/arookiecoder-ip/youtube-music-ale
 For a configured build, use a developer checkout with JDK 17 and Android SDK 36, and set these non-secret/example values in an untracked `local.properties`:
 
 ```properties
-ALEXA_SESSION_BASE_URL=https://music.example.com
-ALEXA_BASE_URL=https://music.example.com
+MULTIUSER_SESSION_BASE_URL=https://music.example.com
+MULTIUSER_BASE_URL=https://music.example.com
 POSTHOG_API_KEY=
 POSTHOG_HOST=
 ```
+
+Both origins default to `https://testalexa.synthora.in`, the deployment that runs the multi-user account pages; leave them out to keep that default.
 
 Session and audio origins can be split only when both services are configured for that arrangement. Current builds set `ALEXA_API_KEY` to an empty value and obtain scoped audio credentials through the owner session; do not embed a server-wide API key in the APK.
 
