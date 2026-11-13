@@ -66,4 +66,25 @@ class AccountDoorHtmlTest {
         assertFalse(result.ok)
         assertEquals("Too many attempts. Wait a minute.", result.message)
     }
+    @Test
+    fun readsEachServerSignupStageWithoutTreatingItAsCreation() {
+        for (step in AccountWebApi.SignupStep.entries) {
+            val html = """<div data-signup-step="${step.value}" data-masked-email="j…@example.com"><input name="_csrf" value="fresh-token"></div>"""
+            val gate = DoorHtml.signupGate(html)!!
+            assertEquals(step, gate.step)
+            assertEquals("fresh-token", gate.csrf)
+            assertEquals("j…@example.com", gate.maskedEmail)
+        }
+    }
+
+    @Test
+    fun readsTheExistingWebsiteStepFieldDuringRollingDeploys() {
+        val html = """<form><input name="_csrf" value="csrf"><input name="step" value="code"></form>"""
+        assertEquals(AccountWebApi.SignupStep.CODE, DoorHtml.signupGate(html)!!.step)
+    }
+
+    @Test
+    fun doesNotInferSignupSuccessFromAnUnrelatedPage() {
+        assertEquals(null, DoorHtml.signupGate("""<form><input name="_csrf" value="csrf"></form>"""))
+    }
 }
