@@ -5,7 +5,7 @@ import org.junit.Test
 
 class AlexaRemotePolicyTest {
     @Test fun defaultsToTheMultiUserOriginWithIndependentPhoneConfiguration() {
-        assertEquals("https://testalexa.synthora.in", AlexaRemotePolicy.DEFAULT_SERVER)
+        assertEquals("https://alexa.synthora.in", AlexaRemotePolicy.DEFAULT_SERVER)
         assertEquals("https://example.com", AlexaRemotePolicy.server(" HTTPS://EXAMPLE.COM/ "))
     }
 

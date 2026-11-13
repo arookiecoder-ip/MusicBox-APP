@@ -63,7 +63,7 @@ sealed interface LoginStep {
  */
 object Backend {
 
-    private const val DEFAULT_SERVER = "https://testalexa.synthora.in"
+    private const val DEFAULT_SERVER = "https://alexa.synthora.in"
 
     val audioBaseUrl: String get() = BuildConfig.ALEXA_BASE_URL.trim().trimEnd('/').ifBlank { DEFAULT_SERVER }
     val baseUrl: String get() = BuildConfig.ALEXA_SESSION_BASE_URL.trim().trimEnd('/').ifBlank { audioBaseUrl }

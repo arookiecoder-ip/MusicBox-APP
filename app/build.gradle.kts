@@ -18,8 +18,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 121
-        versionName = "2.5.3"
+        versionCode = 122
+        versionName = "2.5.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -40,19 +40,16 @@ android {
             "POSTHOG_HOST",
             "\"${properties.getProperty("POSTHOG_HOST", "")}\""
         )
-        // Account sessions need a server with web login enabled. Audio can use a separate keyed server.
-        // The multi-user account pages (sign-up, verification, password recovery) only exist on the
-        // multi-user origin, so that origin is the default for this branch; alexa.synthora.in still runs
-        // the pre-multi-user build, whose /signup answers 404.
+        // Account sessions and playback use the primary multi-user Music Box server.
         buildConfigField(
             "String",
             "ALEXA_SESSION_BASE_URL",
-            "\"${properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://testalexa.synthora.in")}\""
+            "\"${properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://alexa.synthora.in")}\""
         )
         buildConfigField(
             "String",
             "ALEXA_BASE_URL",
-            "\"${properties.getProperty("MULTIUSER_BASE_URL", "https://testalexa.synthora.in")}\""
+            "\"${properties.getProperty("MULTIUSER_BASE_URL", "https://alexa.synthora.in")}\""
         )
         buildConfigField(
             "String",

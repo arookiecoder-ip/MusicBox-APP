@@ -1,10 +1,12 @@
-name: Android Multi-User Build
+name: Android Production Build
 
 # Dedicated multi-user verification using the existing protected signing secret.
 on:
   push:
     branches:
+      - main
       - feat/multi-user
+      - release/production-cutover
   workflow_dispatch:
     inputs:
       ui_tests:
@@ -55,8 +57,8 @@ jobs:
           cat > local.properties <<EOF
           POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
           POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}
-          MULTIUSER_SESSION_BASE_URL=https://testalexa.synthora.in
-          MULTIUSER_BASE_URL=https://testalexa.synthora.in
+          MULTIUSER_SESSION_BASE_URL=https://alexa.synthora.in
+          MULTIUSER_BASE_URL=https://alexa.synthora.in
           EOF
 
       - name: Compile and run JVM regressions
