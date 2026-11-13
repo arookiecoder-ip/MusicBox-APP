@@ -1111,12 +1111,7 @@ class PlaybackService : MediaLibraryService() {
         serviceScope.launch {
             try {
                 val track = database.trackDao().getTrackByUuid(mediaId) ?: return@launch
-                val videoId = track.ytVideoId ?: return@launch
-                `in`.synthora.musicbox.network.Backend.post("/api/track/$videoId/listen", kotlinx.serialization.json.buildJsonObject {
-                    put("title", track.title)
-                    put("artist", track.artist)
-                    put("thumbnail", track.thumbnailUri.orEmpty())
-                })
+                LocalListeningHistory.record(this@PlaybackService, track.toTrack())
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (lastReportedListen == mediaId) lastReportedListen = null
@@ -1895,9 +1890,10 @@ class PlaybackService : MediaLibraryService() {
                 if (currentTrackId != null) {
                     serviceScope.launch {
                         try {
-                            val videoId = database.trackDao().getTrackByUuid(currentTrackId)?.ytVideoId
+                            val likedTrack = database.trackDao().getTrackByUuid(currentTrackId)?.toTrack()
+                            val videoId = likedTrack?.ytVideoId
                             if (videoId != null) {
-                                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId))
+                                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId), likedTrack)
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "Error processing like command: ${e.message}")

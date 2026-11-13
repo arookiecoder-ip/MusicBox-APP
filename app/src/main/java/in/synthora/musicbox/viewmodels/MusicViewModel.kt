@@ -2546,7 +2546,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val videoId = track.ytVideoId ?: return
         viewModelScope.launch {
             try {
-                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId))
+                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId), track)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: BackendAuthException) {

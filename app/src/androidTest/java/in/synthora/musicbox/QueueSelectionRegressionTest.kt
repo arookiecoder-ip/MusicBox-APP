@@ -62,6 +62,26 @@ class QueueSelectionRegressionTest {
         }
     }
 
+    @Test fun pullingDownAtTopOfQueueClosesIt() {
+        var closed = 0
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(480.dp)) {
+            QueueBottomSheetContent(songs[0], songs, 0, MusicUiState(), { closed++ }, { _, _ -> }, { _, _ -> }, {})
+        } } }
+        compose.onNodeWithTag("Queue rows").performTouchInput { swipeDown() }
+        compose.runOnIdle { assertTrue("Pulling down from the top should close the queue", closed > 0) }
+    }
+
+    @Test fun smallPullAtTopOfQueueDoesNotCloseIt() {
+        var closed = 0
+        compose.setContent { JUKETheme { Surface(Modifier.fillMaxWidth().height(480.dp)) {
+            QueueBottomSheetContent(songs[0], songs, 0, MusicUiState(), { closed++ }, { _, _ -> }, { _, _ -> }, {})
+        } } }
+        compose.onNodeWithTag("Queue rows").performTouchInput {
+            down(center); moveBy(Offset(0f, 24f)); up()
+        }
+        compose.runOnIdle { assertEquals("A small pull must not close the queue", 0, closed) }
+    }
+
     @Test fun stalePreparedRowsCannotReplaceTitlesOrBlockRepeatedTaps() {
         var rows by mutableStateOf(songs)
         var selected by mutableIntStateOf(0)

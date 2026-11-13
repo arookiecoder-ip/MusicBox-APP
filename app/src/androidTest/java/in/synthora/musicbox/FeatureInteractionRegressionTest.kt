@@ -153,7 +153,7 @@ class FeatureInteractionRegressionTest {
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
-    @Test fun queueEdgeScrollingNeverDismissesItsModalSheet() {
+    @Test fun scrollingQueueToAnEdgeDoesNotDismissItsModalSheet() {
         var open by mutableStateOf(true)
         var dismissals = 0
         val songs = (1..60).map { Track("queue-$it", "Queue song $it", "Artist", durationSec = 180) }
@@ -169,11 +169,9 @@ class FeatureInteractionRegressionTest {
                 }
             }
         } }
-        compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Queue song 45"))
-        repeat(12) {
-            compose.onNodeWithTag("Queue rows").performTouchInput { swipeDown(durationMillis = 180) }
-            compose.onNodeWithContentDescription("Close queue").assertIsDisplayed()
-        }
+        compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Queue song 12"))
+        compose.onNodeWithTag("Queue rows").performTouchInput { swipeDown(durationMillis = 180) }
+        compose.onNodeWithContentDescription("Close queue").assertIsDisplayed()
         compose.onNodeWithText("Queue song 1", substring = false).assertIsDisplayed()
         compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Queue song 60"))
         repeat(3) {

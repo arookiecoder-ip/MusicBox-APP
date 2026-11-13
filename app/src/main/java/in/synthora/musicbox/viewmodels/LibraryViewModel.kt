@@ -12,6 +12,7 @@ import `in`.synthora.musicbox.network.array
 import `in`.synthora.musicbox.network.flag
 import `in`.synthora.musicbox.network.number
 import `in`.synthora.musicbox.network.objectOrEmpty
+import `in`.synthora.musicbox.network.metadata
 import `in`.synthora.musicbox.network.toTrack
 import `in`.synthora.musicbox.services.AccountRepository
 import kotlinx.coroutines.CancellationException
@@ -225,7 +226,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         startView(LibraryView.HISTORY, null)
         viewJob = viewModelScope.launch {
             guarded {
-                val history = Backend.get("/history/")
+                val history = `in`.synthora.musicbox.services.LocalListeningHistory.history(getApplication())
                 loadedTracks = (history as? kotlinx.serialization.json.JsonArray).orEmpty()
                     .mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                     .filter { it.videoId.isNotBlank() }
@@ -324,7 +325,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         val videoId = track.ytVideoId ?: return
         viewModelScope.launch {
             try {
-                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId))
+                AccountRepository.setLiked(videoId, !AccountRepository.isLiked(videoId), track)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -409,7 +410,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     private suspend fun addTrack(playlistId: String, track: Track) {
         val videoId = track.ytVideoId ?: return
-        Backend.post("/api/library/playlists/$playlistId/tracks", JsonObject(mapOf("video_id" to JsonPrimitive(videoId))))
+        Backend.post("/api/library/playlists/$playlistId/tracks", track.metadata())
     }
 
     // ---------- Selection ----------

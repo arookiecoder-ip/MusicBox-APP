@@ -115,7 +115,7 @@ class RemotePlaybackService : MediaSessionService() {
                     val result = SettableFuture.create<SessionResult>()
                     scope.launch {
                         try {
-                            remote.snapshot.track?.ytVideoId?.let { AccountRepository.setLiked(it, !AccountRepository.isLiked(it)) }
+                            remote.snapshot.track?.let { track -> track.ytVideoId?.let { AccountRepository.setLiked(it, !AccountRepository.isLiked(it), track) } }
                             result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                         } catch (e: Exception) { result.setException(e) }
                     }
