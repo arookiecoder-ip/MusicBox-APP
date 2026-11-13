@@ -597,7 +597,7 @@ class MainActivity : ComponentActivity() {
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onBackground,
                     bottomBar = {
-                        if (currentRoute != "settings") {
+                        if (currentRoute != "settings" && currentRoute != "settings/account") {
                             Column(
                                 modifier = Modifier.fillMaxWidth().playerDockInput().background(`in`.synthora.musicbox.ui.theme.dockColor()),
                                 verticalArrangement = Arrangement.spacedBy(0.dp)
