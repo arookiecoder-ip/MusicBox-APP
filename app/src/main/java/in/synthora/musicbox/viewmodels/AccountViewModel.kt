@@ -48,7 +48,9 @@ data class AuthDoorState(
     val message: String = "",
     val fieldErrors: Map<String, String> = emptyMap(),
     val minPasswordLength: Int = 10,
-    val signupOpen: Boolean = true
+    val signupOpen: Boolean = true,
+    val signupStep: AccountWebApi.SignupStep = AccountWebApi.SignupStep.EMAIL,
+    val resendAtMillis: Long = 0
 )
 
 data class TotpEnrollment(
@@ -265,7 +267,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 val status = AccountStatus(
                     amazonConnected = profile.flag("alexa_access_enabled") && profile.flag("amazon_connected"),
                     alexaAccessEnabled = profile.flag("alexa_access_enabled"),
-                    youtubeLibrary = profile.flag("youtube_auth_working"),
+                    youtubeLibrary = profile.flag("youtube_own_session"),
                     youtubeCookies = _state.value.status?.youtubeCookies ?: false,
                     youtubeCookiesPresent = profile.flag("youtube_cookies_present"),
                     youtubeBrowserAvailable = profile.flag("youtube_browser_available"),
@@ -494,20 +496,75 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update {
             it.copy(
                 stage = AuthStage.SIGNUP,
-                door = AuthDoorState(csrf = gate.csrf, signupOpen = true),
+                door = AuthDoorState(csrf = gate.csrf, signupOpen = true, signupStep = gate.step, maskedEmail = gate.maskedEmail),
                 error = null
             )
         }
     }
 
+    private fun applySignupReply(reply: AccountWebApi.SignupReply, email: String? = null, username: String? = null, sentCode: Boolean = false) {
+        val gate = reply.gate
+        if (gate == null && reply.result.ok) {
+            onSignedIn()
+            return
+        }
+        if (gate?.step == AccountWebApi.SignupStep.EMAIL) signupOpenedAt = android.os.SystemClock.elapsedRealtime()
+        _state.update { current ->
+            val expired = gate?.step == AccountWebApi.SignupStep.EMAIL && current.door.signupStep != gate.step
+            current.copy(door = current.door.copy(
+                csrf = gate?.csrf ?: current.door.csrf,
+                signupStep = gate?.step ?: current.door.signupStep,
+                maskedEmail = gate?.maskedEmail.orEmpty(),
+                email = email ?: current.door.email,
+                username = username ?: current.door.username,
+                resendAtMillis = if (sentCode && reply.result.ok) System.currentTimeMillis() + 60_000 else current.door.resendAtMillis,
+                message = if (expired) "Your verification expired. Request a new code to continue." else if (reply.result.ok) "" else reply.result.message,
+                fieldErrors = reply.result.fieldErrors
+            ), error = null)
+        }
+    }
+
+    fun submitSignupEmail(email: String) {
+        val clean = email.trim()
+        if (!clean.contains('@') || clean.length < 5 || clean.length > 254) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = mapOf("email" to "Enter a valid email address."))) }
+            return
+        }
+        runBusy {
+            val elapsed = android.os.SystemClock.elapsedRealtime() - signupOpenedAt
+            if (elapsed in 0 until 3_200) delay(3_200 - elapsed)
+            applySignupReply(AccountWebApi.beginSignup(_state.value.door.csrf, clean), email = clean, sentCode = true)
+        }
+    }
+
+    fun submitSignupCode(code: String) {
+        val digits = code.filter(Char::isDigit)
+        if (digits.length != 6) {
+            _state.update { it.copy(door = it.door.copy(fieldErrors = mapOf("code" to "Enter the 6-digit code from your email."))) }
+            return
+        }
+        runBusy { applySignupReply(AccountWebApi.verifySignup(_state.value.door.csrf, digits)) }
+    }
+
+    fun resendSignupCode() = runBusy {
+        if (System.currentTimeMillis() < _state.value.door.resendAtMillis) return@runBusy
+        applySignupReply(AccountWebApi.resendSignup(_state.value.door.csrf), sentCode = true)
+    }
+
+    fun restartSignup() = runBusy {
+        applySignupReply(AccountWebApi.restartSignup(_state.value.door.csrf), email = "", username = "")
+    }
+
     fun submitSignup(username: String, email: String, password: String, confirmPassword: String) {
+        if (_state.value.door.signupStep != AccountWebApi.SignupStep.DETAILS) {
+            _state.update { it.copy(door = it.door.copy(message = "Verify your email before creating the account.")) }
+            return
+        }
         val cleanUser = username.trim()
-        val cleanEmail = email.trim()
         val errors = buildMap {
             if (!cleanUser.matches(Regex("[A-Za-z0-9][A-Za-z0-9._-]{2,31}"))) {
                 put("username", "Use 3–32 letters, numbers, dots, dashes or underscores.")
             }
-            if (!cleanEmail.contains('@') || cleanEmail.length < 5) put("email", "Enter a valid email address.")
             if (password.length < 10) put("password", "Use at least 10 characters.")
             if (password != confirmPassword) put("confirm_password", "The two passwords do not match.")
         }
@@ -516,28 +573,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             return
         }
         runBusy {
-            // The server rejects forms filled faster than a person can type. Wait out
-            // the remainder instead of letting a password-manager fill fake a success.
-            val elapsed = android.os.SystemClock.elapsedRealtime() - signupOpenedAt
-            if (elapsed in 0 until 3_200) delay(3_200 - elapsed)
-            val result = AccountWebApi.signup(_state.value.door.csrf, cleanUser, cleanEmail, password, confirmPassword)
-            if (!result.ok) {
-                _state.update {
-                    it.copy(
-                        door = it.door.copy(username = cleanUser, email = cleanEmail, message = result.message, fieldErrors = result.fieldErrors),
-                        error = null
-                    )
-                }
-                return@runBusy
-            }
-            val verifyCsrf = runCatching { AccountWebApi.openVerification() }.getOrDefault("")
-            _state.update {
-                it.copy(
-                    stage = AuthStage.VERIFY_EMAIL,
-                    door = AuthDoorState(csrf = verifyCsrf, username = cleanUser, message = result.notice),
-                    error = null
-                )
-            }
+            applySignupReply(AccountWebApi.signup(_state.value.door.csrf, cleanUser, email, password, confirmPassword), username = cleanUser)
         }
     }
 

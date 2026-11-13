@@ -4,7 +4,7 @@ import java.net.URI
 
 /** Native remote configuration and trusted account sign-in origins. */
 object AlexaRemotePolicy {
-    const val DEFAULT_SERVER = "https://testalexa.synthora.in"
+    const val DEFAULT_SERVER = "https://alexa.synthora.in"
 
     fun server(value: String): String {
         val uri = URI(value.trim())

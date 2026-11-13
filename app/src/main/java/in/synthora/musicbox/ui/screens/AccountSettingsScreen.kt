@@ -26,6 +26,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.TextButton
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
@@ -193,18 +197,13 @@ fun AccountSettingsScreen(
                 AccountActionRow("Password", "Verify your identity to choose a new password", "Change") {
                     dialog = AccountDialog.CHANGE_PASSWORD
                 }
-                Text(
-                    "Security changes can sign out other devices. This device stays signed in.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
+
             }
 
             AccountSection("Two-factor authentication") {
                 Text(
                     if (profile.totpEnabled) "On — this account asks for a 6-digit authenticator code at sign-in."
-                    else "Add an authenticator app so a stolen password is not enough.",
+                    else "Off",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (profile.totpPending) {
@@ -266,11 +265,12 @@ fun AccountSettingsScreen(
                     "This erases the account, its playlists, likes and connected services. It cannot be undone.",
                     style = MaterialTheme.typography.bodyMedium
                 )
-                TextButton(
-                    onClick = { haptic.click(); account.sendEmailCode(); dialog = AccountDialog.DELETE },
+                Button(
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
+                    onClick = { haptic.click(); dialog = AccountDialog.DELETE_WARNING },
                     enabled = !state.busy,
                     modifier = Modifier.padding(top = 4.dp)
-                ) { Text("Delete my account", color = MaterialTheme.colorScheme.error) }
+                ) { Text("Delete my account") }
             }
         }
     }
@@ -282,13 +282,20 @@ fun AccountSettingsScreen(
         AccountDialog.TOTP_BEGIN -> BeginTotpDialog(state, account) { dialog = null }
         AccountDialog.TOTP_CONFIRM -> state.totp?.let { TotpConfirmDialog(it, state, account) { dialog = null } }
         AccountDialog.TOTP_DISABLE -> DisableTotpDialog(state, account) { dialog = null }
+        AccountDialog.DELETE_WARNING -> GlassAlertDialog(
+            onDismissRequest = { dialog = null },
+            title = { Text("Delete this account?") },
+            text = { Text("This permanently removes your account, playlists, likes and connected services. It cannot be undone.") },
+            confirmButton = { TextButton(onClick = { dialog = AccountDialog.DELETE }) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Keep my account") } }
+        )
         AccountDialog.DELETE -> state.profile?.let { DeleteAccountDialog(it, state, account) { dialog = null } }
         null -> Unit
     }
 }
 
 private enum class AccountDialog {
-    CHANGE_EMAIL, CHANGE_PASSWORD, VERIFY_EMAIL, TOTP_BEGIN, TOTP_CONFIRM, TOTP_DISABLE, DELETE
+    CHANGE_EMAIL, CHANGE_PASSWORD, VERIFY_EMAIL, TOTP_BEGIN, TOTP_CONFIRM, TOTP_DISABLE, DELETE_WARNING, DELETE
 }
 
 @Composable
@@ -347,7 +354,9 @@ private fun DismissOnAction(state: AccountUiState, key: String, onDismiss: () ->
 }
 
 @Composable
-private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel, purpose: String, code: String, onCode: (String) -> Unit) {
+private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel, purpose: String, code: String, onCode: (String) -> Unit, requireSend: Boolean = false) {
+    val initialExpiry = remember { state.codeExpiresAt }
+    val sent = !requireSend || state.codeExpiresAt != initialExpiry
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(state.codeExpiresAt, state.codeResendAt) {
         while (true) { now = System.currentTimeMillis(); delay(1000) }
@@ -359,8 +368,12 @@ private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel,
     TextButton(onClick = { when (purpose) { "reset" -> account.sendPasswordResetCode(); "verify" -> account.resendEmailVerification(); else -> account.sendEmailCode() } }, enabled = !state.busy && wait == 0L) {
         Text(if (wait > 0) "Resend in ${wait}s" else "Send code")
     }
-    GlassTextField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Verification code", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
-    if (state.codeExpiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    AnimatedVisibility(visible = sent && state.codeExpiresAt > now) {
+        Column(Modifier.animateContentSize()) {
+            GlassTextField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Verification code", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+        }
+    }
+    if (sent && state.codeExpiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -586,12 +599,7 @@ private fun DeleteAccountDialog(
                 GlassTextField(username, { username = it }, "Username")
                 GlassTextField(password, { password = it }, "Current password", password = true)
                 if (profile.email.isNotBlank()) {
-                    Text("A code was sent to ${profile.email}. Enter it to finish.")
-                    GlassTextField(
-                        emailCode, { value -> emailCode = value.filter(Char::isDigit).take(6) }, "6-digit email code",
-                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword)
-                    )
-                    TextButton(onClick = account::sendEmailCode, enabled = !state.busy) { Text("Send a new code") }
+                    SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, requireSend = true)
                 }
                 DialogError(state)
             }

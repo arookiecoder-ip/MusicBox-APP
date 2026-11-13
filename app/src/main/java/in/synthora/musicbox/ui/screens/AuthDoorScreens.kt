@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +45,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import `in`.synthora.musicbox.network.AccountWebApi.SignupStep
 import `in`.synthora.musicbox.R
 import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
@@ -110,71 +114,100 @@ private fun AuthDoorFrame(content: @Composable ColumnScope.() -> Unit) {
 
 @Composable
 private fun SignupDoor(state: AccountUiState, account: AccountViewModel) {
-    var username by rememberSaveable { mutableStateOf(state.door.username) }
-    var email by rememberSaveable { mutableStateOf(state.door.email) }
-    var password by remember { mutableStateOf("") }
-    var confirmPassword by remember { mutableStateOf("") }
+    val step = state.door.signupStep
+    var username by rememberSaveable(step) { mutableStateOf(state.door.username) }
+    var email by rememberSaveable(step) { mutableStateOf(state.door.email) }
+    var password by remember(step) { mutableStateOf("") }
+    var confirmPassword by remember(step) { mutableStateOf("") }
+    var resendSeconds by remember { mutableStateOf(0L) }
     val busy = state.busy
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
     val haptic = rememberJukeHaptics()
-
-    DoorTitle("Create your account", "One account for your music, your Echo and every phone signed into this Music Box.")
-    DoorMessage(state)
-    GlassTextField(
-        value = username,
-        onValueChange = { username = it.filter { ch -> ch.isLetterOrDigit() || ch in "._-" }.take(32) },
-        placeholder = "Username",
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-        keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) })
-    )
-    DoorFieldError(state, "username")
-    Spacer(Modifier.height(10.dp))
-    GlassTextField(
-        value = email,
-        onValueChange = { email = it.trimStart().take(254) },
-        placeholder = "Email address",
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
-        keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) })
-    )
-    DoorFieldError(state, "email")
-    Spacer(Modifier.height(10.dp))
-    GlassTextField(
-        value = password,
-        onValueChange = { password = it.take(200) },
-        placeholder = "Password (10+ characters)",
-        password = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
-        keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) })
-    )
-    PasswordStrength(password)
-    DoorFieldError(state, "password")
-    Spacer(Modifier.height(10.dp))
-    GlassTextField(
-        value = confirmPassword,
-        onValueChange = { confirmPassword = it.take(200) },
-        placeholder = "Repeat the password",
-        password = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = {
-            keyboard?.hide()
-            account.submitSignup(username, email, password, confirmPassword)
-        })
-    )
-    DoorFieldError(state, "confirm_password")
-    Spacer(Modifier.height(20.dp))
-    SubmitButton("Create account", busy) {
-        haptic.click()
-        keyboard?.hide()
-        account.submitSignup(username, email, password, confirmPassword)
+    LaunchedEffect(state.door.resendAtMillis) {
+        do {
+            resendSeconds = ((state.door.resendAtMillis - System.currentTimeMillis() + 999) / 1000).coerceAtLeast(0)
+            if (resendSeconds > 0) delay(1000)
+        } while (resendSeconds > 0)
     }
-    Text(
-        "We send one six-digit code to this address. Nothing else is ever emailed to it.",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        textAlign = TextAlign.Center,
-        modifier = Modifier.padding(top = 12.dp)
-    )
+
+    DoorTitle("Create your account", when (step) {
+        SignupStep.EMAIL -> "1 of 3 · Email"
+        SignupStep.CODE -> "2 of 3 · Verify email"
+        SignupStep.DETAILS -> "3 of 3 · Account details"
+    })
+    DoorMessage(state)
+    when (step) {
+        SignupStep.EMAIL -> {
+            GlassTextField(value = email, onValueChange = { email = it.trimStart().take(254) },
+                placeholder = "Email address",
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); account.submitSignupEmail(email) }))
+            DoorFieldError(state, "email")
+            Spacer(Modifier.height(20.dp))
+            SubmitButton("Continue", busy) { haptic.click(); keyboard?.hide(); account.submitSignupEmail(email) }
+            Text("We send a six-digit code to verify your email before you choose your username and password.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 12.dp))
+        }
+        SignupStep.CODE -> {
+            var code by rememberSaveable { mutableStateOf("") }
+            val address = state.door.maskedEmail.ifBlank { state.door.email }
+            Text("Enter the code sent to $address. It expires in 15 minutes.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(bottom = 16.dp))
+            GlassTextField(value = code, onValueChange = { code = it.filter(Char::isDigit).take(6) },
+                placeholder = "Verification code", centered = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { keyboard?.hide(); account.submitSignupCode(code) }))
+            DoorFieldError(state, "code")
+            Spacer(Modifier.height(20.dp))
+            SubmitButton("Verify email", busy) { haptic.click(); keyboard?.hide(); account.submitSignupCode(code) }
+            if (resendSeconds > 0) Text("You can request another code in $resendSeconds seconds.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 12.dp))
+        }
+        SignupStep.DETAILS -> {
+            GlassTextField(value = username,
+                onValueChange = { username = it.filter { ch -> ch.isLetterOrDigit() || ch in "._-" }.take(32) },
+                placeholder = "Username", keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }))
+            DoorFieldError(state, "username")
+            Spacer(Modifier.height(10.dp))
+            GlassTextField(value = password, onValueChange = { password = it.take(200) },
+                placeholder = "Password (10+ characters)", password = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Next),
+                keyboardActions = KeyboardActions(onNext = { focus.moveFocus(FocusDirection.Down) }))
+            PasswordStrength(password)
+            DoorFieldError(state, "password")
+            Spacer(Modifier.height(10.dp))
+            GlassTextField(value = confirmPassword, onValueChange = { confirmPassword = it.take(200) },
+                placeholder = "Repeat the password", password = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = {
+                    keyboard?.hide(); account.submitSignup(username, state.door.email, password, confirmPassword)
+                }))
+            DoorFieldError(state, "confirm_password")
+            Spacer(Modifier.height(20.dp))
+            SubmitButton("Create account", busy) {
+                haptic.click(); keyboard?.hide()
+                account.submitSignup(username, state.door.email, password, confirmPassword)
+            }
+        }
+    }
+    if (step != SignupStep.EMAIL) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            if (step == SignupStep.CODE) {
+                TextButton(onClick = account::resendSignupCode, enabled = !busy && resendSeconds == 0L,
+                    contentPadding = PaddingValues(0.dp)) {
+                    Text("Send a new code", style = MaterialTheme.typography.bodySmall)
+                }
+            } else Spacer(Modifier.weight(1f))
+            TextButton(onClick = account::restartSignup, enabled = !busy, contentPadding = PaddingValues(0.dp)) {
+                Text("Use a different email", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
     TextButton(onClick = account::backToSignIn, enabled = !busy) { Text("I already have an account") }
 }
 

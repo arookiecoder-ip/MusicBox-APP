@@ -13,6 +13,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.test.platform.app.InstrumentationRegistry
+import `in`.synthora.musicbox.ui.screens.AccountSettingsScreen
+import `in`.synthora.musicbox.network.AccountWebApi
 import `in`.synthora.musicbox.ui.screens.AccountCheckScreen
 import `in`.synthora.musicbox.ui.screens.SignInScreen
 import `in`.synthora.musicbox.ui.theme.JUKETheme
@@ -72,4 +74,23 @@ class AccountUiRegressionTest {
         compose.onNodeWithText("Connect what's missing, or continue").assertIsDisplayed()
         compose.onNodeWithText("Continue anyway").performScrollTo().assertIsDisplayed().performClick()
     }
+    @Test fun deletionStartsWithWarningThenOffersSendCodeWithoutOtpField() {
+        val account = account()
+        val profile = AccountWebApi.AccountProfile(
+            id = "test", username = "testuser", email = "test@example.test", pendingEmail = "",
+            emailVerified = true, verificationPending = false, role = "user", roleText = "User",
+            totpEnabled = false, totpPending = false, mustChangePassword = false,
+            sessions = emptyList(), providers = emptyList(), minPasswordLength = 10
+        )
+        compose.setContent {
+            JUKETheme { AccountSettingsScreen(account, AccountUiState(stage = AuthStage.SIGNED_IN, profile = profile), {}) }
+        }
+        compose.onNodeWithText("Delete my account").performScrollTo().performClick()
+        compose.onNodeWithText("Delete this account?").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.onNodeWithText("Continue").performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+    }
+
 }

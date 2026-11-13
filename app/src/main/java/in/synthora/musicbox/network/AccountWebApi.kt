@@ -22,7 +22,12 @@ object AccountWebApi {
     @Volatile
     private var csrfToken: String? = null
 
-    data class SignupGate(val open: Boolean, val message: String, val csrf: String)
+    enum class SignupStep(val value: String) { EMAIL("email"), CODE("code"), DETAILS("details") }
+    data class SignupGate(
+        val open: Boolean, val message: String, val csrf: String,
+        val step: SignupStep = SignupStep.EMAIL, val maskedEmail: String = ""
+    )
+    data class SignupReply(val result: DoorResult, val gate: SignupGate? = null)
     data class DoorResult(
         val ok: Boolean,
         val message: String,
@@ -99,30 +104,41 @@ object AccountWebApi {
         val message = DoorHtml.resultText(response.body)
         if (response.status == 503) return SignupGate(false, message.ifBlank { "Sign-ups are closed on this server." }, "")
         requireOk(response, message)
-        val csrf = DoorHtml.csrf(response.body)
-            ?: throw AccountActionException("The sign-up form could not be read. Update the app or contact the server administrator.")
-        return SignupGate(true, "", csrf)
+        return DoorHtml.signupGate(response.body)
+            ?: throw AccountActionException("The signup step could not be read. Reload signup and try again.")
     }
 
+    suspend fun beginSignup(csrf: String, email: String): SignupReply =
+        signupStep(csrf, "email", mapOf("email" to email, "website" to ""))
+
+    suspend fun verifySignup(csrf: String, code: String): SignupReply =
+        signupStep(csrf, "code", mapOf("code" to code))
+
+    suspend fun resendSignup(csrf: String): SignupReply = signupStep(csrf, "resend")
+
+    suspend fun restartSignup(csrf: String): SignupReply = signupStep(csrf, "restart")
+
     suspend fun signup(
-        csrf: String,
-        username: String,
-        email: String,
-        password: String,
-        confirmPassword: String
-    ): DoorResult {
-        val response = Backend.formPost(
-            "/signup",
-            mapOf(
-                "_csrf" to csrf,
-                "username" to username,
-                "email" to email,
-                "password" to password,
-                "confirm_password" to confirmPassword,
-                "website" to ""
-            )
-        )
-        return DoorHtml.doorResult(response, listOf("check your inbox", "almost there"))
+        csrf: String, username: String, email: String, password: String, confirmPassword: String
+    ): SignupReply = signupStep(csrf, "details", mapOf(
+        "username" to username, "password" to password, "confirm_password" to confirmPassword
+    ))
+
+    private suspend fun signupStep(
+        csrf: String, step: String, fields: Map<String, String> = emptyMap()
+    ): SignupReply {
+        val response = Backend.formPost("/signup", fields + mapOf("_csrf" to csrf, "step" to step))
+        // A redirect advances the same server-side challenge. Read its next form,
+        // including the fresh CSRF token, instead of treating it as account creation.
+        if (response.status == 303 && response.location == "/signup") {
+            return SignupReply(DoorResult(true, ""), openSignup())
+        }
+        if (step == "details" && response.status == 303 && response.location == "/account") {
+            return SignupReply(DoorResult(true, "Account created."), null)
+        }
+        val result = DoorHtml.doorResult(response, listOf("account created"))
+        val gate = DoorHtml.signupGate(response.body)
+        return SignupReply(result.copy(ok = result.ok && gate == null && response.status in 200..299), gate)
     }
 
     suspend fun openVerification(): String {
@@ -417,6 +433,16 @@ internal object DoorHtml {
     private val spaces = Regex("""\s+""")
 
     fun csrf(html: String): String? = csrf.find(html)?.groupValues?.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
+
+    fun signupGate(html: String): AccountWebApi.SignupGate? {
+        val raw = Regex("""data-signup-step="(email|code|details)"""").find(html)?.groupValues?.get(1)
+            ?: Regex("""name="step"\s+value="(email|code|details)"""").find(html)?.groupValues?.get(1)
+            ?: return null
+        val token = csrf(html) ?: return null
+        val step = AccountWebApi.SignupStep.entries.firstOrNull { it.value == raw } ?: return null
+        val masked = Regex("""data-masked-email="([^"<]*)"""").find(html)?.groupValues?.get(1)?.let(::clean).orEmpty()
+        return AccountWebApi.SignupGate(true, "", token, step, masked)
+    }
 
     fun resultText(html: String): String {
         val h1 = heading.find(html)?.groupValues?.getOrNull(1)?.let(::clean).orEmpty()
