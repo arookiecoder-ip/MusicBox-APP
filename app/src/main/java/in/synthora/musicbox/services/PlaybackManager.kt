@@ -83,6 +83,7 @@ import java.util.Locale
  * Playback Manager for controlling media playback.
  * This connects to PlaybackService via MediaController to enable notification controls.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackManager private constructor(private val context: Context) {
 
     companion object {

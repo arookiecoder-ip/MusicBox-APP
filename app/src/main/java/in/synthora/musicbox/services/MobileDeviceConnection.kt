@@ -13,6 +13,7 @@ import java.util.UUID
 data class MobileAudioDevice(val id: String, val name: String, val volume: Int? = null, val volumeSteps: Int? = null)
 
 /** One presence loop per app process, including while an active player is minimized. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 object MobileDeviceConnection {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var appContext: android.content.Context? = null

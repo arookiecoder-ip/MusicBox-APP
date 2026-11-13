@@ -52,6 +52,8 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
     val downloadedCollections by music.downloadedCollections.collectAsState()
     val downloaded by music.downloadedTracks.collectAsState()
     val downloadProgress by music.downloadProgress.collectAsState()
+    val likedTracks by AccountRepository.liked.collectAsState()
+    val queueState by music.uiState.collectAsState()
     val track = menu.track
     val item = menu.item
     val extraOptions = menu.extraOptions
@@ -76,7 +78,7 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
                 MusicMenuHeader(track?.title ?: item!!.title, track?.artist ?: item?.subtitle.orEmpty(), track?.thumbnailUri ?: item?.image)
                 fun quick(run: () -> Unit) { menu.dismiss(); run() }
                 if (track != null && !menu.playerOnly) {
-                    val liked = track.ytVideoId in AccountRepository.liked.value
+                    val liked = track.ytVideoId in likedTracks
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
                         MusicQuickAction(Icons.Filled.ThumbUp, if (liked) "Unlike" else "Like", Modifier.weight(1f), selected = liked) { quick { music.toggleFavorite(track) } }
                         MusicQuickAction(Icons.Filled.SkipNext, "Next", Modifier.weight(1f)) { quick { music.addNext(track) } }
@@ -161,8 +163,8 @@ fun MediaActionMenuHost(menu: MediaMenuController, music: MusicViewModel, librar
                         }
                     }
                     if (queueActions != null) {
-                        queueActions.remove?.takeIf { music.uiState.value.currentTrack?.uuid != track.uuid }?.let { action("Remove from queue", it) }
-                    } else if (music.uiState.value.currentTrack?.uuid != track.uuid && music.uiState.value.queue.any { it.uuid == track.uuid }) {
+                        queueActions.remove?.takeIf { queueState.currentTrack?.uuid != track.uuid }?.let { action("Remove from queue", it) }
+                    } else if (queueState.currentTrack?.uuid != track.uuid && queueState.queue.any { it.uuid == track.uuid }) {
                         action("Remove from queue") { music.removeFromQueue(track.uuid) }
                     }
                     if (extraOptions.isNotEmpty()) {

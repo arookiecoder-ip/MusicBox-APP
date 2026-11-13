@@ -20,37 +20,41 @@ import org.junit.Test
 class DownloadCookieUiTest {
     @get:Rule val compose = createComposeRule()
 
-    @Test fun replacementIsAvailableWithValidOrInvalidCookies() {
+    @Test fun cookieControlsAreAbsentRegardlessOfCookieState() {
         val state = mutableStateOf(AccountUiState(status = AccountStatus(youtubeCookies = true), checkingStatus = true))
         val account = AccountViewModel(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application)
         compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountStatusCard(state.value, account) } } }
-        compose.onNodeWithText("Test audio download").performScrollTo().assertIsEnabled()
-        compose.onNodeWithText("Replace cookies").performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText("Replace download cookies").assertIsDisplayed()
-        compose.onNodeWithText("Test and save").assertIsNotEnabled()
-        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("Check again").assertDoesNotExist()
+        compose.onNodeWithText("Replace cookies").assertDoesNotExist()
+        compose.onNodeWithText("Download cookies").assertDoesNotExist()
         compose.runOnIdle { state.value = state.value.copy(status = AccountStatus(youtubeCookies = false)) }
-        compose.onNodeWithText("Replace cookies").performScrollTo().assertIsEnabled().performClick()
-        compose.onNodeWithText("Choose cookies.txt").assertIsDisplayed()
+        compose.onNodeWithText("Replace cookies").assertDoesNotExist()
+        compose.onNodeWithText("YouTube Music").assertExists()
     }
 
-    @Test fun rejectionAllowsRetryAndSuccessfulSaveClearsExport() {
+    @Test fun connectedServiceOffersManagementWithoutCookieExports() {
+        val state = AccountUiState(status = AccountStatus(youtubeLibrary = true))
+        val account = AccountViewModel(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application)
+        compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountStatusCard(state, account) } } }
+        compose.onNodeWithText("Manage").performScrollTo().performClick()
+        compose.onNodeWithText("YouTube Music connection").assertIsDisplayed()
+        compose.onNodeWithText("Change account").assertIsEnabled()
+        compose.onNodeWithText("Disconnect").assertIsEnabled()
+        compose.onNodeWithTag("download-cookie-export").assertDoesNotExist()
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onNodeWithText("YouTube Music connection").assertDoesNotExist()
+    }
+
+    @Test fun accessChangesRemoveAndRestoreAmazonRow() {
         val state = mutableStateOf(AccountUiState(status = AccountStatus()))
         val account = AccountViewModel(InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application)
-        compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) { AccountStatusCard(state.value, account) } } }
-        compose.onNodeWithText("Replace cookies").performScrollTo().performClick()
-        compose.onNodeWithTag("download-cookie-export").performTextInput("sample export")
-        compose.runOnIdle { state.value = state.value.copy(checkingStatus = true) }
-        compose.onNodeWithText("Test and save").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(cookieBusy = true) }
-        compose.onNodeWithText("Test and save").assertIsNotEnabled()
-        compose.onNodeWithText("Cancel").assertIsNotEnabled()
-        compose.runOnIdle { state.value = state.value.copy(cookieBusy = false, cookieMessage = "Audio download failed") }
-        compose.onNodeWithTag("download-cookie-export").assertTextContains("sample export")
-        compose.onNodeWithText("Test and save").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(cookieSaved = 1) }
-        compose.onNodeWithText("Replace download cookies").assertDoesNotExist()
-        compose.onNodeWithText("Replace cookies").performScrollTo().performClick()
-        compose.onNodeWithText("Test and save").assertIsNotEnabled()
+        compose.setContent { JUKETheme { AccountStatusCard(state.value, account) } }
+        compose.onNodeWithText("Echo (Amazon)").assertDoesNotExist()
+        compose.onNodeWithText("YouTube Music").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(status = AccountStatus(alexaAccessEnabled = true)) }
+        compose.onNodeWithText("Echo (Amazon)").assertExists()
+        compose.runOnIdle { state.value = state.value.copy(status = AccountStatus(alexaAccessEnabled = false, amazonConnected = true)) }
+        compose.onNodeWithText("Echo (Amazon)").assertDoesNotExist()
+        compose.onNodeWithText("YouTube Music").assertExists()
     }
 }

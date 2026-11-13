@@ -78,19 +78,76 @@ class UiRefinementRegressionTest {
         assertEquals(thin, compose.onNodeWithTag("Seek test track", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.height, 1f)
     }
 
-    @Test fun queueOptionsMoveSongsUsingTheirQueueIndices() {
-        var moved: Pair<Int, Int>? = null
+    @Test fun queueRowsExposeDragGripsForTheirQueueIndices() {
         compose.setContent { JUKETheme(darkTheme = true) { Surface(Modifier.fillMaxSize()) {
             QueueBottomSheetContent(current, listOf(current, first, second), 0, MusicUiState(), {},
-                { from, to -> moved = from to to }, { _, _ -> }, {})
+                { _, _ -> }, { _, _ -> }, {})
         } } }
         compose.onNodeWithText("Queue").assertIsDisplayed()
         compose.onNodeWithText("3 songs").assertIsDisplayed()
+        // Reordering is a long-press drag on each row's grip; there are no move commands.
+        compose.onNodeWithContentDescription("Drag to reorder Current song").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Drag to reorder Next song").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Drag to reorder Last song").assertIsDisplayed()
         screenshot("queue")
-        compose.onNodeWithContentDescription("Options for Next song").performClick()
-        compose.onNodeWithText("Move up").assertIsEnabled()
-        compose.onNodeWithText("Move down").performClick()
-        assertEquals(1 to 2, moved)
+    }
+
+    @Test fun signedOutScreenOffersAccountCreationAndRecovery() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("Create account").assertIsDisplayed()
+        compose.onNodeWithText("Forgot password?").assertIsDisplayed()
+        screenshot("sign-in")
+    }
+
+    @Test fun signedOutScreenHidesDoorsTheServerDoesNotServe() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT,
+                        doorsAvailable = false
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("This server doesn't offer account creation or password recovery.")
+            .assertIsDisplayed()
+        compose.onNodeWithText("Create account").assertDoesNotExist()
+        screenshot("sign-in-no-doors")
+    }
+
+    @Test fun createAccountDoorRendersItsForm() {
+        val account = `in`.synthora.musicbox.viewmodels.AccountViewModel(
+            InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as android.app.Application
+        )
+        compose.setContent {
+            JUKETheme(darkTheme = true) {
+                `in`.synthora.musicbox.ui.screens.SignInScreen(
+                    `in`.synthora.musicbox.viewmodels.AccountUiState(
+                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNUP
+                    ),
+                    account
+                )
+            }
+        }
+        compose.onNodeWithText("Create your account").assertIsDisplayed()
+        screenshot("signup")
     }
 
     @Test fun queueHasClearEmptyStateAndSaveAction() {

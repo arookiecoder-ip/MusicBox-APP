@@ -133,6 +133,7 @@ internal fun SearchResultsList(
     bottomPadding: Dp,
     keyboardController: androidx.compose.ui.platform.SoftwareKeyboardController? = null
 ) {
+    val likedTracks by `in`.synthora.musicbox.services.AccountRepository.liked.collectAsStateWithLifecycle()
     val hideKeyboardOnScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
@@ -150,7 +151,7 @@ internal fun SearchResultsList(
             if (hero != null) item(key = "top-result") {
                 SectionHeader("Top result")
                 val menu = LocalMediaMenu.current
-                val track = if (hero.kind == "track") hero.toTrack(`in`.synthora.musicbox.services.AccountRepository.liked.value) else null
+                val track = if (hero.kind == "track") hero.toTrack(likedTracks) else null
                 val open = { when (hero.kind) {
                     "artist" -> onNavigateToArtist(hero)
                     "album" -> onNavigateToAlbum(hero)

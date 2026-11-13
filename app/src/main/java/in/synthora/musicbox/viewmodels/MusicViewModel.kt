@@ -95,6 +95,7 @@ data class MusicUiState(
     val phase: `in`.synthora.musicbox.services.PlaybackPhase = `in`.synthora.musicbox.services.PlaybackPhase.IDLE
 )
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = MusicDatabase.getDatabase(application)
@@ -2006,7 +2007,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) {
                 val expired = `in`.synthora.musicbox.network.confirmSessionExpired {
-                    Backend.get("/alexa/status/")
+                    Backend.get("/api/account")
                 }
                 _queueLoadError.value = if (expired) "Your session expired. Sign in again to sync the queue."
                     else "Queue sync rejected at ${e.endpoint ?: "the queue endpoint"} (HTTP ${e.statusCode}). Your login has been kept."

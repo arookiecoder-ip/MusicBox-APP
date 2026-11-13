@@ -230,12 +230,9 @@ object UpdateManager {
         }
 
         val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(downloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            context.registerReceiver(downloadReceiver, filter)
-        }
+        androidx.core.content.ContextCompat.registerReceiver(
+            context, downloadReceiver, filter, androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+
     }
 
     private suspend fun handleDownloadComplete(context: Context, downloadId: Long) {

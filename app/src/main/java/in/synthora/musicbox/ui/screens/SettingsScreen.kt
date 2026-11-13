@@ -57,6 +57,7 @@ fun SettingsScreen(
     music: `in`.synthora.musicbox.viewmodels.MusicViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToPowerTools: () -> Unit,
+    onNavigateToAccount: () -> Unit,
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp,
     jam: `in`.synthora.musicbox.viewmodels.JamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
@@ -144,7 +145,7 @@ fun SettingsScreen(
                     Text("Cache size applies after restarting the app.", style = MaterialTheme.typography.bodySmall)
                 }
             } }
-            item { GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) {
+            if (state.status?.alexaAccessEnabled == true) item { GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Alexa", fontWeight = FontWeight.SemiBold)
                     if (amazonConnected == null && echoDevices.isEmpty()) `in`.synthora.musicbox.ui.components.StatusSkeleton(Modifier.padding(top = 12.dp))
@@ -171,6 +172,21 @@ fun SettingsScreen(
                 }
             } }
             item { Box(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape)) { AccountStatusCard(state, account) } }
+            item {
+                GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape).clickable { haptic.click(); onNavigateToAccount() }) {
+                    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Profile and security", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                "Email, password, two-factor and signed-in devices",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("›", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+            }
 
             if (powerUnlocked) {
                 item {

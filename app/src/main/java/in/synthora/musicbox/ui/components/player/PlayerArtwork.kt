@@ -196,7 +196,8 @@ private fun ArtworkCardContent(
 private fun ClockedLyricsOverlay(track: Track, fallbackPosition: Long, music: MusicViewModel,
     tablet: Boolean, dismiss: () -> Unit) {
     val progress by music.playbackProgress.collectAsStateWithLifecycle()
+    val currentState by music.uiState.collectAsStateWithLifecycle()
     LyricsOverlay(currentTrack = track,
-        currentPosition = if (music.uiState.value.currentTrack?.uuid == track.uuid) progress.positionMs else fallbackPosition,
+        currentPosition = if (currentState.currentTrack?.uuid == track.uuid) progress.positionMs else fallbackPosition,
         musicViewModel = music, isTablet = tablet, onDismiss = dismiss)
 }

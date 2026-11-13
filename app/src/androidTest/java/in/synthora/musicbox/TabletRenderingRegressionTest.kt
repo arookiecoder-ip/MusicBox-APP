@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
@@ -67,6 +68,14 @@ class TabletRenderingRegressionTest {
         }
     }
 
+    /** Tablet runs publish screenshots next to their frame reports, like the phone sweep. */
+    private fun screenshot(name: String) {
+        val directory = File(compose.activity.getExternalFilesDir(null), "screenshots").apply { mkdirs() }
+        File(directory, "$name.png").outputStream().use {
+            compose.onRoot().captureToImage().asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it)
+        }
+    }
+
     @Test fun homeScrollingWithLocalArtworkReportsFrameCosts() {
         val context = instrumentation.targetContext
         val cover = File(context.cacheDir, "performance-cover.png")
@@ -85,6 +94,7 @@ class TabletRenderingRegressionTest {
         }
         compose.setContent { JUKETheme { Surface { HomeContent(HomeUiState(shelves = shelves, isLoading = false), "") } } }
         compose.onNodeWithTag("Home feed").assertExists()
+        screenshot("tablet-home")
         measure("home-scroll") {
             repeat(5) { compose.onNodeWithTag("Home feed").performTouchInput { swipeUp(durationMillis = 350) }; compose.waitForIdle() }
             repeat(3) { compose.onNodeWithTag("Home feed").performTouchInput { swipeDown(durationMillis = 350) }; compose.waitForIdle() }
