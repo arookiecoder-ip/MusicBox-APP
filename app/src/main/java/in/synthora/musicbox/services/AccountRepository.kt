@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.update
+import `in`.synthora.musicbox.models.Track
+import `in`.synthora.musicbox.network.metadata
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -49,11 +51,11 @@ object AccountRepository {
     }
 
     /** Like or un-like on YouTube Music. The change shows immediately and is undone on failure. */
-    suspend fun setLiked(videoId: String, liked: Boolean) {
+    suspend fun setLiked(videoId: String, liked: Boolean, track: Track? = null) {
         val started = generation
         _liked.update { if (liked) it + videoId else it - videoId }
         try {
-            Backend.post("/alexa/like/", JsonObject(mapOf(
+            Backend.post("/alexa/like/", JsonObject((track?.metadata().orEmpty()) + mapOf(
                 "video_id" to JsonPrimitive(videoId),
                 "action" to JsonPrimitive(if (liked) "LIKE" else "INDIFFERENT")
             )))
