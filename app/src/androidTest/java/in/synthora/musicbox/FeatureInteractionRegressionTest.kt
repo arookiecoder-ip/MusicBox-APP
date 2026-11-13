@@ -125,7 +125,7 @@ class FeatureInteractionRegressionTest {
         row.performTouchInput { up() }
         compose.waitForIdle()
         assertEquals(0, removed)
-        row.performTouchInput { swipe(Offset(width * .85f, height / 2), Offset(width * .15f, height / 2), 400) }
+        row.performTouchInput { swipe(Offset(width * .85f, height * .5f), Offset(width * .15f, height * .5f), 400) }
         compose.waitForIdle()
         assertEquals(1, removed)
     }
