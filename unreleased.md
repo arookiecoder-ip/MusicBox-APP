@@ -1,5 +1,18 @@
 # Unreleased
 
+## 2.5.5
+
+- Keep queue edge scrolling and flings inside the list instead of dismissing the queue sheet.
+
+- Pause Alexa directly during output handoffs, with a skill-pause fallback for unsupported devices.
+
+- Keep queue removal behind a deliberate half-row swipe and cover the reveal behind unmoved row content.
+- Start a new queue for song selections outside the queue, including retries of failed selections.
+- Keep mini-player and loading-dock touches from activating content underneath.
+
+- Resume phone playback after calls when call audio releases slowly.
+- Recheck call state after ownership recovery and tolerate bounded late focus losses without a split-second resume followed by a permanent pause.
+
 ## 2.5.1
 
 - Guide password, email and authenticator updates through verified steps with code timers.

@@ -1256,7 +1256,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             echo.refresh(force = true)
                         } else {
                             transferPlayback(
-                                pauseSource = { if (from.playing) echo.command("pause", refreshAfter = false) },
+                                pauseSource = { if (from.playing) echo.command("pause", refreshAfter = false, nativeHandoffPause = true) },
                                 startTarget = {
                                     echo.select(serial!!, refreshAfter = false)
                                     moveQueueToEcho(from.queue, from.index, from.track, from.livePosition(), from.playing)
@@ -2164,7 +2164,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (!selection.loading) {
                 if (selection.track.uuid.startsWith("youtube-link:")) {
                     `in`.synthora.musicbox.network.youtubeLink("https://youtu.be/${selection.track.ytVideoId}")?.let(::playYoutubeLink)
-                } else if (uiState.value.queue.any { it.uuid == selection.track.uuid }) playTrackFromQueue(selection.track, selection.index)
+                } else if (selection.index != null && uiState.value.queue.any { it.uuid == selection.track.uuid }) playTrackFromQueue(selection.track, selection.index)
                 else playTrack(selection.track)
             } else {
                 ++playbackRequestId

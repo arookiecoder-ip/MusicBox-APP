@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -29,6 +30,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.TextButton
 import kotlinx.coroutines.delay
@@ -42,6 +45,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -78,9 +83,15 @@ fun AccountSettingsScreen(
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     BackHandler(onBack = onNavigateBack)
+    val clipboard = LocalClipboardManager.current
     val profile = state.profile
     val haptic = rememberJukeHaptics()
     var dialog by remember { mutableStateOf<AccountDialog?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(state.actionMessage, state.error) {
+        val message = state.actionMessage ?: state.error
+        if (message != null) android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+    }
     LaunchedEffect(state.actionKey, state.actionMessage) {
         if (state.actionKey == ACTION_EMAIL && state.actionMessage != null) dialog = AccountDialog.VERIFY_EMAIL
     }
@@ -155,23 +166,6 @@ fun AccountSettingsScreen(
                 }
             }
 
-            state.actionMessage?.let { message ->
-                Text(
-                    message,
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-            }
-            state.error?.let { error ->
-                Text(
-                    error,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                )
-            }
-
             if (!profile.emailVerified || profile.verificationPending || profile.pendingEmail.isNotBlank()) {
                 AccountSection("Confirm your email") {
                     Text(
@@ -189,6 +183,11 @@ fun AccountSettingsScreen(
                 }
             }
 
+            AccountSection("Account ID") {
+                Text(profile.id, style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { clipboard.setText(AnnotatedString(profile.id)) }) { Text("Copy account ID") }
+            }
+
             AccountSection("Email and password") {
                 AccountActionRow("Email", profile.email.ifBlank { "Not set" }, "Change") {
                     dialog = AccountDialog.CHANGE_EMAIL
@@ -200,10 +199,10 @@ fun AccountSettingsScreen(
 
             }
 
-            AccountSection("Two-factor authentication") {
+            AccountSection("Two-step verification") {
                 Text(
                     if (profile.totpEnabled) "On — this account asks for a 6-digit authenticator code at sign-in."
-                    else "Off",
+                    else "Off — add an authenticator app to protect sign-in.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 if (profile.totpPending) {
@@ -221,7 +220,7 @@ fun AccountSettingsScreen(
                     },
                     enabled = !state.busy,
                     modifier = Modifier.padding(top = 4.dp)
-                ) { Text(if (profile.totpEnabled) "Turn off two-factor" else "Set up two-factor") }
+                ) { Text(if (profile.totpEnabled) "Turn off verification" else "Set up authenticator") }
             }
 
             AccountSection("Signed-in devices") {
@@ -322,7 +321,7 @@ private fun AccountSection(
             fontWeight = FontWeight.Bold,
             color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(16.dp))
         content()
     }
 }
@@ -334,7 +333,8 @@ private fun AccountActionRow(title: String, detail: String, action: String, onCl
             Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        TextButton(onClick = onClick) { Text(action) }
+        Spacer(Modifier.width(12.dp))
+        androidx.compose.material3.OutlinedButton(onClick = onClick) { Text(action) }
     }
 }
 
@@ -354,26 +354,35 @@ private fun DismissOnAction(state: AccountUiState, key: String, onDismiss: () ->
 }
 
 @Composable
-private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel, purpose: String, code: String, onCode: (String) -> Unit, requireSend: Boolean = false) {
-    val initialExpiry = remember { state.codeExpiresAt }
-    val sent = !requireSend || state.codeExpiresAt != initialExpiry
+private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel, purpose: String, code: String, onCode: (String) -> Unit, requireSend: Boolean = true, scope: String = purpose) {
+    val timing = state.codeDeliveries[scope]
+    val expiresAt = timing?.expiresAt ?: 0L
+    val resendAt = timing?.resendAt ?: 0L
+    val initialExpiry = remember { expiresAt }
+    var requested by remember { mutableStateOf(false) }
+    val sent = !requireSend || (requested && expiresAt != initialExpiry)
+    val sending = state.codeSending == scope
+    val labelAlpha by animateFloatAsState(if (sending) 0.2f else 1f, label = "sendCodeLabel")
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(state.codeExpiresAt, state.codeResendAt) {
+    LaunchedEffect(expiresAt, resendAt) {
         while (true) { now = System.currentTimeMillis(); delay(1000) }
     }
-    val wait = ((state.codeResendAt - now + 999) / 1000).coerceAtLeast(0)
-    val remaining = ((state.codeExpiresAt - now + 999) / 1000).coerceAtLeast(0)
+    val wait = if (sent) ((resendAt - now + 999) / 1000).coerceAtLeast(0) else 0L
+    val remaining = ((expiresAt - now + 999) / 1000).coerceAtLeast(0)
     val destination = if (purpose == "verify") state.profile?.pendingEmail?.ifBlank { state.profile?.email.orEmpty() }.orEmpty() else state.profile?.email.orEmpty()
     Text("Code delivery: $destination", style = MaterialTheme.typography.bodyMedium)
-    TextButton(onClick = { when (purpose) { "reset" -> account.sendPasswordResetCode(); "verify" -> account.resendEmailVerification(); else -> account.sendEmailCode() } }, enabled = !state.busy && wait == 0L) {
-        Text(if (wait > 0) "Resend in ${wait}s" else "Send code")
+    TextButton(onClick = { requested = true; when (purpose) { "reset" -> account.sendPasswordResetCode(scope); "verify" -> account.resendEmailVerification(scope); else -> account.sendEmailCode(scope) } }, enabled = !state.busy && wait == 0L) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(if (wait > 0) "Resend in ${wait}s" else "Send code", modifier = Modifier.alpha(labelAlpha))
+            if (sending) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        }
     }
-    AnimatedVisibility(visible = sent && state.codeExpiresAt > now) {
+    AnimatedVisibility(visible = sent && expiresAt > now) {
         Column(Modifier.animateContentSize()) {
             GlassTextField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Verification code", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
         }
     }
-    if (sent && state.codeExpiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (sent && expiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 @Composable
@@ -427,7 +436,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(if (verified) "Step 2 of 3" else "Step 1 of 3", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!verified) SecurityCodeFields(state, account, "reauth", code, { code = it })
+                if (!verified) SecurityCodeFields(state, account, "reauth", code, { code = it }, scope = "email-change")
                 else {
                     GlassTextField(email, { email = it.trimStart() }, "New email address", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Email))
                     GlassTextField(password, { password = it }, "Current password", password = true)
@@ -479,7 +488,7 @@ private fun BeginTotpDialog(state: AccountUiState, account: AccountViewModel, on
         onDismissRequest = { if (!state.busy) onDismiss() }, title = { Text("Set up authenticator") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(if (verified) "Confirm your password to create a setup key." else "First, verify your email.")
-            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it })
+            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, scope = "totp-setup")
             else GlassTextField(password, { password = it }, "Current password", password = true)
             DialogError(state)
         } },
@@ -560,7 +569,7 @@ private fun DisableTotpDialog(state: AccountUiState, account: AccountViewModel, 
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() }, title = { Text("Remove authenticator") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it })
+            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, scope = "totp-disable")
             else {
                 Text("Confirm your password to turn off two-factor sign-in.")
                 GlassTextField(password, { password = it }, "Current password", password = true)
@@ -599,7 +608,7 @@ private fun DeleteAccountDialog(
                 GlassTextField(username, { username = it }, "Username")
                 GlassTextField(password, { password = it }, "Current password", password = true)
                 if (profile.email.isNotBlank()) {
-                    SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, requireSend = true)
+                    SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, requireSend = true, scope = "account-delete")
                 }
                 DialogError(state)
             }

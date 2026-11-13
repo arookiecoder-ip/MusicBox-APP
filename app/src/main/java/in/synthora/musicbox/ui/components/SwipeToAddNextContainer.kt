@@ -29,6 +29,9 @@ import kotlin.math.abs
 internal fun horizontalRowIntent(dx: Float, dy: Float, slop: Float): Boolean =
     abs(dx) > slop * 2 && abs(dx) > abs(dy) * 2
 
+internal fun commitsRowSwipe(distance: Float, width: Float, minimum: Float, removing: Boolean): Boolean =
+    width > 0 && abs(distance) >= maxOf(minimum, width * if (removing) .5f else .35f)
+
 @Composable
 fun SwipeToAddNextContainer(onAddNext: () -> Unit, onAddToQueue: () -> Unit,
     modifier: Modifier = Modifier, content: @Composable RowScope.() -> Unit) {
@@ -49,6 +52,7 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
     val left by rememberUpdatedState(onLeft)
     val right by rememberUpdatedState(onRight)
     val haptic = rememberJukeHaptics()
+    val rowBackground = if (removing) `in`.synthora.musicbox.ui.theme.glassSheetColor() else MaterialTheme.colorScheme.background
     val scope = rememberCoroutineScope()
     var offset by remember { mutableFloatStateOf(0f) }
     var width by remember { mutableFloatStateOf(0f) }
@@ -79,7 +83,7 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                             offset = dx.coerceIn(-width, width)
                         }
                         if (!change.pressed) {
-                            if (horizontal && width > 0 && abs(dx) > width * .35f) {
+                            if (horizontal && commitsRowSwipe(dx, width, 96.dp.toPx(), removing)) {
                                 haptic.confirm()
                                 committed = true
                                 if (!removing) (if (dx < 0) left else right)?.invoke()
@@ -117,6 +121,6 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                 Text(if (removing) "Remove from queue" else if (positive) "Add to queue" else "Play next")
             }
         }
-        Box(Modifier.fillMaxWidth().graphicsLayer { translationX = offset }) { content() }
+        Box(Modifier.fillMaxWidth().graphicsLayer { translationX = offset }.background(rowBackground)) { content() }
     }
 }

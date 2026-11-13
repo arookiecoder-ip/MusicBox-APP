@@ -1,10 +1,12 @@
-name: Android Multi-User Build
+name: Android Production Build
 
 # Dedicated multi-user verification using the existing protected signing secret.
 on:
   push:
     branches:
+      - main
       - feat/multi-user
+      - release/production-cutover
   workflow_dispatch:
     inputs:
       ui_tests:
@@ -55,8 +57,8 @@ jobs:
           cat > local.properties <<EOF
           POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
           POSTHOG_HOST=${{ secrets.POSTHOG_HOST }}
-          MULTIUSER_SESSION_BASE_URL=https://testalexa.synthora.in
-          MULTIUSER_BASE_URL=https://testalexa.synthora.in
+          MULTIUSER_SESSION_BASE_URL=https://alexa.synthora.in
+          MULTIUSER_BASE_URL=https://alexa.synthora.in
           EOF
 
       - name: Compile and run JVM regressions
@@ -80,7 +82,8 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.QueueSelectionRegressionTest --no-daemon
+          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.QueueSelectionRegressionTest --no-daemon
+
 
       - name: Build the signed debug APK
         run: sh ./gradlew assembleDebug --no-daemon
