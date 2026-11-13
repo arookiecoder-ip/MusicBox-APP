@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.testTag
 import `in`.synthora.musicbox.ui.components.SwipeToRemoveQueueRow
 import `in`.synthora.musicbox.ui.components.playerDockInput
+import `in`.synthora.musicbox.ui.components.player.QueueBottomSheetContent
+import `in`.synthora.musicbox.viewmodels.MusicUiState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -148,6 +150,41 @@ class FeatureInteractionRegressionTest {
         assertEquals(1, expanded); assertEquals(0, behind)
         compose.onNodeWithTag("dock").performTouchInput { click(Offset(2f, 2f)) }
         assertEquals(0, behind)
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test fun queueEdgeScrollingNeverDismissesItsModalSheet() {
+        var open by mutableStateOf(true)
+        var dismissals = 0
+        val songs = (1..60).map { Track("queue-$it", "Queue song $it", "Artist", durationSec = 180) }
+        compose.setContent { JUKETheme {
+            if (open) {
+                val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+                ModalBottomSheet(onDismissRequest = { dismissals++; open = false }, sheetState = sheet, dragHandle = null) {
+                    Box(Modifier.fillMaxWidth().height(520.dp)) {
+                        QueueBottomSheetContent(songs[0], songs, 0, MusicUiState(),
+                            onClose = { dismissals++; open = false }, onMoveTrack = { _, _ -> },
+                            onRemoveTrack = { _, done -> done(false) }, onPlayTrack = {})
+                    }
+                }
+            }
+        } }
+        compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Queue song 45"))
+        repeat(12) {
+            compose.onNodeWithTag("Queue rows").performTouchInput { swipeDown(durationMillis = 180) }
+            compose.onNodeWithContentDescription("Close queue").assertIsDisplayed()
+        }
+        compose.onNodeWithText("Queue song 1", substring = false).assertIsDisplayed()
+        compose.onNodeWithTag("Queue rows").performScrollToNode(hasText("Queue song 60"))
+        repeat(3) {
+            compose.onNodeWithTag("Queue rows").performTouchInput { swipeUp(durationMillis = 180) }
+            compose.onNodeWithContentDescription("Close queue").assertIsDisplayed()
+        }
+        assertEquals(0, dismissals)
+        compose.onNodeWithContentDescription("Close queue").performClick()
+        compose.waitForIdle()
+        assertEquals(1, dismissals)
+        compose.onNodeWithTag("Queue rows").assertDoesNotExist()
     }
 
 }

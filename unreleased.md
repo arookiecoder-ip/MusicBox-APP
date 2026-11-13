@@ -2,6 +2,8 @@
 
 ## 2.5.5
 
+- Keep queue edge scrolling and flings inside the list instead of dismissing the queue sheet.
+
 - Pause Alexa directly during output handoffs, with a skill-pause fallback for unsupported devices.
 
 - Keep queue removal behind a deliberate half-row swipe and cover the reveal behind unmoved row content.

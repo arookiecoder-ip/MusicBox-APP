@@ -32,6 +32,11 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +49,15 @@ import `in`.synthora.musicbox.ui.components.QueueSongActions
 import `in`.synthora.musicbox.ui.components.LocalMediaMenu
 import `in`.synthora.musicbox.viewmodels.MusicUiState
 import kotlin.math.roundToInt
+
+/** List edge overscroll belongs to the queue, not the sheet's dismiss gesture. */
+internal object QueueListScrollBoundary : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        Offset(0f, available.y)
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+        Velocity(0f, available.y)
+}
 
 /** The web queue: one numbered list, left drag grip, artwork, duration and a separate more button. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -134,7 +148,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             Text(it, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onRetry) { Text("Retry") }
         } }
-        LazyColumn(Modifier.weight(1f).testTag("Queue rows"), state = list, contentPadding = PaddingValues(bottom = 12.dp)) {
+        LazyColumn(Modifier.weight(1f).nestedScroll(QueueListScrollBoundary).testTag("Queue rows"), state = list, contentPadding = PaddingValues(bottom = 12.dp)) {
             itemsIndexed(order, key = { _, key -> key }, contentType = { _, _ -> "queue-track" }) { position, key ->
                 val track = byKey.getValue(key)
                 val index = keyIndices.getValue(key)
