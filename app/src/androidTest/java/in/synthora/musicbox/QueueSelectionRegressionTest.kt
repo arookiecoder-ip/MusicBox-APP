@@ -345,8 +345,38 @@ class QueueSelectionRegressionTest {
                             instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(focusRequest) }
                             android.os.SystemClock.sleep(700)
                             instrumentation.runOnMainSync { assertFalse("Focus gain while call is active must not resume",controller.isPlaying) }
-                            mode(android.media.AudioManager.MODE_NORMAL)
+                            // MODE_NORMAL can precede the call's final audio buffers.
+                            val lingering = android.media.MediaPlayer()
+                            try {
+                                instrumentation.runOnMainSync {
+                                    lingering.setDataSource(audio.absolutePath)
+                                    lingering.isLooping = true
+                                    lingering.prepare()
+                                    lingering.start()
+                                }
+                                waitForState("Lingering audio did not become active") { audioManager.isMusicActive }
+                                mode(android.media.AudioManager.MODE_NORMAL)
+                                android.os.SystemClock.sleep(1_600)
+                                instrumentation.runOnMainSync {
+                                    assertFalse("Call audio must finish before automatic resume", controller.isPlaying)
+                                    lingering.stop()
+                                }
+                            } finally { instrumentation.runOnMainSync { lingering.release() } }
                             waitFor(songs[0].uuid,true)
+                            // Several OEM focus-loss callbacks can arrive just after hang-up.
+                            val lateFocus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+                                .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).build())
+                                .setOnAudioFocusChangeListener({}, android.os.Handler(android.os.Looper.getMainLooper())).build()
+                            try {
+                                repeat(2) {
+                                    instrumentation.runOnMainSync { assertEquals(android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED, audioManager.requestAudioFocus(lateFocus)) }
+                                    waitFor(songs[0].uuid, false)
+                                    instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(lateFocus) }
+                                    waitFor(songs[0].uuid, true)
+                                }
+                                android.os.SystemClock.sleep(1_200)
+                                instrumentation.runOnMainSync { assertTrue("Post-call resume must remain playing", controller.isPlaying) }
+                            } finally { instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(lateFocus) } }
                         } finally { instrumentation.runOnMainSync { audioManager.abandonAudioFocusRequest(focusRequest) } }
                         mode(android.media.AudioManager.MODE_IN_COMMUNICATION)
                         waitFor(songs[0].uuid,false)

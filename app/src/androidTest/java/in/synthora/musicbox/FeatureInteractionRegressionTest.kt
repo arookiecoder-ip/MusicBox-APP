@@ -1,6 +1,14 @@
 package `in`.synthora.musicbox
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
+import `in`.synthora.musicbox.ui.components.SwipeToRemoveQueueRow
+import `in`.synthora.musicbox.ui.components.playerDockInput
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -100,6 +108,46 @@ class FeatureInteractionRegressionTest {
         val finished = `in`.synthora.musicbox.services.downloadNotification(context, state.copy(active = 0, completed = 10), false)
         assertEquals("Downloads complete", finished.extras.getString(android.app.Notification.EXTRA_TITLE))
         assertTrue(finished.flags and android.app.Notification.FLAG_AUTO_CANCEL != 0)
+    }
+
+    @Test fun queueRemovalKeepsItsSurfaceAndRequiresADeliberateSwipe() {
+        var removed = 0
+        compose.setContent { JUKETheme { Surface {
+            SwipeToRemoveQueueRow(true, { removed++ }, Modifier.width(300.dp).testTag("swipe-row")) {
+                Box(Modifier.fillMaxWidth().height(64.dp))
+            }
+        } } }
+        val row = compose.onNodeWithTag("swipe-row")
+        val original = row.captureToImage().toPixelMap().let { it[it.width / 2, it.height / 2] }
+        row.performTouchInput { down(center); moveBy(Offset(-width * .25f, 0f)) }
+        val dragging = row.captureToImage().toPixelMap().let { it[it.width / 2, it.height / 2] }
+        assertEquals("The removal background must stay behind the displaced edge", original, dragging)
+        row.performTouchInput { up() }
+        compose.waitForIdle()
+        assertEquals(0, removed)
+        row.performTouchInput { swipe(Offset(width * .85f, height / 2), Offset(width * .15f, height / 2), 400) }
+        compose.waitForIdle()
+        assertEquals(1, removed)
+    }
+
+    @Test fun dockTouchesNeverReachContentBehindLoadingOrLiveControls() {
+        var behind = 0; var expanded = 0; var loading by mutableStateOf(true)
+        compose.setContent { JUKETheme {
+            Box(Modifier.size(300.dp, 100.dp)) {
+                Button(onClick = { behind++ }, modifier = Modifier.fillMaxSize()) { Text("Behind dock") }
+                Box(Modifier.fillMaxSize().playerDockInput().testTag("dock"), contentAlignment = Alignment.Center) {
+                    if (loading) Box(Modifier.fillMaxSize().background(Color.Gray))
+                    else TextButton(onClick = { expanded++ }) { Text("Open mini player") }
+                }
+            }
+        } }
+        compose.onNodeWithTag("dock").performTouchInput { click(center) }
+        assertEquals(0, behind)
+        compose.runOnIdle { loading = false }
+        compose.onNodeWithText("Open mini player").performTouchInput { click(center) }
+        assertEquals(1, expanded); assertEquals(0, behind)
+        compose.onNodeWithTag("dock").performTouchInput { click(Offset(2f, 2f)) }
+        assertEquals(0, behind)
     }
 
 }

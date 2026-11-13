@@ -104,14 +104,24 @@ class CallPlaybackGuardTest {
         guard.explicitPause();assertFalse(guard.needsModePolling)
     }
 
-    @Test fun delayedPostCallFocusLossSchedulesOnlyOneRecovery() {
+    @Test fun repeatedPostCallFocusLossRetriesAreBoundedAndWaitForSettling() {
         var calling=true;var now=1_000L;var schedules=0
         val guard=CallPlaybackGuard({calling},{},{schedules++},{},nowMs={now})
         guard.modeChanged(true);calling=false;guard.modeChanged(false)
         now+=800;assertTrue(guard.readyToResume());guard.resumeConsumed()
         now+=100;guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
         assertTrue(guard.resumePending);assertTrue(guard.isSettlingRetry)
+        assertFalse(guard.readyToResume())
+        now+=750; assertTrue(guard.readyToResume())
         guard.resumeConsumed()
+        repeat(2) {
+            now+=100
+            guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+            assertTrue(guard.resumePending)
+            assertFalse(guard.readyToResume())
+            now+=750; assertTrue(guard.readyToResume())
+            guard.resumeConsumed()
+        }
         guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
         assertFalse(guard.resumePending)
     }
@@ -123,7 +133,7 @@ class CallPlaybackGuardTest {
         guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
         assertFalse(guard.resumePending)
         calling=true;guard.modeChanged(true);calling=false;guard.modeChanged(false);guard.resumeConsumed()
-        now+=2_001
+        now+=8_001
         guard.onPlayWhenReadyChanged(false,Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
         assertFalse(guard.resumePending)
     }
@@ -175,6 +185,49 @@ class CallPlaybackGuardTest {
         assertFalse(canRecoverCallLease("old", "", own.copy(mode = "alexa"), "self"))
         assertFalse(canRecoverCallLease("old", "new", own.copy(handoffPending = true), "self"))
         assertTrue(canRecoverCallLease("old", "", own.copy(owner = "", token = "", leaseMs = 0), "self"))
+    }
+
+    @Test fun slowOwnershipRecoveryDoesNotSpendThePostCallFocusWindow() {
+        var calling = true; var now = 1_000L
+        val guard = CallPlaybackGuard({ calling }, {}, {}, {}, nowMs = { now })
+        guard.modeChanged(true); calling = false; guard.modeChanged(false)
+        now += 800; assertTrue(guard.readyToResume())
+        // The service can wait for a long-call lease renewal before player.play().
+        now += 12_000
+        assertTrue(guard.resumePending)
+        guard.resumeConsumed()
+        now += 300
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertTrue(guard.resumePending)
+    }
+
+    @Test fun retriesCannotExtendTheOriginalPostCallWindow() {
+        var calling = true; var now = 1_000L
+        val guard = CallPlaybackGuard({ calling }, {}, {}, {}, nowMs = { now })
+        guard.modeChanged(true); calling = false; guard.modeChanged(false)
+        guard.resumeConsumed()
+        now += 7_000
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertTrue(guard.resumePending)
+        now += 800; assertFalse(guard.readyToResume())
+        now += 750; assertTrue(guard.readyToResume())
+        guard.resumeConsumed()
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertFalse(guard.resumePending)
+    }
+
+    @Test fun aSecondCallGetsItsOwnRecoveryBudget() {
+        var calling = true; var now = 1_000L
+        val guard = CallPlaybackGuard({ calling }, {}, {}, {}, nowMs = { now })
+        guard.modeChanged(true); calling = false; guard.modeChanged(false); guard.resumeConsumed()
+        repeat(3) {
+            guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+            guard.resumeConsumed()
+        }
+        calling = true; guard.modeChanged(true)
+        now += 30_000; calling = false; guard.modeChanged(false); guard.resumeConsumed()
+        guard.onPlayWhenReadyChanged(false, Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS)
+        assertTrue(guard.resumePending)
     }
 
 }

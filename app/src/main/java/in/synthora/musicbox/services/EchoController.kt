@@ -594,6 +594,7 @@ class EchoController(
             "queue_session_id" to JsonPrimitive(playQueueSession),
             "serial" to JsonPrimitive(requireSerial()),
             "force_radio" to JsonPrimitive(radio),
+            "new_queue" to JsonPrimitive(true),
             "suppress_radio" to JsonPrimitive(suppressRadio),
             "intent_seq" to JsonPrimitive(seq),
             "intent_client" to JsonPrimitive(intentClient)

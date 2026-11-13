@@ -542,18 +542,15 @@ class PlaybackService : MediaLibraryService() {
             // Do not take playback back from another music app selected during
             // the call or during Android's final focus handoff.
             if (callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
-                // Audio still active after call - just clear resumePending to stop looping
-                // but do NOT call resumeConsumed() to avoid interfering with audio device switches
-                // Use explicitPlay() instead of direct resumePending assignment since resumePending has private set
-                callGuard.explicitPlay()
-                mainHandler.postDelayed(this, 250)
+                // Waiting is not an explicit Play: retain the call's resume
+                // intent until the remaining audio releases (or another app wins).
+                if (callGuard.resumePending) mainHandler.postDelayed(this, 250)
                 return
             }
-            // Audio has released - safely resume playback
-            callGuard.resumeConsumed()
             // The normal resume path safely renews an expired lease and fences newer devices.
+            // Keep the call intent until that asynchronous work reaches the renderer.
             cancelledMedia3Resume=false
-            resumeFromSession(explicit=false)
+            resumeFromSession(explicit=false, fromCall=true)
         }
     }
     private val callGuard: CallPlaybackGuard = CallPlaybackGuard(
@@ -765,7 +762,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     /** All session Play calls pass here; the app's already-authorized renderer calls stay unchanged. */
-    private fun resumeFromSession(explicit: Boolean = true) {
+    private fun resumeFromSession(explicit: Boolean = true, fromCall: Boolean = false) {
         if (cancelledMedia3Resume) return
         if (outputPrefs.getString("playback_output", "PHONE") != "PHONE") {
             showSessionResumeFailure("Playback is selected on another device. Open Music Box to select this phone.")
@@ -841,6 +838,18 @@ class PlaybackService : MediaLibraryService() {
                 if (!resumeCommands.current(request) || player.currentMediaItem?.mediaId != id ||
                     PhonePlaybackOwnership.token != expectedClaim || outputPrefs.getString("playback_output", "PHONE") != "PHONE") return@launch
                 check(PhonePlaybackOwnership.permitsPlayback() || canContinueCurrentAudioOffline()) { "Playback authorization expired. Tap Play to retry." }
+                if (fromCall) {
+                    // Calls, explicit Pause and other apps can change while
+                    // ownership/network recovery is suspended. Recheck before
+                    // touching the renderer, not just when the timer fired.
+                    if (!callGuard.resumePending) return@launch
+                    if (!callGuard.readyToResume() ||
+                        callGuard.waitForAudioRelease(audioManager.isMusicActive && !player.isPlaying)) {
+                        if (callGuard.resumePending) mainHandler.postDelayed(resumeAfterCall, 250)
+                        return@launch
+                    }
+                    callGuard.resumeConsumed()
+                }
                 publishResumedQueue()
                 if (player.playerError != null) recoverCurrentStream(manual = true)
                 else {
