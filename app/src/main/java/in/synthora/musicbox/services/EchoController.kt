@@ -409,7 +409,7 @@ class EchoController(
         finally { mutationEpoch++; refreshedAt = 0 }
     }
 
-    suspend fun command(action: String, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
+    suspend fun command(action: String, refreshAfter: Boolean = true, expectedPhoneToken: String? = null, nativeHandoffPause: Boolean = false) {
         pendingSeek = null
         seekIntent++
         val previous = _state.value
@@ -438,6 +438,7 @@ class EchoController(
             try {
                 send("/alexa/command/", buildJsonObject {
                     put("serial", requireSerial()); put("action", action)
+                    if (action == "pause" && nativeHandoffPause) put("native_handoff", true)
                     if (expectedPhoneToken != null) {
                         put("output_owner", PhonePlaybackOwnership.ownerId); put("output_token", expectedPhoneToken)
                         put("phone_paused", true)

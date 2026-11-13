@@ -1256,7 +1256,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             echo.refresh(force = true)
                         } else {
                             transferPlayback(
-                                pauseSource = { if (from.playing) echo.command("pause", refreshAfter = false) },
+                                pauseSource = { if (from.playing) echo.command("pause", refreshAfter = false, nativeHandoffPause = true) },
                                 startTarget = {
                                     echo.select(serial!!, refreshAfter = false)
                                     moveQueueToEcho(from.queue, from.index, from.track, from.livePosition(), from.playing)

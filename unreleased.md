@@ -2,6 +2,8 @@
 
 ## 2.5.5
 
+- Pause Alexa directly during output handoffs, with a skill-pause fallback for unsupported devices.
+
 - Keep queue removal behind a deliberate half-row swipe and cover the reveal behind unmoved row content.
 - Start a new queue for song selections outside the queue, including retries of failed selections.
 - Keep mini-player and loading-dock touches from activating content underneath.
