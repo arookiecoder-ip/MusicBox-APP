@@ -133,6 +133,9 @@ object AccountWebApi {
         if (response.status == 303 && response.location == "/signup") {
             return SignupReply(DoorResult(true, ""), openSignup())
         }
+        if (step == "details" && response.status == 303 && response.location == "/account") {
+            return SignupReply(DoorResult(true, "Account created."), null)
+        }
         val result = DoorHtml.doorResult(response, listOf("account created"))
         val gate = DoorHtml.signupGate(response.body)
         return SignupReply(result.copy(ok = result.ok && gate == null && response.status in 200..299), gate)

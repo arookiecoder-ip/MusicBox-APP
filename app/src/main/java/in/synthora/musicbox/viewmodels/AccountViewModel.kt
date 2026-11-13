@@ -267,7 +267,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 val status = AccountStatus(
                     amazonConnected = profile.flag("alexa_access_enabled") && profile.flag("amazon_connected"),
                     alexaAccessEnabled = profile.flag("alexa_access_enabled"),
-                    youtubeLibrary = profile.flag("youtube_auth_working"),
+                    youtubeLibrary = profile.flag("youtube_own_session"),
                     youtubeCookies = _state.value.status?.youtubeCookies ?: false,
                     youtubeCookiesPresent = profile.flag("youtube_cookies_present"),
                     youtubeBrowserAvailable = profile.flag("youtube_browser_available"),
@@ -505,8 +505,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     private fun applySignupReply(reply: AccountWebApi.SignupReply, email: String? = null, username: String? = null, sentCode: Boolean = false) {
         val gate = reply.gate
         if (gate == null && reply.result.ok) {
-            _state.update { it.copy(stage = AuthStage.SIGNED_OUT,
-                door = AuthDoorState(message = "Account created. Your email is verified. Sign in."), error = null) }
+            onSignedIn()
             return
         }
         if (gate?.step == AccountWebApi.SignupStep.EMAIL) signupOpenedAt = android.os.SystemClock.elapsedRealtime()
