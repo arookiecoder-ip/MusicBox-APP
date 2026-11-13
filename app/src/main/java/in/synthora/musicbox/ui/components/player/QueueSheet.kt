@@ -128,7 +128,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             fun beginGesture(atTop: Boolean) { eligible = atTop; distance = 0f }
             fun endGesture() { eligible = false; distance = 0f }
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < 0f || list.canScrollBackward) distance = 0f
+                if (available.y < 0f || list.canScrollBackward) { distance = 0f; eligible = false }
                 return Offset.Zero
             }
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
@@ -136,11 +136,11 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                     distance += available.y
                     if (distance >= dismissDistance) { endGesture(); closeQueue() }
                 }
-                return Offset(0f, available.y)
+                return QueueListScrollBoundary.onPostScroll(consumed, available, source)
             }
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
                 endGesture()
-                return Velocity(0f, available.y)
+                return QueueListScrollBoundary.onPostFling(consumed, available)
             }
         }
     }
