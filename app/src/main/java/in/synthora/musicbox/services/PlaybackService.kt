@@ -1102,12 +1102,7 @@ class PlaybackService : MediaLibraryService() {
         serviceScope.launch {
             try {
                 val track = database.trackDao().getTrackByUuid(mediaId) ?: return@launch
-                val videoId = track.ytVideoId ?: return@launch
-                `in`.synthora.musicbox.network.Backend.post("/api/track/$videoId/listen", kotlinx.serialization.json.buildJsonObject {
-                    put("title", track.title)
-                    put("artist", track.artist)
-                    put("thumbnail", track.thumbnailUri.orEmpty())
-                })
+                LocalListeningHistory.record(this@PlaybackService, track)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if (lastReportedListen == mediaId) lastReportedListen = null

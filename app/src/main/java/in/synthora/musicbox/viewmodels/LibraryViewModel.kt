@@ -225,7 +225,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         startView(LibraryView.HISTORY, null)
         viewJob = viewModelScope.launch {
             guarded {
-                val history = Backend.get("/history/")
+                val history = `in`.synthora.musicbox.services.LocalListeningHistory.history(getApplication())
                 loadedTracks = (history as? kotlinx.serialization.json.JsonArray).orEmpty()
                     .mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                     .filter { it.videoId.isNotBlank() }

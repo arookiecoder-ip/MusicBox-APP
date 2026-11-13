@@ -275,6 +275,13 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 )
                 `in`.synthora.musicbox.services.AmazonAccess.update(status.alexaAccessEnabled)
                 _state.update { it.copy(status = status) }
+                if (profile.flag("youtube_auth_working") && profile.flag("youtube_own_session")) {
+                    viewModelScope.launch {
+                        try { `in`.synthora.musicbox.services.LocalListeningHistory.sync(getApplication()) }
+                        catch (e: CancellationException) { throw e }
+                        catch (_: Exception) { /* Pending history stays encrypted locally for retry. */ }
+                    }
+                }
                 if (checkAudio) {
                     val result = downloadCookies.check()
                     _state.update { it.copy(status = (it.status ?: AccountStatus()).copy(youtubeCookies = result.valid), cookieMessage = result.message) }

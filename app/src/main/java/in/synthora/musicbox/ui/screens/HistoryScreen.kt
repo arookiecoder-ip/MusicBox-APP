@@ -21,6 +21,7 @@ import kotlinx.serialization.json.JsonObject
 
 @Composable
 fun HistoryScreen(music: MusicViewModel, onBack: () -> Unit, bottomPadding: Dp) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -28,7 +29,7 @@ fun HistoryScreen(music: MusicViewModel, onBack: () -> Unit, bottomPadding: Dp) 
     LaunchedEffect(retry) {
         loading = true; error = null
         try {
-            tracks = (Backend.get("/history/") as? JsonArray).orEmpty()
+            tracks = (`in`.synthora.musicbox.services.LocalListeningHistory.history(context) as? JsonArray).orEmpty()
                 .mapNotNull { (it as? JsonObject)?.let(BrowseParser::item) }
                 .filter { it.videoId.isNotBlank() }.map { it.toTrack() }
         } catch (e: CancellationException) { throw e }

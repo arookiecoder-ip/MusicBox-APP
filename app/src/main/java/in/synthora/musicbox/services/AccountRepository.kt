@@ -27,15 +27,18 @@ object AccountRepository {
         _subscriptions.tryEmit(ArtistSubscriptionChange(artist, subscribed))
     }
 
+    private var generation = 0L
     private val _liked = MutableStateFlow<Set<String>>(emptySet())
     val liked: StateFlow<Set<String>> = _liked.asStateFlow()
 
     fun isLiked(videoId: String?): Boolean = videoId != null && videoId in _liked.value
 
     suspend fun refreshLiked() {
+        val started = generation
         try {
-            _liked.value = Backend.get("/api/liked_songs/").objectOrEmpty().array("liked_songs")
+            val liked = Backend.get("/api/liked_songs/").objectOrEmpty().array("liked_songs")
                 .mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.toSet()
+            if (started == generation) _liked.value = liked
         } catch (e: CancellationException) {
             throw e
         } catch (e: BackendAuthException) {
@@ -47,6 +50,7 @@ object AccountRepository {
 
     /** Like or un-like on YouTube Music. The change shows immediately and is undone on failure. */
     suspend fun setLiked(videoId: String, liked: Boolean) {
+        val started = generation
         _liked.update { if (liked) it + videoId else it - videoId }
         try {
             Backend.post("/alexa/like/", JsonObject(mapOf(
@@ -54,12 +58,13 @@ object AccountRepository {
                 "action" to JsonPrimitive(if (liked) "LIKE" else "INDIFFERENT")
             )))
         } catch (e: Exception) {
-            _liked.update { if (liked) it - videoId else it + videoId }
+            if (started == generation) _liked.update { if (liked) it - videoId else it + videoId }
             throw e
         }
     }
 
     fun clear() {
+        generation++
         _liked.value = emptySet()
     }
 }
