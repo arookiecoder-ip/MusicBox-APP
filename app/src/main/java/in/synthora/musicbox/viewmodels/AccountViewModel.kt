@@ -849,6 +849,7 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
                 AccountWebApi.deleteAccount(currentPassword, username, emailCode)
                 Backend.clearSession()
                 AccountWebApi.clearSecrets()
+                `in`.synthora.musicbox.services.LocalListeningHistory.deleteAccount(getApplication())
                 AccountScope.forget(getApplication())
                 _state.value = AccountUiState(
                     stage = AuthStage.SIGNED_OUT,

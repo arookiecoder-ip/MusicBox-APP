@@ -22,6 +22,10 @@ object LocalListeningHistory {
         val encrypted = SecureStore.encrypt(JsonArray(rows.take(100)).toString()) ?: return
         prefs(context, id).edit().putString("rows", encrypted).commit()
     }
+    suspend fun deleteAccount(context: Context) = mutex.withLock {
+        AccountScope.current(context)?.id?.let { prefs(context, it).edit().clear().commit() }
+        Unit
+    }
     suspend fun record(context: Context, track: Track) {
         val id = AccountScope.current(context)?.id ?: return
         val video = track.ytVideoId ?: return
