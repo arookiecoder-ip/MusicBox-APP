@@ -496,6 +496,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _queueLoadError = MutableStateFlow<String?>(null)
     val queueLoadError = _queueLoadError.asStateFlow()
     fun refreshQueue() {
+        if(JamSession.active){JamSession.refresh();return}
         viewModelScope.launch {
             _queueLoadError.value = null
             try {
@@ -514,7 +515,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyAlexaWindow(window: QueueManager.AlexaQueueWindow) {
-        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback) return
+        if (JamSession.active) return
         // While this phone owns output, its edits/order win over delayed remote snapshots.
         if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.token.isNotBlank()) return
         val state = _uiState.value
@@ -2174,7 +2175,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun publishPhoneQueue(tracks: List<Track>, index: Int, positionMs: Long, playing: Boolean, startRadio: Boolean = false) = phoneQueueMutex.withLock {
-        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback) return@withLock
+        if (JamSession.active) return@withLock
         require(index in tracks.indices)
         require(tracks.size <= 5_000) { "This queue exceeds the server's 5,000-song limit" }
         val seed = requireNotNull(tracks[index].ytVideoId)
@@ -2221,7 +2222,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun synchronizePhoneQueue(startRadio: Boolean = false) {
-        if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback) return
+        if (JamSession.active) return
         if (isAlexa || isRemotePhone || !signedIn || !serverPlaybackChecked || `in`.synthora.musicbox.services.PhonePlaybackOwnership.token.isBlank() || !`in`.synthora.musicbox.network.NetworkFeedback.online.value) return
         val state = _uiState.value
         if (!`in`.synthora.musicbox.services.canPublishPhoneQueue(

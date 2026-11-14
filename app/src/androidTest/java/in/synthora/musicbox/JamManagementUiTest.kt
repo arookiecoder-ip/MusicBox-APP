@@ -26,7 +26,7 @@ class JamManagementUiTest {
         val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val directory=java.io.File(context.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
         java.io.File(directory,name+".png").outputStream().use {output->
-            compose.onRoot().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,output)
+            compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,output)
         }
     }
     private fun host()=JamUiState(active=true,host=true,url="https://example.test/j/abcdefghijk",memberCount=2,

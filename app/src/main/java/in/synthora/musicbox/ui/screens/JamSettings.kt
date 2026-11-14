@@ -49,10 +49,10 @@ internal fun JamSettingsContent(
     val context = LocalContext.current
     val share = rememberShareAction()
     var showParticipants by remember { mutableStateOf(false) }
-    LaunchedEffect(state.active) {if(!state.active)showParticipants=false}
     var confirmEnd by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
     var removeMember by remember { mutableStateOf<`in`.synthora.musicbox.viewmodels.JamMember?>(null) }
+    LaunchedEffect(state.active) {if(!state.active){showParticipants=false;confirmEnd=false;showQr=false;removeMember=null}}
     Column(Modifier.padding(horizontal=24.dp,vertical=12.dp)) {
         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
             .clickable(enabled=state.active,role=Role.Button,onClickLabel="Open Jam participants"){showParticipants=true}
