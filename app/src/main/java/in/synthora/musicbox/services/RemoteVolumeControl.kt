@@ -24,7 +24,7 @@ object RemoteVolumeControl {
             if (_feedback.value?.sequence == sequence) _feedback.value = null
         }
     }
-    fun current(context: Context): Int? = when (mode(context)) {
+    fun current(context: Context): Int? = if (`in`.synthora.musicbox.viewmodels.JamSession.active) `in`.synthora.musicbox.viewmodels.JamSession.volumeTarget()?.volume else when (mode(context)) {
         "ALEXA" -> PlaybackCoordinator.echo(context).state.value.volume
         "REMOTE_PHONE" -> MobileDeviceConnection.devices.value.firstOrNull { it.id == MobileDeviceConnection.output.value.owner }?.volume
         else -> null
@@ -32,6 +32,7 @@ object RemoteVolumeControl {
     private fun mode(context: Context) = context.getSharedPreferences("music_settings_prefs", Context.MODE_PRIVATE)
         .getString("playback_output", "PHONE")
     fun adjust(context: Context, direction: Int): Boolean {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active) return `in`.synthora.musicbox.viewmodels.JamSession.adjustVolume(direction)
         if (mode(context) !in setOf("ALEXA", "REMOTE_PHONE")) return false
         val current = current(context) ?: return true
         val output = MobileDeviceConnection.output.value
@@ -42,6 +43,13 @@ object RemoteVolumeControl {
         return true
     }
     fun set(context: Context, value: Int) {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active) {
+            `in`.synthora.musicbox.viewmodels.JamSession.volumeTarget()?.let {target->
+                preview(value,target.name)
+                `in`.synthora.musicbox.viewmodels.JamSession.setVolume(target.id,value)
+            }
+            return
+        }
         val app = context.applicationContext
         val selected = mode(app)
         job?.cancel()

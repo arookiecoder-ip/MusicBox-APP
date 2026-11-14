@@ -18,6 +18,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -61,6 +63,7 @@ fun PlayerControls(
     onSaveToPlaylist: () -> Unit = {}
 ) {
     val haptic = rememberJukeHaptics()
+    val jam by `in`.synthora.musicbox.viewmodels.JamSession.state.collectAsStateWithLifecycle()
     val resolvedPlayButtonSize = playButtonSize ?: if (isLarge) 88.dp else 72.dp
     val resolvedButtonSize = buttonSize ?: if (isLarge) 72.dp else 56.dp
     val resolvedIconSize = iconSize ?: if (isLarge) 56.dp else 40.dp
@@ -121,7 +124,7 @@ fun PlayerControls(
                 .scale(playButtonScale.value)
                 .glassPane(CircleShape, GlassLevel.Thick, accent)
                 .background(accent.copy(alpha = 0.9f))
-                .clickable(enabled = !uiState.isLoading, role = Role.Button) {
+                .clickable(enabled = !uiState.isLoading || jam.active, role = Role.Button) {
                     haptic.heavyClick()
                     musicViewModel.togglePlayPause()
                 },

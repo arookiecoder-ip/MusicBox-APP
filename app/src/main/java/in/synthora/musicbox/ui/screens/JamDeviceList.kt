@@ -1,6 +1,9 @@
 package `in`.synthora.musicbox.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PhoneAndroid
+import androidx.compose.material.icons.outlined.Speaker
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,12 +29,18 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
         }
         state.outputs.groupBy{it.username}.forEach{(username,outputs)->
             Text(username,style=MaterialTheme.typography.titleSmall,modifier=Modifier.padding(top=16.dp,bottom=8.dp))
+            val echoOwners=outputs.flatMap{output->output.devices.filter{it.kind=="alexa"}.map{it.id to output}}.groupBy{it.first}.mapValues{(_,rows)->
+                rows.firstOrNull{(_,output)->output.id in selected && (targets.text(output.id).let{it.isNotBlank() && it==rows.first().first} || output.devices.any{it.id==rows.first().first && it.active})}?.second?.id ?: rows.first().second.id
+            }
             outputs.forEach{output->
                 val devices=output.devices.ifEmpty{listOf(JamDevice("current",output.name,output.kind,true))}
                 val target=targets.text(output.id).ifBlank{devices.firstOrNull{it.active}?.id ?: devices.first().id}
-                devices.forEach{device->
+                devices.filter{it.kind!="alexa" || echoOwners[it.id]==output.id}.forEach{device->
                     val checked=output.id in selected && device.id==target
                     Row(Modifier.fillMaxWidth().heightIn(min=64.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Icon(if(device.kind=="alexa")Icons.Outlined.Speaker else Icons.Outlined.PhoneAndroid,null,
+                            tint=if(checked)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(24.dp))
+                        Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f).padding(end=12.dp)) {
                             Text(device.name,style=MaterialTheme.typography.bodyLarge)
                             Text(if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked)"Playing here" else "Available"},

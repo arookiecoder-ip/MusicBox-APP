@@ -94,6 +94,17 @@ open class JamClient internal constructor(
     var applyOutput: (suspend (String)->Unit)? = null
     private val acknowledgements=linkedSetOf<String>()
     private val volumeJobs=mutableMapOf<String,Job>()
+    fun volumeTarget():JamOutput? {
+        val room=_state.value
+        val selected=room.playback.array("selected").map{it.jsonPrimitive.content}
+        return room.outputs.firstOrNull{it.id==deviceId() && it.id in selected}
+            ?: room.outputs.firstOrNull{it.id in selected}
+    }
+    fun adjustVolume(direction:Int):Boolean {
+        if(!active)return false
+        volumeTarget()?.let{setVolume(it.id,(it.volume ?: 50)+direction*5)}
+        return true
+    }
     fun setVolume(device:String,value:Int) {
         if(!active) return
         val target=_state.value.outputs.firstOrNull{it.id==device} ?: return

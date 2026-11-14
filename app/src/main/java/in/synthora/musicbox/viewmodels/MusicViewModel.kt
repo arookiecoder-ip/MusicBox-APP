@@ -2659,13 +2659,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Route physical keys to the selected output; local keys retain Android's normal behavior. */
     fun adjustSelectedDeviceVolume(direction: Int): Boolean {
-        if(JamSession.active) {
-            val state=JamSession.state.value
-            val selected=state.playback.array("selected").map{it.toString().trim('"')}
-            val target=state.outputs.firstOrNull{it.id==`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId && it.id in selected} ?: state.outputs.firstOrNull{it.id in selected}
-            target?.let{JamSession.setVolume(it.id,(it.volume ?: 50)+direction*5)}
-            return true
-        }
+        if(JamSession.active)return JamSession.adjustVolume(direction)
         if (!signedIn || _output.value == PlaybackOutput.PHONE) return false
         if (_isSwitchingOutput.value) return true
         return `in`.synthora.musicbox.services.RemoteVolumeControl.adjust(getApplication(), direction)
