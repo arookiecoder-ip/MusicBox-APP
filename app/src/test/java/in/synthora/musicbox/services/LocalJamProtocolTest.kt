@@ -46,6 +46,13 @@ class LocalJamProtocolTest {
         for(ip in listOf("192.168.2.2","8.8.8.8","127.0.0.1","224.0.0.1","0.0.0.0","::1"))
             assertFalse(ip,LocalJamProtocol.sameSubnet(local,InetAddress.getByName(ip),24))
     }
+    @Test fun dualStackDiscoveryChoosesTheAddressOnTheCurrentWifiSubnet() {
+        val local=InetAddress.getByName("192.168.1.2")
+        val wifi=InetAddress.getByName("192.168.1.99")
+        val addresses=listOf(InetAddress.getByName("2001:db8::1"),InetAddress.getByName("10.0.0.1"),wifi)
+        assertEquals(wifi,LocalJamProtocol.peerAddress(local,addresses,24))
+        assertNull(LocalJamProtocol.peerAddress(local,addresses.take(2),24))
+    }
     @Test fun realSocketRoundTripAuthenticatesTimingAndRejectsOversizedFrames() {
         val server=ServerSocket(0,1,InetAddress.getLoopbackAddress())
         val executor=Executors.newSingleThreadExecutor()

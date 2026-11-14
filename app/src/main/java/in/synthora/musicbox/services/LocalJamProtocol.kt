@@ -48,6 +48,9 @@ internal object LocalJamProtocol {
         if(duration>0 && corrected>=duration-500)return null
         return corrected
     }
+    fun peerAddress(local:java.net.InetAddress,addresses:List<java.net.InetAddress>,prefix:Int):java.net.InetAddress? =
+        addresses.firstOrNull{sameSubnet(local,it,prefix)}
+
     fun sameSubnet(local:java.net.InetAddress,peer:java.net.InetAddress,prefix:Int):Boolean {
         if(peer.isLoopbackAddress || peer.isAnyLocalAddress || peer.isMulticastAddress)return false
         val a=local.address;val b=peer.address
