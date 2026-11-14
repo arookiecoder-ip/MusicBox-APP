@@ -10,7 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.ChevronRight
+import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Groups
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Close
@@ -65,7 +65,7 @@ internal fun JamSettingsContent(
             }
             if(state.active) {
                 Icon(Icons.Outlined.Groups,null,tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(start=12.dp).size(22.dp))
-                Icon(Icons.AutoMirrored.Outlined.ChevronRight,null,tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(24.dp))
+                Icon(Icons.Outlined.ChevronRight,null,tint=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(24.dp))
             }
         }
         state.error?.takeIf { state.active }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
