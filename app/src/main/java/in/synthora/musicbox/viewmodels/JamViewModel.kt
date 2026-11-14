@@ -215,7 +215,7 @@ open class JamClient internal constructor(
                 if(command.text("action")=="volume") {
                     val target=command.text("target_id")
                     if(target.isNotBlank() && target!=outputStatus().text("target_id"))continue
-                    applyVolume?.invoke(command.number("value").toInt())
+                    if(localVolumePreview?.second?.let{it>clock()}!=true) applyVolume?.invoke(command.number("value").toInt())
                     acknowledgements+=id
                 }
             }

@@ -172,4 +172,23 @@ class JamManagementUiTest {
         }),ownDeviceId="controller")}}
         compose.onAllNodesWithContentDescription("Volume").assertCountEquals(0)
     }
+    @Test fun compactPlayOnLayoutKeepsParticipantManagementOutOfTheDeviceList() {
+        val state=host().copy(hostName="arookiecoder",outputs=listOf(
+            JamOutput("host-phone","SM-S938B",true,"",username="arookiecoder",volume=46,playing=true,devices=listOf(JamDevice("phone","SM-S938B","phone",true))),
+            JamOutput("echo","Jit's Echo Dot",true,"",username="arookiecoder",kind="alexa",devices=listOf(JamDevice("alexa:serial","Jit's Echo Dot","alexa",true))),
+            JamOutput("alice-phone","SM-T970",true,"",username="Testabc",volume=66,devices=listOf(JamDevice("phone","SM-T970","phone",true)))),
+            playback=buildJsonObject{put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive("host-phone"),JsonPrimitive("alice-phone"))))})
+        compose.setContent{JUKETheme(darkTheme=true){androidx.compose.material3.Surface(color=androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh){
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                PlayOnHeader(false){}
+                JamDeviceList(state,{_,_->},{_,_,_,_->})
+                JamSettingsContent(state,{},{},{},{},{_,_->},{})
+            }
+        }}}
+        compose.onNodeWithContentDescription("Refresh devices").assertIsDisplayed()
+        compose.onAllNodesWithText("Participants").assertCountEquals(0)
+        compose.onNodeWithText("Invite").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("End Jam").assertIsDisplayed()
+        screenshot("play-on-redesign")
+    }
 }
