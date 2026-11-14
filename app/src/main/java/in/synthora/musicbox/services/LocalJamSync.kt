@@ -73,7 +73,8 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
                     override fun onServiceResolved(service:NsdServiceInfo) {
                         val id=service.attributes["peer"]?.toString(Charsets.UTF_8)
                         val room=service.attributes["room"]?.toString(Charsets.UTF_8)
-                        val host=service.host ?: return
+                        val addresses=if(android.os.Build.VERSION.SDK_INT>=34)service.hostAddresses else listOfNotNull(service.host)
+                        val host=LocalJamProtocol.peerAddress(address.address,addresses,address.prefixLength) ?: return
                         if(live() && id==context.leader && room==context.room && service.port in 1..65535 &&
                             LocalJamProtocol.sameSubnet(address.address,host,address.prefixLength))peer=InetSocketAddress(host,service.port)
                     }
@@ -87,7 +88,8 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
                     server=socket
                     if(!live()){socket.close();return@launch}
                     val info=NsdServiceInfo().apply{serviceName=name(context.own);serviceType="_mbjam._tcp.";port=socket.localPort
-                        setAttribute("room",context.room);setAttribute("peer",context.own)}
+                        setAttribute("room",context.room);setAttribute("peer",context.own)
+                        if(android.os.Build.VERSION.SDK_INT>=33)setNetwork(network)}
                     runCatching{nsd.registerService(info,NsdManager.PROTOCOL_DNS_SD,registration);registered=true}
                     runCatching{nsd.discoverServices("_mbjam._tcp.",NsdManager.PROTOCOL_DNS_SD,discovery);discovering=true}
                     if(!live()){close();return@launch}
