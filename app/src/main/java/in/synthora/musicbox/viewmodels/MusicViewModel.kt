@@ -2171,8 +2171,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 pendingPlaybackJob?.cancel()
                 youtubeLinkJob?.cancel()
                 pendingPlayback.value = selection.copy(requestId = playbackRequestId, loading = false, error = null)
-                viewModelScope.launch { `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff() }
-                playbackManager.cancelPendingStart()
+                when {
+                    isAlexa -> launchEcho { echo.command("pause") }
+                    isRemotePhone -> remoteControl("pause")
+                    else -> {
+                        viewModelScope.launch { `in`.synthora.musicbox.services.PlaybackService.pausePhoneForHandoff() }
+                        playbackManager.cancelPendingStart()
+                    }
+                }
             }
             return
         }

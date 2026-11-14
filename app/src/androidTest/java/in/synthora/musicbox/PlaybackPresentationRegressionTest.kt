@@ -3,6 +3,7 @@ package `in`.synthora.musicbox
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import `in`.synthora.musicbox.models.Track
+import `in`.synthora.musicbox.ui.components.MiniPlayerTransport
 import `in`.synthora.musicbox.ui.components.MiniPlayerSkeleton
 import `in`.synthora.musicbox.ui.components.player.QueueBottomSheetContent
 import `in`.synthora.musicbox.ui.theme.ExtractedColors
@@ -31,6 +33,23 @@ class PlaybackPresentationRegressionTest {
         skeleton.assertIsDisplayed().assertHeightIsAtLeast(62.dp).assertHasNoClickAction()
         compose.onNodeWithContentDescription("Loading playback").assertExists()
         assertFalse(skeleton.fetchSemanticsNode().config.contains(SemanticsProperties.Selected))
+    }
+
+    @Test fun miniPlayerTransportRemainsClickableWhileLoadingAndAnimating() {
+        var loading by mutableStateOf(true)
+        var playing by mutableStateOf(false)
+        var clicks = 0
+        compose.setContent { JUKETheme {
+            MiniPlayerTransport(playing, loading, { clicks++ }, Modifier.testTag("mini transport"))
+        } }
+        val control = compose.onNodeWithTag("mini transport")
+        control.assertIsEnabled().assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
+        control.performClick()
+        compose.runOnIdle { assertEquals(1, clicks); loading = false }
+        compose.onNodeWithContentDescription("Play").performClick()
+        compose.runOnIdle { assertEquals(2, clicks); playing = true }
+        control.assertIsEnabled().assertWidthIsEqualTo(48.dp).performClick()
+        compose.runOnIdle { assertEquals(3, clicks) }
     }
 
     @Test fun queueUsesArtworkColorsAndBlendsThemWhenTheSelectedSongChanges() {
