@@ -217,10 +217,10 @@ object JamSession : JamClient(
 class JamViewModel : ViewModel() {
     val state = JamSession.state
     fun refresh() = JamSession.refresh()
-    fun start() = JamSession.action("/alexa/jam/start/", buildJsonObject { put("device_id", deviceId()) })
+    fun start() = JamSession.action("/alexa/jam/start/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
     fun stop() = JamSession.action("/alexa/jam/stop/")
     fun leave() = JamSession.action("/api/jam/leave/")
-    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", deviceId()) })
+    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
     fun remove(id: String) = JamSession.action("/alexa/jam/remove/", buildJsonObject { put("member_id", id) })
     fun configure(mode: String, devices: List<String>) = JamSession.command("configure", buildJsonObject {
         put("mode", mode); put("selected", JsonArray(devices.map(::JsonPrimitive)))
