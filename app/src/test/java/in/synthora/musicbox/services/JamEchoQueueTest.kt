@@ -41,6 +41,10 @@ class JamEchoQueueTest {
             assertEquals("A changed song needs one request, not pause + resume",1,writes.size)
             assertTrue(writes.single().second["start_playback"]!!.jsonPrimitive.boolean)
             assertEquals(45000,writes.single().second["position_ms"]!!.jsonPrimitive.int)
+            assertTrue(controller.state.value.loading)
+            assertFalse(controller.state.value.confirmed)
+            val pending=controller.state.value
+            assertEquals("Pending playback cursor must stay frozen",pending.positionMs,pending.livePosition(pending.anchoredAt+10_000))
             writes.clear()
             controller.applySharedSnapshot(buildJsonObject {
                 put("video_id","bbbbbbbbbbb");put("playing",false);put("playback_processing",true);put("playback_confirmed",false)

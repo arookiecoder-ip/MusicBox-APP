@@ -606,7 +606,12 @@ class EchoController(
             put("output_token",output.text("output_token"));put("command_id",java.util.UUID.randomUUID().toString())
         }).objectOrEmpty()
         if(_serial.value!=serial) throw CancellationException("Selected output changed during Jam queue update")
-        if(replace && !reply.flag("alexa_scheduled")) command("play",refreshAfter=false)
+        if(replace) {
+            // An accepted trigger is pending, not proof the Echo is already audible.
+            _state.update { it.copy(track=tracks[index],queue=tracks,index=index,positionMs=positionMs,
+                anchoredAt=SystemClock.elapsedRealtime(),playing=true,confirmed=false,processing=true) }
+            if(!reply.flag("alexa_scheduled")) command("play",refreshAfter=false)
+        }
     }
 
     /** Play one song; the server keeps the queue going with its radio ([radio] forces a new one).

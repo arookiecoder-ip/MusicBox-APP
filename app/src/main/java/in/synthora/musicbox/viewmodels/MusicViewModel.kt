@@ -212,10 +212,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _echoRequests = MutableStateFlow(0)
     private val transportLoading = MutableStateFlow(false)
+    private val jamApplying = MutableStateFlow(false)
     private val allSkipLoading = combine(transportLoading,
         `in`.synthora.musicbox.services.PlaybackCoordinator.notificationLoading) { app, notification -> app || notification }
     private var skipLoadingJob: Job? = null
-    private val playbackBusy = combine(_isSwitchingOutput, _echoRequests, playbackManager.isBufferingFlow,
+    private val playbackBusy = combine(combine(_isSwitchingOutput, jamApplying) { switching, applying -> switching || applying }, _echoRequests, playbackManager.isBufferingFlow,
         `in`.synthora.musicbox.services.PlaybackService.recoveryLoading, allSkipLoading) { switching, requests, buffering, recovering, skipping ->
         switching || (skipping && _output.value != PlaybackOutput.PHONE) || ((buffering || recovering) && _output.value == PlaybackOutput.PHONE)
     }
@@ -773,7 +774,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             ready
         }
-        JamSession.applyPlayback = ::applyJamPlayback
+        JamSession.applyPlayback = { snapshot, listen ->
+            jamApplying.value = listen
+            try { applyJamPlayback(snapshot, listen) }
+            finally { jamApplying.value = false }
+        }
         JamSession.outputName = { android.os.Build.MODEL + " · " + when {
             isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
             isRemotePhone -> mobileDevices.value.firstOrNull { it.id == _remoteMobileOutput.value.owner }?.name.orEmpty().ifBlank { "remote phone" }
