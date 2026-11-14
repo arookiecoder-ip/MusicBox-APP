@@ -167,6 +167,8 @@ open class JamClient internal constructor(
                 val command=raw.objectOrEmpty();val id=command.text("id")
                 if(id in acknowledgements)continue
                 if(command.text("action")=="volume") {
+                    val target=command.text("target_id")
+                    if(target.isNotBlank() && target!=outputStatus().text("target_id"))continue
                     applyVolume?.invoke(command.number("value").toInt())
                     acknowledgements+=id
                 }

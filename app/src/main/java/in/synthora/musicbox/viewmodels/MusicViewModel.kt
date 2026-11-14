@@ -303,7 +303,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val outputKey = _output.value.name + ":" + echo.serial.value + ":" + _remoteMobileOutput.value.owner
         if (!listen) {
             val audible = if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange()
-            if (audible) {
+            if (jamWasListening && audible) {
                 if (isAlexa) echo.command("pause")
                 else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "pause", buildJsonObject {put("jam_follow",true)})
                 else playbackManager.pause()
@@ -326,9 +326,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             jamAppliedPlaying=room.playing
         }
         val seekChanged=jamSeekRevision != snapshot.number("seek_revision")
-        val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry && actualEntry != expectedEntry || jamAppliedQueue != room.queueVersion
+        val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry || jamAppliedQueue != room.queueVersion
         if (replace) {
-            if (isAlexa) echo.followJamQueue(room.queue, index, room.positionMs, room.playing, preserveCurrent=actualEntry==expectedEntry)
+            if (isAlexa) echo.followJamQueue(room.queue, index, room.positionMs, room.playing, preserveCurrent=jamAppliedEntry==entry && actualEntry==expectedEntry)
             else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "queue", buildJsonObject {
                 put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), room.queue))
                 put("index", index); put("position_ms", room.positionMs); put("playing", room.playing)
@@ -788,8 +788,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val video=if(remote)state.track?.ytVideoId else _uiState.value.currentTrack?.ytVideoId
             buildJsonObject {
                 put("kind",if(isAlexa)"alexa" else "phone")
+                put("target_id",if(isAlexa)"alexa:"+echo.serial.value else "phone")
                 put("video_id",video.orEmpty())
                 put("entry_id",if(remote)state.track?.uuid.orEmpty() else playbackManager.snapshot.value.currentId.orEmpty())
+                put("seek_revision",jamSeekRevision.coerceAtLeast(0))
                 put("playing",if(remote)state.playing else playbackManager.isPlayingFlow.value)
                 put("processing",_isSwitchingOutput.value || jamApplying.value || if(remote)state.processing else playbackManager.isBufferingFlow.value || `in`.synthora.musicbox.services.PhonePlaybackOwnership.preparingSong)
                 put("confirmed",!_isSwitchingOutput.value && !jamApplying.value && if(remote)state.confirmed else !playbackManager.isBufferingFlow.value && !`in`.synthora.musicbox.services.PhonePlaybackOwnership.preparingSong)
