@@ -127,6 +127,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
             var published: PublishedCursor? = null
             while (currentCoroutineContext().isActive) {
                 val event = publications.awaitChange()
+                if (PhonePlaybackOwnership.jamPlayback) continue
                 val claim = PhonePlaybackOwnership.token
                 if (claim.isBlank() || PhonePlaybackOwnership.localHandoff || !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                 try {
