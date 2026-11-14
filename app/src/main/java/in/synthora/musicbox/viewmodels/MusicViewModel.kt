@@ -1711,7 +1711,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 else launchPlayback(first) {
                     phoneSetQueue(listOf(first), 0, deferRadioSeed = true,
-                        onPublished = { backfillPhoneQueue(first, playlistIdOf(item), shuffle) })
+                        afterSynchronization = { backfillPhoneQueue(first, playlistIdOf(item), shuffle) })
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: BackendAuthException) { _signedOut.tryEmit(Unit) }
@@ -1847,7 +1847,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         else launchPlayback(selected) {
             phoneSetQueue(listOf(selected), 0, deferRadioSeed = true,
-                onPublished = { backfillPhoneQueue(selected, playlistId, shuffle = false, selectedIndex = startIndex) })
+                afterSynchronization = { backfillPhoneQueue(selected, playlistId, shuffle = false, selectedIndex = startIndex) })
         }
     }
 
@@ -1891,7 +1891,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Phone-side backfill, chained after the fast-start publish ([onPublished])
+     * Phone-side backfill, chained after the fast-start publish attempt ([afterSynchronization])
      * so the initial install always lands first. Appends locally and to the
      * shared queue in server-sized chunks.
      */
@@ -2044,12 +2044,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * remote see the same songs.
      *
      * [deferRadioSeed] publishes just this song with no radio expansion: used for fast
-     * playlist starts where the remainder is backfilled right after [onPublished].
-     * [onPublished] runs after the shared-queue publish completed, so a backfill can
-     * safely append without racing the initial install.
+     * playlist starts where the remainder is backfilled right after [afterSynchronization].
+     * [afterSynchronization] runs after the initial server publish attempt, including failure,
+     * so the local playlist always fills without racing the initial install.
      */
     private suspend fun phoneSetQueue(tracks: List<Track>, startIndex: Int, positionMs: Long = 0, play: Boolean = true, throwOnFailure: Boolean = true, synchronizeQueue: Boolean = true,
-        deferRadioSeed: Boolean = false, onPublished: (suspend () -> Unit)? = null) {
+        deferRadioSeed: Boolean = false, afterSynchronization: (suspend () -> Unit)? = null) {
         idlePhoneSelection = false
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.beginSongPreparation()
         _uiState.update { it.copy(isLoading = true, error = null) }
@@ -2093,12 +2093,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     publishPhoneQueue(playable, startIndex, positionMs, play, startRadio = !deferRadioSeed && playable.size == 1)
                     sharedPhoneQueueReady = true
                     queueManager.initializeQueue(_uiState.value.queue)
-                    onPublished?.invoke()
                 },
                 onSyncError = { error ->
                     Log.w(TAG, "Device playback started but server queue sync failed", error)
                     _messages.tryEmit("Playing on this device. The server queue couldn't sync.")
-                }
+                },
+                afterSynchronization = { afterSynchronization?.invoke() }
             )
             // MediaController commands are asynchronous: queue installation alone is
             // not enough to release ownership/foreground guards in the background.

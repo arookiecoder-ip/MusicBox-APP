@@ -148,7 +148,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
     // Lighten the artwork accent for readable titles on the dark ambient backdrop.
     val accent by animateColorAsState(colors?.primary?.let { lerp(it, Color.White, .65f) }
         ?: MaterialTheme.colorScheme.primary, tween(700), label = "Queue accent")
-    val palette = remember(colors) { colors?.let { listOf(it.background, it.secondary, it.tertiary).map { color -> lerp(Color.Black, color, .55f) } }.orEmpty() }
+    val palette = remember(colors) { colors?.let { listOf(it.primary, it.secondary, it.tertiary) }.orEmpty() }
     Box(Modifier.fillMaxSize().testTag("Queue palette background")) {
     `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(palette, Modifier.matchParentSize(), baseColor = Color(0xFF101015))
     Column(Modifier.fillMaxSize().stableNavigationBarsPadding()) {

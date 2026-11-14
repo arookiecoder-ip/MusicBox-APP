@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.testTag
@@ -260,6 +261,9 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .glassFloat(GlassShapes.Bar, GlassLevel.Regular)
                 .clipToBounds()
+        ) {
+            // Keep swipe/expand gestures outside the separate transport touch target.
+            Box(modifier = Modifier.fillMaxWidth().padding(end = 54.dp).clipToBounds().onSizeChanged { cardWidthPx = it.width.toFloat() }
                 .combinedClickable(
                     onClickLabel = "Open player",
                     role = Role.Button,
@@ -312,8 +316,7 @@ fun MiniPlayer(
                         }
                     )
                 }
-        ) {
-            Box(modifier = Modifier.fillMaxWidth().padding(end = 46.dp).clipToBounds().onSizeChanged { cardWidthPx = it.width.toFloat() }) {
+            ) {
             Box(modifier = Modifier.fillMaxWidth().graphicsLayer { translationX = offsetX.value }) {
                 Row(
                     modifier = Modifier
@@ -407,17 +410,16 @@ fun MiniPlayer(
                         miniPlayScale.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
                     }
                     IconButton(
-                        enabled = !uiState.isLoading,
                         onClick = {
                             haptic.heavyClick()
                             musicViewModel.togglePlayPause()
                         },
                         modifier = Modifier
-                            .size(40.dp)
-                            .scale(miniPlayScale.value).alexaControlAvailability(musicViewModel)
+                            .size(48.dp)
+                            .alexaControlAvailability(musicViewModel)
                     ) {
                         if (uiState.isLoading) {
-                            androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                            androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp).semantics { contentDescription = "Cancel loading playback" }, strokeWidth = 2.dp)
                         } else Crossfade(
                             targetState = uiState.isPlaying,
                             animationSpec = tween(
@@ -432,7 +434,7 @@ fun MiniPlayer(
                                     else `in`.synthora.musicbox.R.drawable.baseline_play_24
                                 ),
                                 contentDescription = if (isPlaying) "Pause" else "Play",
-                                modifier = Modifier.size(24.dp),
+                                modifier = Modifier.size(24.dp).scale(miniPlayScale.value),
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }

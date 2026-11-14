@@ -1,5 +1,13 @@
 # Music Box changelog
 
+## 2.5.8
+
+- Keep mini-player transport taps available during loading, enlarge the touch target, and keep its animation from shrinking the target.
+- Complete local playlist queues even when the initial server mirror fails; retain cancellation when another playback request supersedes it.
+- Restore visible artwork colors in the queue background without darkening the palette twice.
+- Run playback presentation regressions in the multi-user Android Actions build.
+
+
 Coverage reviewed 2026-10-25: Android `feat/alexa-backend` through `22aa629d15a8d6f362d36b20c3dc81695eb7efb0`, plus companion backend `08139f16aac382d80703d59104838c4ecd1fb40a`. [Current architecture](ARCHITECTURE.md) · [Backend changelog](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/CHANGELOG.md).
 
 Entries below distinguish source/debug builds from published releases. Dates follow commit metadata; they are not evidence that an APK was published on that date. The version-introduction ledger, PR register and full reachable commit index preserve detailed provenance. Existing inherited release notes are retained as historical records.
