@@ -187,6 +187,7 @@ fun PlayerScreen(
     var showArtists by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showOutputSheet by remember { mutableStateOf(false) }
+    val jamState by `in`.synthora.musicbox.viewmodels.JamSession.state.collectAsStateWithLifecycle()
     val output by musicViewModel.output.collectAsStateWithLifecycle()
     val isSwitching by musicViewModel.isSwitchingOutput.collectAsStateWithLifecycle()
     val echoVolume by musicViewModel.echoVolume.collectAsStateWithLifecycle()
@@ -420,7 +421,7 @@ fun PlayerScreen(
                             PlayerAction(icon = rememberVectorPainter(if (currentTrack.isFavourite) Icons.Filled.ThumbUp else Icons.Outlined.ThumbUp),
                                 label = if (currentTrack.isFavourite) "Unlike" else "Like", active = currentTrack.isFavourite, iconSize = 24.dp) { musicViewModel.toggleFavorite(currentTrack) }
                             PlayerAction(icon = rememberVectorPainter(androidx.compose.material.icons.Icons.Filled.Radio), label = "Radio", iconSize = 24.dp) { musicViewModel.startRadio() }
-                            PlayerAction(icon = rememberVectorPainter(if (isAlexa) Icons.Outlined.Speaker else Icons.Outlined.PhoneAndroid), label = if (isAlexa) "Alexa" else mobileDevices.firstOrNull { it.id == remoteMobileOutput.owner }?.name?.takeIf { output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.REMOTE_PHONE } ?: "Phone", active = output != `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE, iconSize = 24.dp) { showOutputSheet = true }
+                            PlayerAction(icon = rememberVectorPainter(if (isAlexa) Icons.Outlined.Speaker else Icons.Outlined.PhoneAndroid), label = if (isAlexa) "Alexa" else mobileDevices.firstOrNull { it.id == remoteMobileOutput.owner }?.name?.takeIf { output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.REMOTE_PHONE } ?: "Phone", active = output != `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE, jamActive = jamState.active, iconSize = 24.dp) { showOutputSheet = true }
                             if (tabletLandscape) PlayerAction(icon = rememberVectorPainter(Icons.Default.Share), label = "Share", iconSize = 24.dp) {
                                 currentTrack.ytVideoId?.let { shareSong("Share ${currentTrack.title}", "https://music.youtube.com/watch?v=$it") }
                             } else PlayerAction(icon = rememberVectorPainter(Icons.AutoMirrored.Filled.List), label = "Queue", iconSize = 24.dp) { showQueue = true }
@@ -791,14 +792,15 @@ private fun OutputRow(
 }
 
 @Composable
-private fun PlayerAction(
+internal fun PlayerAction(
     icon: androidx.compose.ui.graphics.painter.Painter,
     label: String,
     iconSize: androidx.compose.ui.unit.Dp,
     active: Boolean = false,
+    jamActive: Boolean = false,
     onClick: () -> Unit
 ) {
-    val tint = if (active) MaterialTheme.colorScheme.primary
+    val tint = if (jamActive) Color(0xFF66BB6A) else if (active) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -809,7 +811,7 @@ private fun PlayerAction(
             .clickable(onClick = onClick)
             .padding(vertical = 6.dp)
     ) {
-        Icon(icon, label, tint = tint, modifier = Modifier.size(iconSize))
+        Icon(icon, if(jamActive) "$label · Jam active" else label, tint = tint, modifier = Modifier.size(iconSize))
         Spacer(Modifier.height(2.dp))
         Text(label, style = MaterialTheme.typography.labelSmall, color = tint, maxLines = 1)
     }
