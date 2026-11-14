@@ -430,7 +430,8 @@ fun PlayerScreen(
                         PlayerControls(uiState = uiState, musicViewModel = musicViewModel, isLarge = tabletLandscape,
                             modifier = Modifier.padding(top = 8.dp), playButtonSize = if (compact) 60.dp else 72.dp, buttonSize = 48.dp, iconSize = 32.dp, smallIconSize = 24.dp, onSaveToPlaylist = { showAddToPlaylistDialog = currentTrack })
                         Spacer(Modifier.height(16.dp))
-                        if (isAlexa) EchoVolumeRow(volume = echoVolume, enabled = echoSerial.isNotBlank(), onVolumeChange = musicViewModel::setEchoVolume)
+                        if(jamState.active) JamVolumeControls(jamState)
+                        else if (isAlexa) EchoVolumeRow(volume = echoVolume, enabled = echoSerial.isNotBlank(), onVolumeChange = musicViewModel::setEchoVolume)
                         else if (output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.REMOTE_PHONE)
                             EchoVolumeRow(volume = mobileDevices.firstOrNull { it.id == remoteMobileOutput.owner }?.volume,
                                 enabled = mobileDevices.any { it.id == remoteMobileOutput.owner }, onVolumeChange = musicViewModel::setRemotePhoneVolume)
@@ -694,7 +695,7 @@ fun SleepTimerDialog(
 
 /** Echo volume slider; drags are sent to the Echo a moment after you pause (the controller debounces). */
 @Composable
-private fun EchoVolumeRow(volume: Int?, enabled: Boolean = true, onVolumeChange: (Int) -> Unit) {
+internal fun EchoVolumeRow(volume: Int?, enabled: Boolean = true, onVolumeChange: (Int) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Icon(Icons.AutoMirrored.Filled.VolumeDown, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -735,6 +736,10 @@ internal fun OutputPickerContent(
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
         )
+        val jamModel: `in`.synthora.musicbox.viewmodels.JamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+        val jam by jamModel.state.collectAsStateWithLifecycle()
+        if(jam.active) JamDeviceList(jam,jamModel::configure,jamModel::selectDevice)
+        else {
         OutputRow(
             icon = Icons.Outlined.PhoneAndroid, title = "This phone", detail = null,
             selected = selectedMobileId == ownDeviceId, enabled = !busy, onClick = onSelectPhone
@@ -751,6 +756,7 @@ internal fun OutputPickerContent(
                 enabled = device.online, readOnly = !device.controllable,
                 onClick = { if (device.controllable) onSelectEcho(device.serial) else android.widget.Toast.makeText(contextForOutputPicker, "Sign in to Amazon to control Alexa.", android.widget.Toast.LENGTH_SHORT).show() }
             )
+        }
         }
         HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         JamSettings()

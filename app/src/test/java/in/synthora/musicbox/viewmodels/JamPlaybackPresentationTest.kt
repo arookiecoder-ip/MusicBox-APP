@@ -22,7 +22,7 @@ class JamPlaybackPresentationTest {
         }
     }
     @Test fun stoppedOrBufferingDeviceDoesNotPretendTheRoomIsAudible() {
-        val room=EchoState(track=track,playing=true,positionMs=90_000)
+        val room=EchoState(track=track,playing=true,confirmed=true,positionMs=90_000)
         val stopped=MusicUiState(currentTrack=track,position=12_000)
         assertFalse(presentJamPlayback(stopped,room,true).isPlaying)
         val buffering=presentJamPlayback(stopped.copy(isLoading=true),room,true)
@@ -39,3 +39,4 @@ class JamPlaybackPresentationTest {
         assertFalse(failed.isLoading);assertEquals(PlaybackPhase.FAILED,failed.phase)
     }
 }
+

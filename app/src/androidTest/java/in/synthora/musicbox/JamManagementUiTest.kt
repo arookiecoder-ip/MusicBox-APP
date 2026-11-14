@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import `in`.synthora.musicbox.ui.screens.JamSettingsContent
+import `in`.synthora.musicbox.ui.screens.JamDeviceList
 import `in`.synthora.musicbox.ui.theme.JUKETheme
 import `in`.synthora.musicbox.viewmodels.*
 import kotlinx.serialization.json.*
@@ -20,21 +21,21 @@ class JamManagementUiTest {
     @get:Rule val compose=createComposeRule()
     private fun host()=JamUiState(active=true,host=true,url="https://example.test/j/abcdefghijk",memberCount=2,
         members=listOf(JamMember("alice-id","Alice")),
-        outputs=listOf(JamOutput("host-phone","Host phone",true,""),JamOutput("alice-phone","Alice phone",true,"")),
+        outputs=listOf(JamOutput("host-phone","Host phone",true,"",username="Host"),JamOutput("alice-phone","Alice phone",true,"",username="Alice")),
         playback=buildJsonObject {put("mode","single");put("selected",JsonArray(listOf(JsonPrimitive("host-phone"))))})
 
     @Test fun hostCanSwitchBetweenOneAndSeveralSelectedOutputs() {
         val state=mutableStateOf(host())
         compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) {
-            JamSettingsContent(state.value, {}, {}, {}, {}, {mode,outputs ->
+            JamDeviceList(state.value, {mode,outputs ->
                 state.value=state.value.copy(playback=buildJsonObject {put("mode",mode);put("selected",JsonArray(outputs.map(::JsonPrimitive)))})
-            }, {})
+            }, {_,_,_,_->})
         } } }
-        compose.onNodeWithContentDescription("Play on multiple outputs").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Play on multiple devices").performScrollTo().performClick()
         compose.runOnIdle {assertEquals("multiple",state.value.playback["mode"]?.jsonPrimitive?.content)}
-        compose.onNodeWithContentDescription("Audio output: Alice phone").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Play on Alice phone · Alice").performScrollTo().performClick()
         compose.runOnIdle {assertEquals(2,state.value.playback["selected"]?.jsonArray?.size)}
-        compose.onNodeWithContentDescription("Play on multiple outputs").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Play on multiple devices").performScrollTo().performClick()
         compose.runOnIdle {assertEquals(1,state.value.playback["selected"]?.jsonArray?.size)}
     }
     @Test fun hostRemovalRequiresConfirmationAndSendsTheChosenMember() {

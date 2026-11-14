@@ -5,8 +5,8 @@ import `in`.synthora.musicbox.services.PlaybackPhase
 
 /** The room owns the queue; the selected renderer owns readiness and the audible cursor. */
 internal fun presentJamPlayback(personal: MusicUiState, room: EchoState, listen: Boolean): MusicUiState {
-    if (!listen) return personal.copy(isPlaying=room.playing, isLoading=false, position=room.positionMs,
-        phase=if(room.playing) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED)
+    if (!listen) return personal.copy(isPlaying=room.playing && room.confirmed && !room.processing, isLoading=room.loading, position=room.positionMs,
+        phase=if(room.loading) PlaybackPhase.BUFFERING else if(room.playing && room.confirmed) PlaybackPhase.PLAYING else PlaybackPhase.PAUSED)
     val matches=room.track?.ytVideoId != null && personal.currentTrack?.ytVideoId==room.track.ytVideoId
     val loading=personal.isLoading || (room.playing && !matches && personal.error==null)
     val playing=room.playing && matches && personal.isPlaying && !loading

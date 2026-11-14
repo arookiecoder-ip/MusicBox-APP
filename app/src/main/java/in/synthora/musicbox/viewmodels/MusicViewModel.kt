@@ -781,6 +781,50 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             try { applyJamPlayback(snapshot, listen) }
             finally { jamApplying.value = false }
         }
+        JamSession.outputStatus = {
+            val remote=isAlexa || isRemotePhone
+            val state=echo.state.value
+            val audio=getApplication<Application>().getSystemService(android.content.Context.AUDIO_SERVICE) as android.media.AudioManager
+            val video=if(remote)state.track?.ytVideoId else _uiState.value.currentTrack?.ytVideoId
+            buildJsonObject {
+                put("kind",if(isAlexa)"alexa" else "phone")
+                put("video_id",video.orEmpty())
+                put("entry_id",if(remote)state.track?.uuid.orEmpty() else playbackManager.snapshot.value.currentId.orEmpty())
+                put("playing",if(remote)state.playing else playbackManager.isPlayingFlow.value)
+                put("processing",_isSwitchingOutput.value || jamApplying.value || if(remote)state.processing else playbackManager.isBufferingFlow.value || `in`.synthora.musicbox.services.PhonePlaybackOwnership.preparingSong)
+                put("confirmed",!_isSwitchingOutput.value && !jamApplying.value && if(remote)state.confirmed else !playbackManager.isBufferingFlow.value && !`in`.synthora.musicbox.services.PhonePlaybackOwnership.preparingSong)
+                put("position_ms",if(remote)state.livePosition() else playbackManager.getCurrentPosition())
+                put("duration_ms",if(remote)state.durationMs else playbackManager.getDuration().coerceAtLeast(0))
+                put("volume",if(remote)state.volume ?: 50 else (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)*100/audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
+            }
+        }
+        JamSession.outputDevices = {
+            JsonArray(listOf(buildJsonObject {put("id","phone");put("name",android.os.Build.MODEL);put("kind","phone");put("active",!isAlexa && !isRemotePhone);put("online",true)})+
+                echo.devices.value.filter{it.controllable}.map{device->buildJsonObject {
+                    put("id","alexa:"+device.serial);put("name",device.name);put("kind","alexa");put("online",device.online)
+                    put("active",isAlexa && echo.serial.value==device.serial)
+                }})
+        }
+        JamSession.applyVolume = {value->
+            when {isAlexa->echo.setVolume(value);isRemotePhone->setRemotePhoneVolume(value);else->setPhoneVolume(value)}
+        }
+        JamSession.applyOutput = { target ->
+            val serial=target.removePrefix("alexa:")
+            if(target=="phone" && (isAlexa || isRemotePhone) || target.startsWith("alexa:") && (!isAlexa || echo.serial.value!=serial)) {
+                _isSwitchingOutput.value=true
+                try {
+                    if(target=="phone") {if(isRemotePhone)moveRemotePhoneToThisPhone() else moveEchoToPhone()}
+                    else if(target.startsWith("alexa:")) {
+                        if(isAlexa) {
+                            val from=echo.state.value
+                            if(from.playing)echo.command("pause",refreshAfter=false)
+                            echo.select(serial,refreshAfter=false)
+                            moveQueueToEcho(from.queue,from.index,requireNotNull(from.track),from.livePosition(),from.playing)
+                        } else {echo.select(serial,refreshAfter=false);movePhoneToEcho()}
+                    }
+                } finally {_isSwitchingOutput.value=false}
+            }
+        }
         JamSession.outputName = { android.os.Build.MODEL + " · " + when {
             isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
             isRemotePhone -> mobileDevices.value.firstOrNull { it.id == _remoteMobileOutput.value.owner }?.name.orEmpty().ifBlank { "remote phone" }
@@ -2328,7 +2372,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun blockUnavailableAlexaControl(): Boolean {
-        if (!isAlexa || echo.amazonConnected.value != false) return false
+        if (JamSession.active || !isAlexa || echo.amazonConnected.value != false) return false
         _messages.tryEmit("Sign in to Amazon to control Alexa, or choose another playback device.")
         return true
     }
@@ -2613,6 +2657,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Route physical keys to the selected output; local keys retain Android's normal behavior. */
     fun adjustSelectedDeviceVolume(direction: Int): Boolean {
+        if(JamSession.active) {
+            val state=JamSession.state.value
+            val selected=state.playback.array("selected").map{it.toString().trim('"')}
+            val target=state.outputs.firstOrNull{it.id==`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId && it.id in selected} ?: state.outputs.firstOrNull{it.id in selected}
+            target?.let{JamSession.setVolume(it.id,(it.volume ?: 50)+direction*5)}
+            return true
+        }
         if (!signedIn || _output.value == PlaybackOutput.PHONE) return false
         if (_isSwitchingOutput.value) return true
         return `in`.synthora.musicbox.services.RemoteVolumeControl.adjust(getApplication(), direction)
