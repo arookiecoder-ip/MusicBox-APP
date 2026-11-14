@@ -10,6 +10,10 @@ import java.io.IOException
 /** The HTTP client must disable automatic redirects so credentials never cross a boundary. */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 internal class SafeAudioRedirectDataSource(private val upstream: DataSource) : DataSource by upstream {
+    // Java interface default methods are not forwarded by Kotlin delegation.
+    // Cache identity, range validation and socket-to-cache fallback need these.
+    override fun getResponseHeaders(): Map<String, List<String>> = upstream.responseHeaders
+
     override fun open(dataSpec: DataSpec): Long {
         var current = dataSpec
         val authenticated = dataSpec.httpRequestHeaders.keys.any {

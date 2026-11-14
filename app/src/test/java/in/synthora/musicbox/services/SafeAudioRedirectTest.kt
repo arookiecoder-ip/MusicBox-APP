@@ -33,4 +33,53 @@ class SafeAudioRedirectTest {
             assertEquals(0, second.requestCount)
         } finally { first.shutdown(); second.shutdown(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
     }
+    @Test fun redirectedAudioRetainsRepresentationAndRangeHeaders() {
+        val server = MockWebServer()
+        val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
+        try {
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/actual"))
+            server.enqueue(MockResponse().setResponseCode(206).setBody("audio")
+                .setHeader("Content-Type", "audio/mp4").setHeader("ETag", "\"version-a\"")
+                .setHeader("Content-Range", "bytes 5-9/10"))
+            val source = SafeAudioRedirectDataSource(OkHttpDataSource.Factory(client).createDataSource())
+            try {
+                source.open(DataSpec.Builder().setUri(server.url("/audio").toString()).setPosition(5).build())
+                fun header(name: String) = source.responseHeaders.entries.firstOrNull { it.key.equals(name, true) }?.value?.firstOrNull()
+                assertEquals("audio/mp4", header("Content-Type"))
+                assertEquals("\"version-a\"", header("ETag"))
+                assertEquals("bytes 5-9/10", header("Content-Range"))
+                assertEquals("5", header("Content-Length"))
+            } finally { source.close() }
+        } finally { server.shutdown(); client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown() }
+    }
+
+    @androidx.media3.common.util.UnstableApi
+    @Test fun representationGuardStillRejectsChangedAudioThroughTheRedirectWrapper() {
+        val server = MockWebServer()
+        val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).build()
+        val directory = java.io.File(org.robolectric.RuntimeEnvironment.getApplication().cacheDir, "redirect-audio-${System.nanoTime()}")
+        val cache = androidx.media3.datasource.cache.SimpleCache(directory, androidx.media3.datasource.cache.NoOpCacheEvictor())
+        fun source() = ValidatingAudioDataSource(SafeAudioRedirectDataSource(OkHttpDataSource.Factory(client).createDataSource()), cache)
+        try {
+            val spec = DataSpec.Builder().setUri(server.url("/audio").toString()).build()
+            server.enqueue(MockResponse().setBody("audio").setHeader("Content-Type", "audio/mp4").setHeader("ETag", "\"version-a\""))
+            source().let { data -> try { data.open(spec) } finally { data.close() } }
+            assertEquals("\"version-a\"", audioRepresentationHeader(cache, spec.buildUpon().setPosition(1).build()))
+            server.enqueue(MockResponse().setBody("other").setHeader("Content-Type", "audio/mp4").setHeader("ETag", "\"version-b\""))
+            source().let { data ->
+                try { data.open(spec); fail("A different representation must trigger a safe reload") }
+                catch (_: AudioRepresentationChangedException) { }
+                finally { data.close() }
+            }
+            cache.removeResource(spec.uri.toString())
+            clearAudioRepresentation(cache, spec.uri.toString())
+            server.enqueue(MockResponse().setBody("other").setHeader("Content-Type", "audio/mp4").setHeader("ETag", "\"version-b\""))
+            source().let { data -> try { assertEquals(5L, data.open(spec)) } finally { data.close() } }
+            assertEquals("\"version-b\"", audioRepresentationHeader(cache, spec.buildUpon().setPosition(1).build()))
+        } finally {
+            cache.release(); directory.deleteRecursively(); server.shutdown()
+            client.connectionPool.evictAll(); client.dispatcher.executorService.shutdown()
+        }
+    }
+
 }

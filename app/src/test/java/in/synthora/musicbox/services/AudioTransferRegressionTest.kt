@@ -183,6 +183,21 @@ class AudioTransferRegressionTest {
         } finally { source.close() }
     }
 
+    @Test fun redirectWrappedSocketStillHandsOffToCompletedCacheWithoutReadingTheNetworkAgain() = withCache { cache ->
+        val network = Response()
+        // The production redirect adapter must preserve the ETag used to match
+        // a completed cache to the socket that the extractor already opened.
+        val source = CachedAudioFallbackDataSource(SafeAudioRedirectDataSource(network), cache)
+        try {
+            source.open(spec)
+            val prefix = ByteArray(77)
+            assertEquals(77, source.read(prefix, 0, prefix.size))
+            fill(cache)
+            assertArrayEquals(audio, prefix + readAll(source))
+            assertEquals("Playback must finish from disk instead of the old socket", 77, network.index)
+        } finally { source.close() }
+    }
+
     @Test fun completedCacheOfAnotherRepresentationCannotReplaceAnAlreadyOpenSocket() = withCache { cache ->
         val network = Response(tag = "\"version-a\"")
         val source = CachedAudioFallbackDataSource(ValidatingAudioDataSource(network, cache), cache)
