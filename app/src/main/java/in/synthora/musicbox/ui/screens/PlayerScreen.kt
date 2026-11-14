@@ -727,7 +727,7 @@ internal fun OutputPickerContent(
     onRefresh: () -> Unit
 ) {
     val contextForOutputPicker = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.fillMaxWidth().padding(bottom = 32.dp)) {
+    Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         Text(
             "Play on",
             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
@@ -750,6 +750,8 @@ internal fun OutputPickerContent(
                 onClick = { if (device.controllable) onSelectEcho(device.serial) else android.widget.Toast.makeText(contextForOutputPicker, "Sign in to Amazon to control Alexa.", android.widget.Toast.LENGTH_SHORT).show() }
             )
         }
+        HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+        JamSettings()
         TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
         if (busy) {
             androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))

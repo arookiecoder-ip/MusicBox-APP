@@ -260,7 +260,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var remoteTransportSequence = 0L
     private val remoteTransportMutex = kotlinx.coroutines.sync.Mutex()
 
-    val uiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview) { state, busy, pending, preview ->
+    private val personalUiState: StateFlow<MusicUiState> = combine(combinedState, playbackBusy, pendingPlayback, remoteTransportPreview) { state, busy, pending, preview ->
         // Clearing the optimistic selection must wait for this projector to
         // consume the new underlying track, not only for Media3 to be ready.
         presentedPlaybackRequest.value = pending?.takeIf {
@@ -274,6 +274,62 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _isSwitchingOutput.value, pending?.loading == true,
             presented.isLoading, presented.isPlaying, presented.error != null))
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
+
+    val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked) { personal, jam, liked ->
+        if (!jam.active) personal else {
+            val room = `in`.synthora.musicbox.services.parseEchoSnapshot(jam.playback,
+                android.os.SystemClock.elapsedRealtime(), null, false)
+            personal.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
+                queueIndex=room.index, isPlaying=room.playing, isLoading=false,
+                position=room.positionMs, duration=room.durationMs,
+                repeatMode=when(jam.playback.text("repeat")) { "all" -> 2; "one" -> 1; else -> 0 })
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
+
+    private var jamWasListening = false
+    private var jamAppliedQueue = -1L
+    private var jamAppliedEntry = ""
+    private var jamAppliedOutput = ""
+    private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean) {
+        val outputKey = _output.value.name + ":" + echo.serial.value + ":" + _remoteMobileOutput.value.owner
+        if (!listen) {
+            if (jamWasListening) {
+                if (isAlexa) echo.command("pause")
+                else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "pause")
+                else playbackManager.pause()
+            }
+            jamWasListening=false; jamAppliedEntry=""; jamAppliedQueue=-1
+            return
+        }
+        val room = `in`.synthora.musicbox.services.parseEchoSnapshot(snapshot, android.os.SystemClock.elapsedRealtime(), null, false)
+        val index=room.index
+        if (index !in room.queue.indices) return
+        val entry=room.queue[index].uuid
+        val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry || jamAppliedQueue != room.queueVersion
+        if (replace) {
+            if (isAlexa) echo.transferQueue(room.queue, index, room.positionMs, room.playing)
+            else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "queue", buildJsonObject {
+                put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), room.queue))
+                put("index", index); put("position_ms", room.positionMs); put("playing", room.playing)
+            })
+            else phoneSetQueue(room.queue, index, room.positionMs, room.playing, deferRadioSeed=true)
+            jamAppliedEntry=entry; jamAppliedQueue=room.queueVersion; jamAppliedOutput=outputKey
+        } else if (isAlexa) {
+            val actual=echo.state.value
+            if (actual.playing != room.playing) echo.command(if (room.playing) "play" else "pause", refreshAfter=false)
+            if (kotlin.math.abs(actual.livePosition()-room.positionMs)>3_000) echo.seek(room.positionMs, refreshAfter=false)
+        } else if (isRemotePhone) {
+            val actual=echo.state.value
+            if (actual.playing != room.playing) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, if(room.playing) "play" else "pause")
+            if (kotlin.math.abs(actual.livePosition()-room.positionMs)>2_000) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "seek", buildJsonObject { put("position_ms", room.positionMs) })
+        } else {
+            if (playbackManager.shouldResumeAfterTrackChange() != room.playing) {
+                if (room.playing) playbackManager.togglePlayPause() else playbackManager.pause()
+            }
+            if (kotlin.math.abs(playbackManager.getCurrentPosition()-room.positionMs)>1_500) playbackManager.seekTo(room.positionMs)
+        }
+        jamWasListening=true
+    }
 
     // Prepared once per queue change, before opening either the player or its sheet.
     val queueRows = `in`.synthora.musicbox.services.preparedQueueRows(viewModelScope, uiState)
@@ -661,6 +717,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * last choice is kept.
      */
     fun onSignedIn() {
+        JamSession.applyPlayback = ::applyJamPlayback
+        JamSession.outputName = { android.os.Build.MODEL + " · " + when {
+            isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
+            isRemotePhone -> mobileDevices.value.firstOrNull { it.id == _remoteMobileOutput.value.owner }?.name.orEmpty().ifBlank { "remote phone" }
+            else -> "This phone"
+        } }
+        JamSession.refresh()
         collectionCache.clear()
         downloads.collections.value.filter { it.title.isBlank() || it.title == "Untitled" }.forEach { refreshDownloadedDetails(it.key) }
         signedIn = true
@@ -710,6 +773,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSignedOut() {
+        JamSession.clear()
+        jamWasListening=false
         deferredPlaybackJob?.cancel()
         playbackTargetRestoration.clear()
         skipLoadingJob?.cancel()
@@ -1551,6 +1616,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Play one song; the queue continues with its radio. */
     fun playYoutubeLink(link: `in`.synthora.musicbox.network.YoutubeLink) {
+        if (JamSession.active) {
+            viewModelScope.launch {
+                try {
+                    if (!link.videoId.isNullOrBlank()) {
+                        val metadata=Backend.get("/api/track/${link.videoId}/metadata").objectOrEmpty()
+                        JamSession.tracks("queue", listOf(BrowseParser.item(JsonObject(metadata + mapOf("video_id" to JsonPrimitive(link.videoId)))).toTrack()))
+                    } else _messages.tryEmit("Open the playlist and choose Play to add it to Jam")
+                } catch(e: CancellationException) { throw e }
+                catch(e: Exception) { _messages.tryEmit(e.message ?: "Couldn't load song") }
+            }; return
+        }
         if (deferUntilPlaybackTargetReady { playYoutubeLink(link) }) return
         val requestId = ++playbackRequestId
         youtubeLinkJob?.cancel()
@@ -1585,6 +1661,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playTrack(track: Track) {
+        if (JamSession.active) { JamSession.tracks("queue", listOf(track)); return }
         if (deferUntilPlaybackTargetReady { playTrack(track) }) return
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("song", buildJsonObject { put("track", kotlinx.serialization.json.Json.encodeToJsonElement(Track.serializer(), track)); put("radio", true) }, requestedTrack = track); return }
@@ -1596,6 +1673,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRadio(track: Track) {
+        if (JamSession.active) { JamSession.tracks("queue", listOf(track)); return }
         if (deferUntilPlaybackTargetReady { startRadio(track) }) return
         if (!isRemotePhone && uiState.value.currentTrack?.ytVideoId == track.ytVideoId && pendingPlayback.value == null) {
             startRadio()
@@ -1684,6 +1762,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * and the full list backfills Up Next in the background.
      */
     fun playCollection(item: `in`.synthora.musicbox.network.BrowseItem, shuffle: Boolean = false) {
+        if (JamSession.active) {
+            viewModelScope.launch {
+                try { val tracks=collectionTracks(item); JamSession.tracks("queue", if(shuffle) tracks.shuffled() else tracks) }
+                catch(e: CancellationException) { throw e }
+                catch(e: Exception) { _messages.tryEmit(e.message ?: "Couldn't load collection") }
+            }; return
+        }
         if (deferUntilPlaybackTargetReady { playCollection(item, shuffle) }) return
         if (item.raw.flag("offline")) {
             val tracks = `in`.synthora.musicbox.services.offlineCollectionTracks(item, downloads.collections.value, downloads.tracks.value).orEmpty()
@@ -1734,6 +1819,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Mix: replace the upcoming songs with a fresh radio from the current song. */
     fun startRadio() {
+        if (JamSession.active) {
+            val current=uiState.value.currentTrack ?: return
+            viewModelScope.launch {
+                try { JamSession.tracks("append", AlexaBackendApi.getRadio(requireNotNull(current.ytVideoId)).map { BrowseParser.item(kotlinx.serialization.json.Json.encodeToJsonElement(`in`.synthora.musicbox.network.BackendTrack.serializer(), it).objectOrEmpty()).toTrack() }) }
+                catch(e: CancellationException) { throw e }
+                catch(e: Exception) { _messages.tryEmit(e.message ?: "Couldn't load radio") }
+            }; return
+        }
         if (deferUntilPlaybackTargetReady { startRadio() }) return
         if (isRemotePhone) { uiState.value.currentTrack?.let { startRadio(it) }; return }
         val current = uiState.value.currentTrack ?: return
@@ -1780,6 +1873,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playTrackFromQueue(track: Track, selectedIndex: Int? = null) {
+        if (JamSession.active) { JamSession.command("select", buildJsonObject { put("index", selectedIndex ?: uiState.value.queue.indexOfFirst { it.uuid == track.uuid }) }); return }
         if (deferUntilPlaybackTargetReady { playTrackFromQueue(track, selectedIndex) }) return
         if (blockUnavailableAlexaControl()) return
         val index = selectedIndex?.takeIf { uiState.value.queue.getOrNull(it)?.uuid == track.uuid }
@@ -1819,6 +1913,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Play [tracks] (a shelf, album, playlist or list) starting at [startIndex]. */
     fun setQueue(tracks: List<Track>, startIndex: Int = 0) {
+        if (JamSession.active) { JamSession.tracks("queue", tracks, startIndex); return }
         if (deferUntilPlaybackTargetReady { setQueue(tracks, startIndex) }) return
         if (blockUnavailableAlexaControl()) return
         if (startIndex !in tracks.indices) return
@@ -1838,6 +1933,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * immediately while the remaining songs backfill Up Next in the background.
      */
     fun playPlaylist(playlistId: String, tracks: List<Track>, startIndex: Int = 0) {
+        if (JamSession.active) { JamSession.tracks("queue", tracks, startIndex); return }
         if (deferUntilPlaybackTargetReady { playPlaylist(playlistId, tracks, startIndex) }) return
         val selected = tracks.getOrNull(startIndex) ?: return
         if (isRemotePhone) { remoteControl("queue", buildJsonObject { put("playlist_id", playlistId); put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)); put("index", startIndex) }, requestedTrack = selected); return }
@@ -2158,6 +2254,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
+        if (JamSession.active) { JamSession.command(if (JamSession.state.value.playback.flag("playing")) "pause" else "play"); return }
         if (deferUntilPlaybackTargetReady { togglePlayPause() }) return
         if (blockUnavailableAlexaControl()) return
         pendingPlayback.value?.let { selection ->
@@ -2213,6 +2310,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleShuffle() {
+        if (JamSession.active) { JamSession.command("shuffle"); return }
         if (deferUntilPlaybackTargetReady { toggleShuffle() }) return
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("shuffle", buildJsonObject {}); return }
@@ -2226,6 +2324,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleRepeat() {
+        if (JamSession.active) { JamSession.command("repeat"); return }
         if (deferUntilPlaybackTargetReady { toggleRepeat() }) return
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("repeat", buildJsonObject {}); return }
@@ -2237,6 +2336,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Insert songs right after the current one. */
     fun addNext(tracks: List<Track>) {
+        if (JamSession.active) { JamSession.tracks("next_items", tracks); return }
         if (deferUntilPlaybackTargetReady { addNext(tracks) }) return
         if (isRemotePhone) { remoteControl("next_items", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)) }); return }
         if (tracks.isEmpty()) return
@@ -2275,6 +2375,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Add songs to the end of the queue. */
     fun addToQueue(tracks: List<Track>) {
+        if (JamSession.active) { JamSession.tracks("append", tracks); return }
         if (deferUntilPlaybackTargetReady { addToQueue(tracks) }) return
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("append", buildJsonObject { put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), tracks)) }); return }
@@ -2341,6 +2442,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToNext() {
+        if (JamSession.active) { JamSession.command("next"); return }
         if (deferUntilPlaybackTargetReady { skipToNext() }) return
         if (blockUnavailableAlexaControl()) return
         clearSelectionForNavigation()
@@ -2354,6 +2456,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun skipToPrevious() {
+        if (JamSession.active) { JamSession.command("previous"); return }
         if (deferUntilPlaybackTargetReady { skipToPrevious() }) return
         if (blockUnavailableAlexaControl()) return
         clearSelectionForNavigation()
@@ -2367,6 +2470,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun seekTo(positionMs: Long) {
+        if (JamSession.active) { JamSession.command("seek", buildJsonObject { put("position_ms", positionMs) }); return }
         if (deferUntilPlaybackTargetReady { seekTo(positionMs) }) return
         if (blockUnavailableAlexaControl()) return
         // A failed/new target must never seek the superseded song still in the renderer.
@@ -2383,6 +2487,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
     internal fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
         val state = uiState.value
+        if (JamSession.active) return `in`.synthora.musicbox.services.PlaybackProgress(state.position, state.duration)
         if (isAlexa || isRemotePhone) {
             val echoState = echo.state.value
             if (state.currentTrack?.ytVideoId != echoState.track?.ytVideoId)
@@ -2434,6 +2539,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 
     fun removeFromQueue(trackId: String, onComplete: ((Boolean) -> Unit)? = null) {
+        if (JamSession.active) { JamSession.command("remove", buildJsonObject { put("entry_id", trackId) }); onComplete?.invoke(true); return }
         if (blockUnavailableAlexaControl()) { onComplete?.invoke(false); return }
         if (isRemotePhone) {
             viewModelScope.launch {
@@ -2489,6 +2595,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun moveInQueue(fromIndex: Int, toIndex: Int) {
+        if (JamSession.active) { JamSession.command("reorder", buildJsonObject { put("from", fromIndex); put("to", toIndex) }); return }
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("reorder", buildJsonObject { put("from", fromIndex); put("to", toIndex) }); return }
         if (isAlexa) {
@@ -2733,6 +2840,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Power tools for the phone queue. The playing song and its position are untouched. */
     fun applyQueueTool(tool: QueueTool) {
+        if (JamSession.active) {
+            JamSession.command(when(tool) { QueueTool.SHUFFLE_UPCOMING -> "shuffle"; QueueTool.SORT_UPCOMING -> "sort"; QueueTool.CLEAR_PLAYED -> "clear_played" }); return
+        }
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("tool", buildJsonObject { put("tool", tool.name) }); return }
         if (isAlexa) {
