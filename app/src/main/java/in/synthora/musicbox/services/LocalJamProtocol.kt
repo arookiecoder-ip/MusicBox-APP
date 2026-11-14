@@ -43,7 +43,7 @@ internal object LocalJamProtocol {
         if(rtt !in 0..200 || local<0 || peer<0)return null
         val target=peer+rtt/2
         val drift=target-local
-        if(kotlin.math.abs(drift) !in 120..2000)return null
+        if(kotlin.math.abs(drift) !in 350..2000)return null
         val corrected=(local+drift.coerceIn(-250,250)).coerceAtLeast(0)
         if(duration>0 && corrected>=duration-500)return null
         return corrected
@@ -61,4 +61,19 @@ internal object LocalJamProtocol {
         }
         return true
     }
+}
+
+/** Check after transport settles, then periodically; never chase every progress heartbeat. */
+internal class LocalJamSyncCadence {
+    private var intent=""
+    private var nextCheck=0L
+    private var correctionAfter=0L
+    fun due(value:String,now:Long):Boolean {
+        if(value!=intent){intent=value;nextCheck=now+2000;correctionAfter=now+2000}
+        if(now<nextCheck)return false
+        nextCheck=now+10000
+        return true
+    }
+    fun canCorrect(now:Long)=now>=correctionAfter
+    fun corrected(now:Long){correctionAfter=now+30000}
 }

@@ -22,7 +22,7 @@ data class JamOutput(val id: String, val name: String, val online: Boolean, val 
 data class JamUiState(val active: Boolean = false, val host: Boolean = false, val url: String = "",
     val busy: Boolean = false, val pendingAction:String="", val error: String? = null, val members: List<JamMember> = emptyList(),
     val outputs: List<JamOutput> = emptyList(), val playback: JsonObject = JsonObject(emptyMap()),
-    val listen: Boolean = false, val localSyncKey:String="", val memberCount: Int = 0, val receivedAt: Long = 0)
+    val listen: Boolean = false, val hostName:String="Host", val localSyncKey:String="", val memberCount: Int = 0, val receivedAt: Long = 0)
 
 /** Only verified, configured Music Box hosts may supply invitations. */
 internal fun jamInviteToken(url: String, base: String): String? = runCatching {
@@ -72,7 +72,7 @@ open class JamClient internal constructor(
                 val phones=room.outputs.filter{it.id in ids && it.online && it.kind=="phone"}.map{it.id}.toSet()
                 val enabled=room.active && room.listen && playback.text("mode")=="multiple" &&
                     playback.flag("playing") && playback.flag("playback_confirmed") && optimisticTransport==null &&
-                    room.localSyncKey.length==64 && phones.size>=2 && deviceId() in phones && playback.text("entry_id").isNotBlank()
+                    room.localSyncKey.length==64 && ids.all { it in phones } && phones.size>=2 && deviceId() in phones && playback.text("entry_id").isNotBlank()
                 localSync?.update(if(enabled) `in`.synthora.musicbox.services.LocalJamContext(
                     playback.text("queue_epoch"),room.localSyncKey,deviceId(),phones.minOrNull()!!,phones,
                     listOf(playback.text("queue_epoch"),playback.text("entry_id"),playback.number("seek_revision"),playback.number("transport_revision")).joinToString(":"),
@@ -108,6 +108,10 @@ open class JamClient internal constructor(
     var outputStatus: () -> JsonObject = {JsonObject(emptyMap())}
     var outputDevices: () -> JsonArray = {JsonArray(emptyList())}
     var applyVolume: (suspend (Int)->Unit)? = null
+    var applyLocalVolume: ((Int)->Unit)? = null
+    private var localVolumePreview: Pair<Int,Long>? = null
+    private val _refreshing=MutableStateFlow(false)
+    val refreshing=_refreshing.asStateFlow()
     var applyOutput: (suspend (String)->Unit)? = null
     private val acknowledgements=linkedSetOf<String>()
     private val volumeJobs=mutableMapOf<String,Job>()
@@ -128,6 +132,12 @@ open class JamClient internal constructor(
         if(!target.online || device !in _state.value.playback.array("selected").map{it.jsonPrimitive.content})return
         _state.update {it.copy(outputs=it.outputs.map{output->if(output.id==device)output.copy(volume=value.coerceIn(0,100))else output})}
         volumeJobs.remove(device)?.cancel()
+        if(device==deviceId() && target.kind=="phone" && applyLocalVolume!=null) {
+            // Local sound never waits for the server or for the next presence response.
+            applyLocalVolume?.invoke(value.coerceIn(0,100))
+            localVolumePreview=value.coerceIn(0,100) to (clock()+1500)
+            return
+        }
         val revision=generation
         volumeJobs[device]=scope.launch {
             delay(150)
@@ -142,7 +152,11 @@ open class JamClient internal constructor(
     fun start()=action("/alexa/jam/start/",buildJsonObject {
         put("device_id",deviceId());put("name",outputName());put("status",outputStatus());put("kind",outputStatus().text("kind"));put("devices",outputDevices())
     })
-    fun refresh() { scope.launch { refreshNow(); if(active) follow() } }
+    fun refresh() {
+        if(_refreshing.value)return
+        _refreshing.value=true
+        scope.launch {try{refreshNow();if(active)follow()}finally{_refreshing.value=false}}
+    }
     private fun follow() {
         if (polling?.isActive == true) return
         polling = scope.launch {
@@ -177,11 +191,11 @@ open class JamClient internal constructor(
             val retainPreview=optimisticTransport!=null && result.flag("listen") &&
                 old.playback.text("queue_epoch")==playback.text("queue_epoch") && old.playback.text("entry_id")==playback.text("entry_id")
             _state.value = JamUiState(active=true, host=result.flag("host"), url=result.text("url"),
-                members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
+                members=(if(result["participants"] is JsonArray)result.array("participants") else result.array("members")).map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error"),
-                    o.text("username").ifBlank{"Host"},o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
+                    o.text("username").ifBlank{"Host"},if(o.text("device")==deviceId() && localVolumePreview?.second?.let{it>clock()}==true) localVolumePreview?.first else o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
                     o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)},o.flag("playing"),o.flag("processing"),o.flag("confirmed")) },
-                playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), localSyncKey=result.text("local_sync_key"), memberCount=result.number("member_count").toInt(),
+                playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), hostName=result.text("host_name").ifBlank{"Host"}, localSyncKey=result.text("local_sync_key"), memberCount=result.number("member_count").toInt(),
                 error=if(playback.flag("playback_confirmed")) null else playbackError ?: result.text("error").takeIf{it.isNotBlank() && it!="null"}, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
             lastSuccess = clock()
@@ -333,7 +347,7 @@ open class JamClient internal constructor(
         } }
     }
     fun clear() {
-        volumeJobs.values.forEach{it.cancel()};volumeJobs.clear();acknowledgements.clear(); generation++; playbackHeld=false; optimisticTransport=null; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
+        localVolumePreview=null;volumeJobs.values.forEach{it.cancel()};volumeJobs.clear();acknowledgements.clear(); generation++; playbackHeld=false; optimisticTransport=null; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
     }
 }
 
@@ -345,6 +359,7 @@ object JamSession : JamClient(
 
 class JamViewModel : ViewModel() {
     val state = JamSession.state
+    val refreshing = JamSession.refreshing
     fun refresh() { if(JamSession.active && state.value.error!=null) JamSession.command("retry") else JamSession.refresh() }
     fun start() = JamSession.start()
     fun stop() = JamSession.action("/alexa/jam/stop/")

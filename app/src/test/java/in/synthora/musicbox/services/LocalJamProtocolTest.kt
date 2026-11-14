@@ -73,4 +73,19 @@ class LocalJamProtocolTest {
             assertNull(LocalJamProtocol.read(DataInputStream(ByteArrayInputStream(oversize)),key))
         } finally {server.close();executor.shutdownNow()}
     }
+    @Test fun syncChecksSettleAfterActivityAndCorrectionsHaveAThirtySecondCooldown() {
+        val cadence=LocalJamSyncCadence()
+        assertFalse(cadence.due("track:play",0))
+        assertFalse(cadence.due("track:play",1999))
+        assertTrue(cadence.due("track:play",2000))
+        cadence.corrected(2000)
+        assertFalse(cadence.canCorrect(12000))
+        assertFalse(cadence.due("track:play",2001))
+        assertTrue(cadence.due("track:play",12000))
+        assertTrue(cadence.canCorrect(32000))
+        assertFalse(cadence.due("track:seek",33000))
+        assertFalse(cadence.due("track:seek",34999))
+        assertTrue(cadence.due("track:seek",35000))
+        assertTrue(cadence.canCorrect(35000))
+    }
 }

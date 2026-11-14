@@ -11,6 +11,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import `in`.synthora.musicbox.ui.screens.JamSettingsContent
 import `in`.synthora.musicbox.ui.screens.JamDeviceList
 import `in`.synthora.musicbox.ui.screens.JamVolumeControls
+import `in`.synthora.musicbox.ui.screens.PlayOnHeader
 import `in`.synthora.musicbox.ui.theme.JUKETheme
 import `in`.synthora.musicbox.viewmodels.*
 import kotlinx.serialization.json.*
@@ -52,6 +53,10 @@ class JamManagementUiTest {
         compose.setContent { JUKETheme { Column(Modifier.verticalScroll(rememberScrollState())) {
             JamSettingsContent(host(), {}, {}, {}, {removed=it}, {_,_->}, {})
         } } }
+        compose.onAllNodesWithContentDescription("Remove Alice").assertCountEquals(0)
+        compose.onNodeWithContentDescription("Jam participants, 2 people").performClick()
+        compose.onNodeWithText("Jam participants").assertIsDisplayed()
+        compose.onAllNodesWithText("You · Host").assertCountEquals(0)
         compose.onNodeWithContentDescription("Remove Alice").performScrollTo().performClick()
         compose.onNodeWithText("Remove Alice?").assertIsDisplayed()
         compose.onNodeWithText("Cancel").performClick()
@@ -105,19 +110,20 @@ class JamManagementUiTest {
         compose.onAllNodesWithText("Audio outputs").assertCountEquals(0)
         screenshot("jam-play-on-multiple")
     }
-    @Test fun memberControlsHostVolumeInSingleModeAndSeparateDeviceVolumesInMultipleMode() {
+    @Test fun playerShowsSharedVolumeInSingleModeAndOnlyOwnVolumeInMultipleMode() {
         val state=mutableStateOf(host().copy(host=false,outputs=listOf(
             JamOutput("echo","Echo",true,"",username="Host",volume=20,kind="alexa"),
             JamOutput("phone","Tablet",true,"",username="Alice",volume=40)),
             playback=buildJsonObject{put("mode","single");put("selected",JsonArray(listOf(JsonPrimitive("echo"))))}))
         val changes=mutableListOf<Pair<String,Int>>()
-        compose.setContent{JUKETheme{Column{JamVolumeControls(state.value){device,value->changes+=device to value}}}}
+        compose.setContent{JUKETheme{Column{JamVolumeControls(state.value,ownDeviceId="phone"){device,value->changes+=device to value}}}}
         compose.onAllNodesWithContentDescription("Volume").assertCountEquals(1)
         compose.onNodeWithContentDescription("Volume").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress){it(.7f)}
         compose.runOnIdle{assertEquals("echo",changes.last().first);assertEquals(70,changes.last().second)
             state.value=state.value.copy(playback=buildJsonObject{put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive("echo"),JsonPrimitive("phone"))))})}
-        compose.onAllNodesWithContentDescription("Volume").assertCountEquals(2)
-        screenshot("jam-shared-volume")
+        compose.onAllNodesWithContentDescription("Volume").assertCountEquals(1)
+        compose.onAllNodesWithText("Echo · Host").assertCountEquals(0)
+        screenshot("jam-own-volume")
         compose.onAllNodesWithContentDescription("Volume").onLast().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress){it(.3f)}
         compose.runOnIdle{assertEquals("phone",changes.last().first);assertEquals(30,changes.last().second)}
     }
@@ -136,5 +142,34 @@ class JamManagementUiTest {
         compose.onAllNodesWithContentDescription("Volume").assertCountEquals(2)
         assertEquals("Tablet",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],phone))
         assertEquals("Tablet · This device",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],"other"))
+    }
+    @Test fun participantSheetClosesWithoutSendingPlaybackOrJamCommands() {
+        var commands=0
+        val state=mutableStateOf(host().copy(hostName="arookiecoder"))
+        compose.setContent{JUKETheme(darkTheme=true){JamSettingsContent(state.value,{commands++},{commands++},{commands++},{commands++},{_,_->commands++},{commands++})}}
+        compose.onAllNodesWithText("Jam participants").assertCountEquals(0)
+        compose.onNodeWithContentDescription("Jam participants, 2 people").performClick()
+        compose.onNodeWithText("arookiecoder").assertIsDisplayed()
+        compose.onNodeWithText("Host").assertIsDisplayed()
+        compose.onNodeWithText("Participant").assertIsDisplayed()
+        compose.onAllNodesWithContentDescription("Remove arookiecoder").assertCountEquals(0)
+        screenshot("jam-participants")
+        compose.onNodeWithContentDescription("Close Jam participants").performClick()
+        compose.onAllNodesWithText("Jam participants").assertCountEquals(0)
+        compose.runOnIdle{assertEquals(0,commands)}
+    }
+    @Test fun refreshHeaderShowsProgressAndPreventsDuplicateRefresh() {
+        var calls=0;val busy=mutableStateOf(false)
+        compose.setContent{JUKETheme(darkTheme=true){PlayOnHeader(busy.value){calls++;busy.value=true}}}
+        compose.onNodeWithContentDescription("Refresh devices").assertIsDisplayed().performClick()
+        compose.onNodeWithContentDescription("Refreshing devices").assertIsDisplayed()
+        compose.onAllNodesWithContentDescription("Refresh devices").assertCountEquals(0)
+        compose.runOnIdle{assertEquals(1,calls)}
+    }
+    @Test fun multiDeviceControllerWithoutSelectedLocalOutputHasNoPlayerVolumeSlider() {
+        compose.setContent{JUKETheme{JamVolumeControls(host().copy(playback=buildJsonObject{
+            put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive("host-phone"),JsonPrimitive("alice-phone"))))
+        }),ownDeviceId="controller")}}
+        compose.onAllNodesWithContentDescription("Volume").assertCountEquals(0)
     }
 }
