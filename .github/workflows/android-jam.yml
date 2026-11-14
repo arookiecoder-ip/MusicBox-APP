@@ -6,6 +6,7 @@ on:
     branches:
       - feat/jam-sessions
       - fix/jam-playback-session
+      - codex/jam-output-handoff
   workflow_dispatch:
     inputs:
       ui_tests:

@@ -106,7 +106,7 @@ open class JamClient internal constructor(
             val result = read("/api/jam/state/", query).objectOrEmpty()
             if(requestGeneration != generation) return
             if (!result.flag("active")) {
-                if (active || result.flag("revoked")) {
+                if (active) {
                     silence()
 
                 }
@@ -138,8 +138,19 @@ open class JamClient internal constructor(
             }
         }
     }
+    private var playbackHeld = false
+    suspend fun beginOutputSwitch() {
+        playbackHeld = true
+        applying?.cancelAndJoin()
+    }
+    fun endOutputSwitch() {
+        playbackHeld = false
+        applyingKey = null
+        if (active) refresh()
+    }
     private var applyingKey: List<Any?>? = null
     private fun deliver(playback: JsonObject, listen: Boolean) {
+        if (playbackHeld) return
         val key=listOf(playback.text("queue_epoch"),playback.number("queue_version"),playback.number("queue_index"),
             playback.flag("playing"),playback.number("seek_revision"),listen,outputName())
         if(applying?.isActive==true && applyingKey==key) return
@@ -218,9 +229,12 @@ open class JamClient internal constructor(
                     catch(_: Exception) { feedback("Joined Jam. Your audio output needs to reconnect.") }
                 }
                 if (path.endsWith("leave/") || path.endsWith("stop/")) {
+                    polling?.cancel()
                     silence()
                     rememberActive(false)
                     _state.value=JamUiState()
+                    polling?.cancel()
+                    return@withLock
                 }
                 refreshNow()
             } catch (e: CancellationException) { throw e }
@@ -228,7 +242,7 @@ open class JamClient internal constructor(
         } }
     }
     fun clear() {
-        generation++; optimisticTransport=null; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
+        generation++; playbackHeld=false; optimisticTransport=null; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
     }
 }
 

@@ -212,10 +212,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _echoRequests = MutableStateFlow(0)
     private val transportLoading = MutableStateFlow(false)
+    private val jamApplying = MutableStateFlow(false)
     private val allSkipLoading = combine(transportLoading,
         `in`.synthora.musicbox.services.PlaybackCoordinator.notificationLoading) { app, notification -> app || notification }
     private var skipLoadingJob: Job? = null
-    private val playbackBusy = combine(_isSwitchingOutput, _echoRequests, playbackManager.isBufferingFlow,
+    private val playbackBusy = combine(combine(_isSwitchingOutput, jamApplying) { switching, applying -> switching || applying }, _echoRequests, playbackManager.isBufferingFlow,
         `in`.synthora.musicbox.services.PlaybackService.recoveryLoading, allSkipLoading) { switching, requests, buffering, recovering, skipping ->
         switching || (skipping && _output.value != PlaybackOutput.PHONE) || ((buffering || recovering) && _output.value == PlaybackOutput.PHONE)
     }
@@ -286,9 +287,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked) { personal, jam, liked ->
         if (!jam.active) personal else {
             val room = decodeJamSnapshot(jam.playback)
-            personal.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
-                queueIndex=room.index, isPlaying=room.playing, isLoading=false,
-                position=room.positionMs, duration=room.durationMs,
+            presentJamPlayback(personal, room, jam.listen).copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
+                queueIndex=room.index, duration=room.durationMs,
                 repeatMode=when(jam.playback.text("repeat")) { "all" -> 2; "one" -> 1; else -> 0 })
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
@@ -297,13 +297,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var jamAppliedQueue = -1L
     private var jamAppliedEntry = ""
     private var jamAppliedOutput = ""
-    private var jamInstallAt = 0L
+    private var jamAppliedPlaying = false
     private var jamSeekRevision = -1L
     private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean) {
         val outputKey = _output.value.name + ":" + echo.serial.value + ":" + _remoteMobileOutput.value.owner
         if (!listen) {
             val audible = if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange()
-            if (jamWasListening || audible) {
+            if (audible) {
                 if (isAlexa) echo.command("pause")
                 else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "pause", buildJsonObject {put("jam_follow",true)})
                 else playbackManager.pause()
@@ -315,16 +315,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val index=room.index
         if (index !in room.queue.indices) return
         val entry=room.queue[index].uuid
-        val seekChanged=jamSeekRevision != snapshot.number("seek_revision")
         val actualEntry = if(isAlexa || isRemotePhone) echo.state.value.track?.ytVideoId else playbackManager.snapshot.value.currentId
         val expectedEntry = if(isAlexa || isRemotePhone) room.track?.ytVideoId else entry
-        if(!jamWasListening && actualEntry==expectedEntry &&
+        if((!jamWasListening || jamAppliedOutput != outputKey) && actualEntry==expectedEntry &&
             (if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange())==room.playing &&
             (if(isAlexa || isRemotePhone) echo.state.value.queue.map {it.ytVideoId} else _uiState.value.queue.map {it.ytVideoId})==room.queue.map {it.ytVideoId}) {
+            // Preserve a seek received during the handoff; the new output must apply it once.
+            if (!jamWasListening) jamSeekRevision=snapshot.number("seek_revision")
             jamWasListening=true;jamAppliedQueue=room.queueVersion;jamAppliedEntry=entry;jamAppliedOutput=outputKey
-            jamSeekRevision=snapshot.number("seek_revision");jamInstallAt=android.os.SystemClock.elapsedRealtime()
+            jamAppliedPlaying=room.playing
         }
-        val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry && actualEntry != expectedEntry || jamAppliedQueue != room.queueVersion || actualEntry != expectedEntry && android.os.SystemClock.elapsedRealtime()-jamInstallAt>8_000
+        val seekChanged=jamSeekRevision != snapshot.number("seek_revision")
+        val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry && actualEntry != expectedEntry || jamAppliedQueue != room.queueVersion
         if (replace) {
             if (isAlexa) echo.followJamQueue(room.queue, index, room.positionMs, room.playing, preserveCurrent=actualEntry==expectedEntry)
             else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "queue", buildJsonObject {
@@ -343,22 +345,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 if(seekChanged || kotlin.math.abs(playbackManager.getCurrentPosition()-room.positionMs)>1_500) playbackManager.seekTo(room.positionMs)
             } else phoneSetQueue(room.queue, index, room.positionMs, room.playing, deferRadioSeed=true)
-            jamAppliedEntry=entry; jamAppliedQueue=room.queueVersion; jamAppliedOutput=outputKey; jamInstallAt=android.os.SystemClock.elapsedRealtime()
+            jamAppliedEntry=entry; jamAppliedQueue=room.queueVersion; jamAppliedOutput=outputKey
         } else if (isAlexa) {
-            val actual=echo.state.value
-            if (actual.playing != room.playing) echo.command(if (room.playing) "play" else "pause", refreshAfter=false)
-            if (seekChanged || kotlin.math.abs(actual.livePosition()-room.positionMs)>3_000) echo.seek(room.positionMs, refreshAfter=false)
+            if (jamAppliedPlaying != room.playing) echo.command(if (room.playing) "play" else "pause", refreshAfter=false)
+            if (seekChanged) echo.seek(room.positionMs, refreshAfter=false)
         } else if (isRemotePhone) {
-            val actual=echo.state.value
-            if (actual.playing != room.playing) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, if(room.playing) "play" else "pause", buildJsonObject {put("jam_follow",true)})
-            if (seekChanged || kotlin.math.abs(actual.livePosition()-room.positionMs)>2_000) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "seek", buildJsonObject { put("position_ms", room.positionMs); put("jam_follow",true) })
+            if (jamAppliedPlaying != room.playing) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, if(room.playing) "play" else "pause", buildJsonObject {put("jam_follow",true)})
+            if (seekChanged) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "seek", buildJsonObject { put("position_ms", room.positionMs); put("jam_follow",true) })
         } else {
             if (playbackManager.shouldResumeAfterTrackChange() != room.playing) {
                 if (room.playing) playbackManager.togglePlayPause() else playbackManager.pause()
             }
-            if (seekChanged || kotlin.math.abs(playbackManager.getCurrentPosition()-room.positionMs)>1_500) playbackManager.seekTo(room.positionMs)
+            if (seekChanged || (playbackManager.isPlayingFlow.value && !playbackManager.isBufferingFlow.value && kotlin.math.abs(playbackManager.getCurrentPosition()-room.positionMs)>1_500)) playbackManager.seekTo(room.positionMs)
         }
         jamAppliedEntry=entry
+        jamAppliedPlaying=room.playing
         jamSeekRevision=snapshot.number("seek_revision")
         jamWasListening=true
         if(!isAlexa && !isRemotePhone) {
@@ -775,7 +776,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             ready
         }
-        JamSession.applyPlayback = ::applyJamPlayback
+        JamSession.applyPlayback = { snapshot, listen ->
+            jamApplying.value = listen
+            try { applyJamPlayback(snapshot, listen) }
+            finally { jamApplying.value = false }
+        }
         JamSession.outputName = { android.os.Build.MODEL + " · " + when {
             isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
             isRemotePhone -> mobileDevices.value.firstOrNull { it.id == _remoteMobileOutput.value.owner }?.name.orEmpty().ifBlank { "remote phone" }
@@ -1098,6 +1103,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playlistBackfillJob?.cancel()
         viewModelScope.launch {
             try {
+                JamSession.beginOutputSwitch()
                 val before = AlexaBackendApi.phoneOutputStatus()
                 val latest = `in`.synthora.musicbox.services.MobileDeviceConnection.transfer(deviceId, before, echo.serial.value)
                 _remoteMobileOutput.value = latest
@@ -1109,6 +1115,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't switch devices") }
             finally {
                 _isSwitchingOutput.value = false
+                JamSession.endOutputSwitch()
                 val next = outputSwitchRequests.finish()
                 if (signedIn && next != null) switchOutput(next.serial)
             }
@@ -1379,6 +1386,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _isSwitchingOutput.value = true
         viewModelScope.launch {
             try {
+                JamSession.beginOutputSwitch()
                 when {
                     toPhone && isRemotePhone -> moveRemotePhoneToThisPhone()
                     toPhone -> moveEchoToPhone()
@@ -1420,6 +1428,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _messages.tryEmit(e.message ?: "Couldn't switch playback")
             } finally {
                 _isSwitchingOutput.value = false
+                JamSession.endOutputSwitch()
                 if (!isAlexa && !sharedPhoneQueueReady) synchronizePhoneQueue()
                 val next = outputSwitchRequests.finish()
                 if (signedIn && next != null) switchOutput(next.serial)
@@ -2564,7 +2573,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
     internal fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
         val state = uiState.value
-        if (JamSession.active) return `in`.synthora.musicbox.services.PlaybackProgress(JamSession.positionMs, state.duration)
+        if (JamSession.active) {
+            if (!JamSession.state.value.listen) return `in`.synthora.musicbox.services.PlaybackProgress(JamSession.positionMs, state.duration)
+            if (state.isLoading || _isSwitchingOutput.value) return `in`.synthora.musicbox.services.PlaybackProgress(state.position, state.duration)
+        }
         if (isAlexa || isRemotePhone) {
             val echoState = echo.state.value
             if (state.currentTrack?.ytVideoId != echoState.track?.ytVideoId)

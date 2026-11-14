@@ -86,4 +86,31 @@ class JamPlaybackRegressionTest {
         response.complete(buildJsonObject {put("playback",playback(false,2))});runCurrent()
         assertFalse(client.active);assertTrue(client.state.value.playback.isEmpty())
     }
+    @Test fun handoffCancelsOldFollowerAndDefersNewCommandsUntilOutputCommits()=runTest {
+        var desired=playback(true);var output="phone";val applied=mutableListOf<String>();var cancelled=false
+        val client=JamClient(backgroundScope,{_,_->state(desired)},{_,_->buildJsonObject {}},{"phone"},{testScheduler.currentTime},{})
+        client.outputName={output}
+        client.applyPlayback={_,_->applied+=output;if(output=="phone")try{awaitCancellation()}finally{cancelled=true}}
+        client.refresh();runCurrent();assertEquals(listOf("phone"),applied)
+        client.beginOutputSwitch();assertTrue(cancelled)
+        desired=playback(false,2);client.refresh();runCurrent()
+        advanceTimeBy(2100);runCurrent();assertEquals(listOf("phone"),applied)
+        output="alexa";client.endOutputSwitch();runCurrent()
+        assertEquals(listOf("phone","alexa"),applied)
+        assertFalse(client.state.value.playback["playing"]!!.jsonPrimitive.boolean)
+        client.clear()
+    }
+    @Test fun endingJamSilencesOnceWithoutRevokedRefreshSendingAnotherPause()=runTest {
+        var ended=false;var pauses=0;var readsAfterEnd=0
+        val client=JamClient(backgroundScope,{_,_->
+            if(ended){readsAfterEnd++;buildJsonObject{put("active",false);put("revoked",true)}}else state(playback(true))
+        },{path,_->if(path.endsWith("stop/"))ended=true;buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        client.applyPlayback={_,listen->if(!listen)pauses++}
+        client.refresh();runCurrent();client.action("/alexa/jam/stop/");runCurrent()
+        advanceTimeBy(10_000);runCurrent()
+        assertFalse(client.active);assertEquals(1,pauses);assertEquals(0,readsAfterEnd)
+        client.refresh();runCurrent();assertEquals(1,pauses)
+        client.clear()
+    }
+
 }
