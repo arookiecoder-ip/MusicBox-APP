@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    private val pendingJamInvite = mutableStateOf<String?>(null)
     private val showPlayerOnLaunch = mutableStateOf(false)
     private var downloadsOpenTrigger by mutableIntStateOf(0)
 
@@ -201,6 +202,7 @@ class MainActivity : ComponentActivity() {
         `in`.synthora.musicbox.ui.theme.GlassPrefs.solid =
             getSharedPreferences("ui_prefs", MODE_PRIVATE).getBoolean("solid_surfaces", false)
 
+        pendingJamInvite.value = savedInstanceState?.getString("jam_invite")
         // Check intent immediately
         handlePlayerIntent(intent)
 
@@ -240,6 +242,20 @@ class MainActivity : ComponentActivity() {
             JUKETheme(
                 extractedColors = themeColors
             ) {
+                val inviteToken=pendingJamInvite.value
+                LaunchedEffect(inviteToken, accountState.stage) {
+                    if (inviteToken != null && accountState.stage == AuthStage.SIGNED_OUT) {
+                        pendingJamInvite.value=null
+                        startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(`in`.synthora.musicbox.network.Backend.baseUrl + "/jam-invite/" + inviteToken)))
+                    }
+                }
+                if (inviteToken != null && accountState.stage == AuthStage.SIGNED_IN) {
+                    GlassAlertDialog(onDismissRequest={pendingJamInvite.value=null},
+                        title={Text("Join this Jam?")},
+                        text={Text("Share one playback control and queue. The host can select your current audio output for the group. Likes and playlist saves stay in your account.")},
+                        confirmButton={TextButton(onClick={jamViewModel.join(inviteToken); pendingJamInvite.value=null}){Text("Join Jam")}},
+                        dismissButton={TextButton(onClick={pendingJamInvite.value=null}){Text("Cancel")}})
+                }
                 accountState.browserUrl?.let { url ->
                     `in`.synthora.musicbox.ui.screens.AccountBrowser(url, account::browserClosed)
                 }
@@ -902,7 +918,18 @@ class MainActivity : ComponentActivity() {
         handlePlayerIntent(intent)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("jam_invite", pendingJamInvite.value)
+        super.onSaveInstanceState(outState)
+    }
+
     private fun handlePlayerIntent(intent: Intent?) {
+        intent?.data?.toString()?.let { url ->
+            `in`.synthora.musicbox.viewmodels.jamInviteToken(url, `in`.synthora.musicbox.network.Backend.baseUrl)?.let {
+                pendingJamInvite.value=it
+                intent.data=null
+            }
+        }
         if (intent?.getBooleanExtra(`in`.synthora.musicbox.services.DownloadService.OPEN_DOWNLOADS, false) == true) {
             showPlayerOnLaunch.value = false
             downloadsOpenTrigger++
@@ -914,7 +941,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing) `in`.synthora.musicbox.services.MobileDeviceConnection.stop()
+        if (isFinishing && !`in`.synthora.musicbox.viewmodels.JamSession.active) `in`.synthora.musicbox.services.MobileDeviceConnection.stop()
         super.onDestroy()
         // Track app closed and end session
         AnalyticsManager.getIfInitialized()?.let { analytics ->

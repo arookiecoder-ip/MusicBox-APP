@@ -22,6 +22,10 @@ class JukeApplication : Application(), ImageLoaderFactory, androidx.lifecycle.Vi
         `in`.synthora.musicbox.network.Backend.init(this)
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.init(this)
         `in`.synthora.musicbox.network.NetworkFeedback.observe(this)
+        val resumeJam=`in`.synthora.musicbox.viewmodels.JamSession.init(this)
+        if(resumeJam && `in`.synthora.musicbox.network.Backend.hasSession()) {
+            android.os.Handler(mainLooper).post { playbackModel().onSignedIn() }
+        }
         `in`.synthora.musicbox.services.DownloadRepository.get(this)
     }
 
