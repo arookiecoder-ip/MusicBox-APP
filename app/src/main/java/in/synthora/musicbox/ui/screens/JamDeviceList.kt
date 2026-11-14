@@ -1,6 +1,14 @@
 package `in`.synthora.musicbox.ui.screens
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.PhoneAndroid
 import androidx.compose.material.icons.outlined.Speaker
@@ -29,7 +37,7 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
         }
         if(state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=8.dp))
         state.outputs.filter{it.online}.groupBy{it.username}.forEach{(username,outputs)->
-            Text(username,style=MaterialTheme.typography.titleSmall,modifier=Modifier.padding(top=16.dp,bottom=8.dp))
+            Text(username,style=MaterialTheme.typography.titleSmall,modifier=Modifier.padding(top=12.dp,bottom=4.dp))
             val echoOwners=outputs.flatMap{output->output.devices.filter{it.kind=="alexa"}.map{it.id to output}}.groupBy{it.first}.mapValues{(_,rows)->
                 rows.firstOrNull{(_,output)->output.id in selected && (targets.text(output.id).let{it.isNotBlank() && it==rows.first().first} || output.devices.any{it.id==rows.first().first && it.active})}?.second?.id ?: rows.first().second.id
             }
@@ -39,39 +47,47 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
                 devices.filter{it.online && (it.kind!="alexa" || echoOwners[it.id]==output.id)}.forEach{device->
                     val echoDisabled=multiple && device.kind=="alexa"
                     val checked=!echoDisabled && output.id in selected && device.id==target
-                    Row(Modifier.fillMaxWidth().heightIn(min=64.dp),verticalAlignment=Alignment.CenterVertically) {
+                    val available=!state.busy && !echoDisabled && output.online && device.online
+                    val background by animateColorAsState(if(checked)MaterialTheme.colorScheme.primary.copy(alpha=.06f) else Color.Transparent,label="Selected device")
+                    fun select(enable:Boolean) {
+                        val next=if(!enable)selected-output.id else if(multiple)(selected+output.id).distinct() else listOf(output.id)
+                        if(device.id=="current")onConfigure(if(multiple)"multiple" else "single",next)
+                        else onSelect(if(multiple)"multiple" else "single",next,output.id,device.id)
+                    }
+                    Row(Modifier.fillMaxWidth().heightIn(min=60.dp).clip(RoundedCornerShape(8.dp)).background(background)
+                        .toggleable(value=checked,enabled=available,role=Role.Checkbox,onValueChange=::select)
+                        .semantics{contentDescription="Play on ${device.name} · $username"}.padding(start=8.dp),
+                        verticalAlignment=Alignment.CenterVertically) {
                         Icon(if(device.kind=="alexa")Icons.Outlined.Speaker else Icons.Outlined.PhoneAndroid,null,
                             tint=if(checked)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(24.dp))
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f).padding(end=12.dp)) {
-                            Text(jamDeviceLabel(output, device),style=MaterialTheme.typography.bodyLarge)
+                            Text(jamDeviceLabel(output, device),style=MaterialTheme.typography.bodyMedium,maxLines=2,overflow=TextOverflow.Ellipsis,
+                                color=if(checked && output.playing)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
                             Text(if(echoDisabled)"Available in single-device mode" else if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked && output.processing)"Buffering…" else if(checked && output.playing)"Playing here" else if(checked)"Selected" else "Available"},
-                                style=MaterialTheme.typography.bodySmall,color=if(output.error.isNotBlank())MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                                maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.bodySmall,color=if(output.error.isNotBlank())MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Checkbox(checked=checked,enabled=!state.busy && !echoDisabled && (checked || output.online && device.online),
-                            onCheckedChange={enable->
-                                val next=if(!enable)selected-output.id else if(multiple)(selected+output.id).distinct() else listOf(output.id)
-                                if(device.id=="current")onConfigure(if(multiple)"multiple" else "single",next)
-                                else onSelect(if(multiple)"multiple" else "single",next,output.id,device.id)
-                            },modifier=Modifier.semantics{contentDescription="Play on ${device.name} · $username"})
+                        Checkbox(checked=checked,enabled=available,onCheckedChange=null,modifier=Modifier.size(48.dp))
                     }
-                    if (multiple && checked) EchoVolumeRow(volume=output.volume, enabled=output.online,
-                        onVolumeChange={JamSession.setVolume(output.id,it)})
+                    if (multiple && checked) Box(Modifier.padding(start=36.dp,end=8.dp)) {
+                        EchoVolumeRow(volume=output.volume, enabled=output.online,onVolumeChange={JamSession.setVolume(output.id,it)})
+                    }
                 }
             }
         }
         if(state.outputs.none{it.online}) {
-            LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=12.dp))
-            Text("Finding Jam devices…",style=MaterialTheme.typography.bodySmall)
+            Text("No connected devices. Refresh to check again.",Modifier.padding(vertical=16.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-internal fun JamVolumeControls(state:JamUiState,onVolume:(String,Int)->Unit={device,value->JamSession.setVolume(device,value)}) {
+internal fun JamVolumeControls(state:JamUiState,
+    ownDeviceId:String=`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId,
+    onVolume:(String,Int)->Unit={device,value->JamSession.setVolume(device,value)}) {
     val selected=state.playback.array("selected").map{it.jsonPrimitive.content}.filter { id -> state.outputs.any { it.id == id && it.online } }
-    state.outputs.filter{it.online && it.id in selected}.forEach{output->
-        if(selected.size>1)Text("${jamOutputLabel(output)} · ${output.username}",style=MaterialTheme.typography.labelMedium,modifier=Modifier.padding(top=8.dp))
+    state.outputs.filter{it.online && it.id in selected && (state.playback.text("mode")!="multiple" || it.id==ownDeviceId)}.forEach{output->
+        if(state.playback.text("mode")=="multiple")Text("${jamOutputLabel(output)} · ${output.username}",style=MaterialTheme.typography.labelMedium,modifier=Modifier.padding(top=8.dp))
         EchoVolumeRow(volume=output.volume,enabled=output.online,onVolumeChange={onVolume(output.id,it)})
     }
 }

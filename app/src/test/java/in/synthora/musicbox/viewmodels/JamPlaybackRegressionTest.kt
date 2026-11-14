@@ -163,4 +163,17 @@ class JamPlaybackRegressionTest {
         client.refresh();runCurrent();version=2;advanceTimeBy(1100);runCurrent()
         assertEquals(1,started);assertEquals(0,cancelled);client.clear()
     }
+    @Test fun ownVolumeChangesSoundBeforeAnyNetworkRoundTripAndIsNotSentBackToSelf()=runTest {
+        val output=buildJsonObject{put("device","phone");put("kind","phone");put("name","Phone");put("online",true);put("volume",20)}
+        val room=JsonObject(state(playback(true))+mapOf("outputs" to JsonArray(listOf(output)),
+            "playback" to JsonObject(playback(true)+mapOf("selected" to JsonArray(listOf(JsonPrimitive("phone")))))))
+        val writes=mutableListOf<String>()
+        val client=JamClient(backgroundScope,{_,_->room},{path,_->writes+=path;buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        var actual=20;client.applyLocalVolume={actual=it};client.refresh();runCurrent();writes.clear()
+        client.setVolume("phone",70)
+        assertEquals(70,actual);assertEquals(70,client.state.value.outputs.single().volume)
+        client.refresh();runCurrent()
+        assertEquals(70,client.state.value.outputs.single().volume)
+        advanceTimeBy(151);runCurrent();assertFalse(writes.any{it.contains("control")});client.clear()
+    }
 }

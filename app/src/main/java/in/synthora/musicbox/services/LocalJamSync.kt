@@ -28,7 +28,15 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
         override fun onCapabilitiesChanged(network:Network,capabilities:NetworkCapabilities){scope.launch{reconcile()}}
     }
     init {runCatching{connectivity.registerDefaultNetworkCallback(callback)}}
-    fun update(value:LocalJamContext?) {desired=value;reconcile()}
+    private val cadence=LocalJamSyncCadence()
+    fun update(value:LocalJamContext?) {
+        desired=value
+        val old=current
+        if(value==null && old==null)return
+        if(value!=null && old!=null && old.context.room==value.room && old.context.key==value.key &&
+            old.context.leader==value.leader && old.context.peers==value.peers)return
+        reconcile()
+    }
     private fun reconcile() {
         val value=desired
         val network=connectivity.activeNetwork
@@ -135,7 +143,7 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
         }
         private suspend fun probe() {
             val frame=verified() ?: return
-            if(frame.own==frame.leader || actual(frame)==null)return
+            if(frame.own==frame.leader || actual(frame)==null || !cadence.due(frame.intent,SystemClock.elapsedRealtime()))return
             val destination=peer ?: return
             val nonce=UUID.randomUUID().toString()
             Socket().use{socket->
@@ -150,7 +158,11 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
                 withContext(Dispatchers.Main.immediate) {
                     if(verified()?.intent!=frame.intent)return@withContext
                     val status=actual(frame) ?: return@withContext
-                    LocalJamProtocol.correction(status.number("position_ms"),response.number("position"),rtt,status.number("duration_ms"))?.let(correct)
+                    if(cadence.canCorrect(SystemClock.elapsedRealtime())) {
+                        LocalJamProtocol.correction(status.number("position_ms"),response.number("position"),rtt,status.number("duration_ms"))?.let {
+                            cadence.corrected(SystemClock.elapsedRealtime());correct(it)
+                        }
+                    }
                 }
             }
         }

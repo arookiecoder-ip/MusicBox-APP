@@ -9,6 +9,9 @@ import `in`.synthora.musicbox.ui.components.stableStatusBarsPadding
 import androidx.compose.material.icons.filled.Radio
 
 import `in`.synthora.musicbox.ui.components.GlassAlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import `in`.synthora.musicbox.ui.components.GlassIconButton
@@ -488,9 +491,10 @@ fun PlayerScreen(
 
     // Output picker: this phone or an Echo
     if (showOutputSheet) {
-        GlassModalBottomSheet(
+        JUKETheme(darkTheme=true) { ModalBottomSheet(
             onDismissRequest = { showOutputSheet = false },
-            sheetState = rememberModalBottomSheetState()
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded=true),
+            containerColor=MaterialTheme.colorScheme.surfaceContainerHigh,tonalElevation=0.dp
         ) {
             OutputPickerContent(
                 isAlexa = isAlexa,
@@ -503,9 +507,10 @@ fun PlayerScreen(
                 busy = isSwitching,
                 onSelectPhone = { showOutputSheet = false; musicViewModel.switchOutput(null) },
                 onSelectEcho = { serial -> showOutputSheet = false; musicViewModel.switchOutput(serial) },
-                onRefresh = { musicViewModel.refreshDevices() }
+                onRefresh = { musicViewModel.refreshDevices() },
+                refreshingDevices = musicViewModel.refreshingDevices.collectAsStateWithLifecycle().value
             )
-        }
+        } }
     }
 
     // Sleep Timer Dialog
@@ -729,17 +734,15 @@ internal fun OutputPickerContent(
     busy: Boolean,
     onSelectPhone: () -> Unit,
     onSelectEcho: (String) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    refreshingDevices:Boolean=false
 ) {
     val contextForOutputPicker = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
-        Text(
-            "Play on",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
-        )
         val jamModel: `in`.synthora.musicbox.viewmodels.JamViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
         val jam by jamModel.state.collectAsStateWithLifecycle()
+        val refreshingJam by jamModel.refreshing.collectAsStateWithLifecycle()
+        PlayOnHeader(refreshingDevices || refreshingJam) {onRefresh();jamModel.refresh()}
         if(jam.active) JamDeviceList(jam,jamModel::configure,jamModel::selectDevice)
         else {
         OutputRow(
@@ -762,7 +765,6 @@ internal fun OutputPickerContent(
         }
         HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         JamSettings()
-        TextButton(onClick = { onRefresh(); jamModel.refresh() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
         if (busy) {
             androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
         }
@@ -856,4 +858,15 @@ private fun ClockedPlayerProgress(state: MusicUiState, music: MusicViewModel, mo
     val cachedProgress by music.playbackProgress.collectAsStateWithLifecycle()
     val progress = music.visiblePlaybackProgress(cachedProgress)
     PlayerProgress(currentPosition = progress.positionMs, uiState = state.copy(position = progress.positionMs, duration = progress.durationMs.takeIf { it > 0 } ?: state.duration), musicViewModel = music, modifier = modifier)
+}
+
+@Composable
+internal fun PlayOnHeader(refreshing:Boolean,onRefresh:()->Unit) {
+    Row(Modifier.fillMaxWidth().padding(start=24.dp,end=12.dp,bottom=4.dp),verticalAlignment=Alignment.CenterVertically) {
+        Text("Play on",Modifier.weight(1f),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Bold)
+        IconButton(onClick=onRefresh,enabled=!refreshing) {
+            if(refreshing)CircularProgressIndicator(Modifier.size(22.dp).semantics{contentDescription="Refreshing devices"},strokeWidth=2.dp,color=MaterialTheme.colorScheme.primary)
+            else Icon(Icons.Outlined.Refresh,"Refresh devices",tint=MaterialTheme.colorScheme.primary)
+        }
+    }
 }
