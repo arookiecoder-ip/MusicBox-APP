@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
@@ -249,7 +250,9 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
 @Composable
 private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boolean, lifted: Boolean, grip: Modifier, accent: Color,
     onPlay: () -> Unit, onLongClick: () -> Unit, onOptions: () -> Unit, options: @Composable BoxScope.() -> Unit) {
+    // Keep titles readable even when a white cover makes the ambient field bright.
     val rowColor by animateColorAsState(if (active) accent.copy(alpha = .16f)
+        .compositeOver(Color(0xFF101015).copy(alpha = .72f))
         else if (lifted) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
         tween(700), label = "Queue selected row")
     val divider = MaterialTheme.colorScheme.outlineVariant
