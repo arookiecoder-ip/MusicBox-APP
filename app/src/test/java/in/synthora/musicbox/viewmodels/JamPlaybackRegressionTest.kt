@@ -61,6 +61,22 @@ class JamPlaybackRegressionTest {
         client.command("pause");runCurrent()
         assertTrue(paused);assertEquals(1,cancelled);client.clear()
     }
+    @Test fun ownedPhonePausesBeforeHttpAndRapidPlayReversesThePendingPause()=runTest {
+        val pending=CompletableDeferred<JsonElement>();var localPlaying=true
+        val client=JamClient(backgroundScope,{_,_->state(playback(true))},{path,body->
+            if(path.contains("control") && body["action"]!!.jsonPrimitive.content=="pause") pending.await()
+            else if(path.contains("control"))buildJsonObject {put("playback",playback(true,3))}
+            else buildJsonObject {}
+        },{"phone"},{testScheduler.currentTime},{})
+        client.refresh();runCurrent()
+        client.previewTransport={localPlaying=it=="play";true}
+        client.command("pause")
+        assertFalse(localPlaying);assertFalse(client.state.value.playback["playing"]!!.jsonPrimitive.boolean)
+        runCurrent();client.command("play");assertTrue(localPlaying)
+        pending.complete(buildJsonObject {put("playback",playback(false,2))});runCurrent()
+        assertTrue(client.state.value.playback["playing"]!!.jsonPrimitive.boolean);client.clear()
+    }
+
     @Test fun delayedCommandCannotRestoreRoomAfterLogout() = runTest {
         val response=CompletableDeferred<JsonElement>()
         val client=JamClient(backgroundScope,{_,_->state(playback(true))},{path,_->

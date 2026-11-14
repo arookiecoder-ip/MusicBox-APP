@@ -79,6 +79,11 @@ open class JamClient internal constructor(
         catch(e: CancellationException) { throw e }
         catch(_: Exception) { feedback("Couldn't pause this audio output. Check its connection.") }
     }
+    // Only an already-owned local phone may preview transport without waiting
+    // for HTTP. The authoritative result or a rejection reconciles it afterward.
+    var previewTransport: ((String) -> Boolean)? = null
+    private var transportSequence=0L
+    private var optimisticTransport: Long? = null
     var enterPlayback: (suspend () -> Unit)? = null
     var applyPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
     var outputName: () -> String = { android.os.Build.MODEL + " · audio output" }
@@ -105,6 +110,7 @@ open class JamClient internal constructor(
                     silence()
 
                 }
+                generation++;optimisticTransport=null
                 rememberActive(false)
                 _state.value = JamUiState(error = if (result.flag("revoked")) "This Jam ended or the host removed you." else null)
                 return
@@ -112,14 +118,16 @@ open class JamClient internal constructor(
             val playback = mergeJamPlayback(known, result["playback"].objectOrEmpty())
             val old = _state.value
             if (old.url == result.text("url") && playback.number("revision") < old.playback.number("revision")) return
+            val retainPreview=optimisticTransport!=null && result.flag("listen") &&
+                old.playback.text("queue_epoch")==playback.text("queue_epoch") && old.playback.text("entry_id")==playback.text("entry_id")
             _state.value = JamUiState(active=true, host=result.flag("host"), url=result.text("url"),
                 members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error")) },
-                playback=playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
-                error=playbackError, receivedAt=clock())
+                playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
+                error=playbackError, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
             lastSuccess = clock()
-            deliver(playback,result.flag("listen"))
+            if(!retainPreview) deliver(playback,result.flag("listen"))
             write("/api/jam/presence/", buildJsonObject { put("device_id", deviceId()); put("name", outputName()); put("error", playbackError.orEmpty()) })
             follow()
         } catch (e: CancellationException) { throw e }
@@ -152,18 +160,33 @@ open class JamClient internal constructor(
         if (!active) return
         val revision=_state.value.playback["revision"] ?: JsonPrimitive(0)
         val commandGeneration=generation
+        val sequence=++transportSequence
+        val previous=_state.value
+        if(action in setOf("play","pause") && previous.listen && previewTransport?.invoke(action)==true) {
+            val position=positionMs
+            optimisticTransport=sequence
+            _state.value=previous.copy(playback=JsonObject(previous.playback+mapOf("playing" to JsonPrimitive(action=="play"),"position_ms" to JsonPrimitive(position))),receivedAt=clock())
+        }
         scope.launch { mutex.withLock {
             try {
                 val result = write("/api/jam/control/", JsonObject(fields + mapOf(
                     "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(UUID.randomUUID().toString()),
                     "revision" to revision))).objectOrEmpty()
                 if(commandGeneration!=generation) return@withLock
+                if(optimisticTransport!=null && optimisticTransport!=sequence) return@withLock
+                if(optimisticTransport==sequence) optimisticTransport=null
                 val accepted=result["playback"].objectOrEmpty()
                 if(accepted.number("revision") < _state.value.playback.number("revision")) return@withLock
                 _state.update { it.copy(playback=accepted, error=null, receivedAt=clock()) }
                 deliver(result["playback"].objectOrEmpty(),_state.value.listen)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
+                if(commandGeneration!=generation) return@withLock
+                if(optimisticTransport==sequence) {
+                    optimisticTransport=null
+                    _state.value=previous
+                    deliver(previous.playback,previous.listen)
+                }
                 val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"
                 refreshNow()
                 _state.update { it.copy(error=message) }
@@ -204,7 +227,7 @@ open class JamClient internal constructor(
         } }
     }
     fun clear() {
-        generation++; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
+        generation++; optimisticTransport=null; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
     }
 }
 

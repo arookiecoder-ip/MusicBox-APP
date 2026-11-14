@@ -765,6 +765,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             else playbackManager.pause()
             jamWasListening=false; jamAppliedEntry=""; jamAppliedQueue=-1
         }
+        JamSession.previewTransport = {action ->
+            val ready=jamWasListening && !isAlexa && !isRemotePhone && !_isSwitchingOutput.value &&
+                !`in`.synthora.musicbox.services.PhonePlaybackOwnership.preparingSong &&
+                `in`.synthora.musicbox.services.PhonePlaybackOwnership.permitsPlayback()
+            if(ready) {
+                if(action=="pause") playbackManager.pause()
+                else if(!playbackManager.shouldResumeAfterTrackChange()) playbackManager.togglePlayPause()
+            }
+            ready
+        }
         JamSession.applyPlayback = ::applyJamPlayback
         JamSession.outputName = { android.os.Build.MODEL + " · " + when {
             isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
