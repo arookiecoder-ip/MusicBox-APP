@@ -89,7 +89,7 @@ internal class LocalJamSync(context:Context,private val scope:CoroutineScope,
                     if(!live()){socket.close();return@launch}
                     val info=NsdServiceInfo().apply{serviceName=name(context.own);serviceType="_mbjam._tcp.";port=socket.localPort
                         setAttribute("room",context.room);setAttribute("peer",context.own)
-                        if(android.os.Build.VERSION.SDK_INT>=33)setNetwork(network)}
+                        if(android.os.Build.VERSION.SDK_INT>=33)setNetwork(this@Session.network)}
                     runCatching{nsd.registerService(info,NsdManager.PROTOCOL_DNS_SD,registration);registered=true}
                     runCatching{nsd.discoverServices("_mbjam._tcp.",NsdManager.PROTOCOL_DNS_SD,discovery);discovering=true}
                     if(!live()){close();return@launch}
