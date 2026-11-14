@@ -60,6 +60,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                         val renewed = kotlinx.coroutines.withTimeoutOrNull(4_000) {
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputRequest("heartbeat", PhonePlaybackOwnership.ownerId, claim)
                         }
+                        if (PhonePlaybackOwnership.jamPlayback) continue
                         if (PhonePlaybackOwnership.token == claim && renewed != null) {
                             if (renewed.belongsToPhone(PhonePlaybackOwnership.ownerId, claim)) PhonePlaybackOwnership.accept(renewed)
                             else if (!PhonePlaybackOwnership.jamPlayback) player.pause()
@@ -82,6 +83,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputStatus()
                         }
                     }
+                    if (PhonePlaybackOwnership.jamPlayback) continue
                     if (status == null) {
                         PhonePlaybackOwnership.ownershipRequestFailed(claim, true)
                         if (canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff)) ownershipOutage()

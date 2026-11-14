@@ -164,7 +164,7 @@ open class JamClient internal constructor(
                     o.text("username").ifBlank{"Host"},o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
                     o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)}) },
                 playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
-                error=playbackError, receivedAt=if(retainPreview) old.receivedAt else clock())
+                error=playbackError ?: result.text("error").takeIf{it.isNotBlank() && it!="null"}, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
             lastSuccess = clock()
             if(!retainPreview) deliver(playback,result.flag("listen"))
@@ -319,7 +319,7 @@ object JamSession : JamClient(
 
 class JamViewModel : ViewModel() {
     val state = JamSession.state
-    fun refresh() = JamSession.refresh()
+    fun refresh() { if(JamSession.active && state.value.error!=null) JamSession.command("retry") else JamSession.refresh() }
     fun start() = JamSession.start()
     fun stop() = JamSession.action("/alexa/jam/stop/")
     fun leave() = JamSession.action("/api/jam/leave/")

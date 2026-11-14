@@ -289,6 +289,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val room = decodeJamSnapshot(jam.playback)
             presentJamPlayback(personal, room, jam.listen).copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
                 queueIndex=room.index, duration=room.durationMs,
+                isLoading=presentJamPlayback(personal,room,jam.listen).isLoading && jam.error==null,
+                error=jam.error ?: personal.error,
                 repeatMode=when(jam.playback.text("repeat")) { "all" -> 2; "one" -> 1; else -> 0 })
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
