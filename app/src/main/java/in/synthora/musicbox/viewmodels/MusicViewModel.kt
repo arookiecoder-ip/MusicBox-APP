@@ -287,10 +287,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked) { personal, jam, liked ->
         if (!jam.active) personal else {
             val room = decodeJamSnapshot(jam.playback)
-            presentJamPlayback(personal, room, jam.listen).copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
+            val shown=presentJamPlayback(personal,room,jam.listen)
+            shown.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
                 queueIndex=room.index, duration=room.durationMs,
-                isLoading=presentJamPlayback(personal,room,jam.listen).isLoading && jam.error==null,
-                error=jam.error ?: personal.error,
+                isLoading=shown.isLoading && jam.error==null,
+                phase=if(jam.error!=null && !room.confirmed) `in`.synthora.musicbox.services.PlaybackPhase.FAILED else shown.phase,
+                error=jam.error.takeIf{!room.confirmed},
                 repeatMode=when(jam.playback.text("repeat")) { "all" -> 2; "one" -> 1; else -> 0 })
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MusicUiState())
@@ -2626,10 +2628,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Read the live cursor at command time too; transport never depends on a UI subscriber. */
     internal fun currentPlaybackProgress(): `in`.synthora.musicbox.services.PlaybackProgress {
         val state = uiState.value
-        if (JamSession.active) {
-            if (!JamSession.state.value.listen) return `in`.synthora.musicbox.services.PlaybackProgress(JamSession.positionMs, state.duration)
-            if (state.isLoading || _isSwitchingOutput.value) return `in`.synthora.musicbox.services.PlaybackProgress(state.position, state.duration)
-        }
+        if (JamSession.active) return `in`.synthora.musicbox.services.PlaybackProgress(JamSession.positionMs, state.duration)
         if (isAlexa || isRemotePhone) {
             val echoState = echo.state.value
             if (state.currentTrack?.ytVideoId != echoState.track?.ytVideoId)
