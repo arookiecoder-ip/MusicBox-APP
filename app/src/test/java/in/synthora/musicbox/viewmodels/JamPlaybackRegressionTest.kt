@@ -156,4 +156,11 @@ class JamPlaybackRegressionTest {
         client.refresh();runCurrent();client.command("queue");runCurrent()
         assertEquals(listOf(1L,2L),revisions);assertEquals(ids[0],ids[1]);assertNull(client.state.value.error);client.clear()
     }
+    @Test fun recommendationsDoNotCancelTheCurrentSongsAudioPreparation()=runTest {
+        var version=1;var started=0;var cancelled=0
+        val client=JamClient(backgroundScope,{_,_->state(JsonObject(playback(true)+mapOf("entry_id" to JsonPrimitive("same-song"),"queue_version" to JsonPrimitive(version))))},{_,_->buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        client.applyPlayback={_,_->started++;try{awaitCancellation()}finally{cancelled++}}
+        client.refresh();runCurrent();version=2;advanceTimeBy(1100);runCurrent()
+        assertEquals(1,started);assertEquals(0,cancelled);client.clear()
+    }
 }

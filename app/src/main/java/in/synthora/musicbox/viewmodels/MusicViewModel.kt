@@ -814,6 +814,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 put("volume",if(remote)state.volume ?: 50 else (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)*100/audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
             }
         }
+        JamSession.localCorrection = { position ->
+            if(JamSession.active && JamSession.state.value.listen && !isAlexa && !isRemotePhone &&
+                !jamApplying.value && playbackManager.isPlayingFlow.value && !playbackManager.isBufferingFlow.value)
+                playbackManager.seekTo(position)
+        }
         JamSession.outputDevices = {
             JsonArray(listOf(buildJsonObject {put("id","phone");put("name",android.os.Build.MODEL);put("kind","phone");put("active",!isAlexa && !isRemotePhone);put("online",true)})+
                 echo.devices.value.filter{it.controllable}.map{device->buildJsonObject {

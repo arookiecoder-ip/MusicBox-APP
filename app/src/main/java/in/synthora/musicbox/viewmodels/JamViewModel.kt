@@ -22,7 +22,7 @@ data class JamOutput(val id: String, val name: String, val online: Boolean, val 
 data class JamUiState(val active: Boolean = false, val host: Boolean = false, val url: String = "",
     val busy: Boolean = false, val pendingAction:String="", val error: String? = null, val members: List<JamMember> = emptyList(),
     val outputs: List<JamOutput> = emptyList(), val playback: JsonObject = JsonObject(emptyMap()),
-    val listen: Boolean = false, val memberCount: Int = 0, val receivedAt: Long = 0)
+    val listen: Boolean = false, val localSyncKey:String="", val memberCount: Int = 0, val receivedAt: Long = 0)
 
 /** Only verified, configured Music Box hosts may supply invitations. */
 internal fun jamInviteToken(url: String, base: String): String? = runCatching {
@@ -60,8 +60,25 @@ open class JamClient internal constructor(
     private var playbackError: String? = null
     private var generation=0L
     private var prefs: android.content.SharedPreferences? = null
+    private var localSync: `in`.synthora.musicbox.services.LocalJamSync? = null
+    var localCorrection: ((Long)->Unit)? = null
     fun init(context: Context): Boolean {
         prefs=context.getSharedPreferences("jam_session",Context.MODE_PRIVATE)
+        if(localSync==null) {
+            localSync=`in`.synthora.musicbox.services.LocalJamSync(context.applicationContext,scope,{outputStatus()},{localCorrection?.invoke(it)})
+            scope.launch {state.collect { room ->
+                val playback=room.playback
+                val ids=playback.array("selected").map{it.jsonPrimitive.content}.toSet()
+                val phones=room.outputs.filter{it.id in ids && it.online && it.kind=="phone"}.map{it.id}.toSet()
+                val enabled=room.active && room.listen && playback.text("mode")=="multiple" &&
+                    playback.flag("playing") && playback.flag("playback_confirmed") && optimisticTransport==null &&
+                    room.localSyncKey.length==64 && phones.size>=2 && deviceId() in phones && playback.text("entry_id").isNotBlank()
+                localSync?.update(if(enabled) `in`.synthora.musicbox.services.LocalJamContext(
+                    playback.text("queue_epoch"),room.localSyncKey,deviceId(),phones.minOrNull()!!,phones,
+                    listOf(playback.text("queue_epoch"),playback.text("entry_id"),playback.number("seek_revision"),playback.number("transport_revision")).joinToString(":"),
+                    playback.text("video_id"),playback.text("entry_id"),playback.number("seek_revision"),room.receivedAt) else null)
+            }}
+        }
         val restore=prefs?.getBoolean("active",false)==true
         if(restore) _state.value=JamUiState(active=true)
         return restore
@@ -164,7 +181,7 @@ open class JamClient internal constructor(
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error"),
                     o.text("username").ifBlank{"Host"},o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
                     o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)},o.flag("playing"),o.flag("processing"),o.flag("confirmed")) },
-                playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
+                playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), localSyncKey=result.text("local_sync_key"), memberCount=result.number("member_count").toInt(),
                 error=if(playback.flag("playback_confirmed")) null else playbackError ?: result.text("error").takeIf{it.isNotBlank() && it!="null"}, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
             lastSuccess = clock()
@@ -210,7 +227,7 @@ open class JamClient internal constructor(
     private var applyingKey: List<Any?>? = null
     private fun deliver(playback: JsonObject, listen: Boolean) {
         if (playbackHeld) return
-        val key=listOf(playback.text("queue_epoch"),playback.number("queue_version"),playback.number("queue_index"),
+        val key=listOf(playback.text("queue_epoch"),playback.text("entry_id"),playback.number("queue_index"),
             playback.flag("playing"),playback.number("seek_revision"),listen,playback["targets"])
         if(applying?.isActive==true && applyingKey==key) return
         val previous=applying
