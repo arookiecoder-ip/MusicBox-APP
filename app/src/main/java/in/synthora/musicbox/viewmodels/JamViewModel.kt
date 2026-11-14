@@ -23,10 +23,11 @@ data class JamUiState(val active: Boolean = false, val host: Boolean = false, va
 
 /** Only verified, configured Music Box hosts may supply invitations. */
 internal fun jamInviteToken(url: String, base: String): String? = runCatching {
-    val uri = Uri.parse(url)
-    val expected = Uri.parse(base)
-    if (uri.scheme != "https" || uri.host != expected.host || uri.port != expected.port || uri.userInfo != null) return null
-    val parts = uri.pathSegments
+    val uri = java.net.URI(url)
+    val expected = java.net.URI(base)
+    if (uri.scheme != "https" || !uri.host.equals(expected.host, ignoreCase=true) ||
+        (if(uri.port==-1) 443 else uri.port) != (if(expected.port==-1) 443 else expected.port) || uri.userInfo != null) return null
+    val parts=uri.rawPath.split('/').filter { it.isNotEmpty() }
     parts.takeIf { it.size == 2 && it[0] in setOf("j", "jam") }?.get(1)
         ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,128}")) }
 }.getOrNull()
@@ -41,6 +42,7 @@ object JamSession {
     private var polling: Job? = null
     private var applying: Job? = null
     private var lastSuccess = 0L
+    var enterPlayback: (suspend () -> Unit)? = null
     var applyPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
     var outputName: () -> String = { android.os.Build.MODEL + " · audio output" }
 
@@ -95,11 +97,12 @@ object JamSession {
     }
     fun command(action: String, fields: JsonObject = JsonObject(emptyMap())) {
         if (!active) return
+        val revision=_state.value.playback["revision"] ?: JsonPrimitive(0)
         scope.launch { mutex.withLock {
             try {
                 val result = Backend.post("/api/jam/control/", JsonObject(fields + mapOf(
                     "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(UUID.randomUUID().toString()),
-                    "revision" to (_state.value.playback["revision"] ?: JsonPrimitive(0))))).objectOrEmpty()
+                    "revision" to revision))).objectOrEmpty()
                 _state.update { it.copy(playback=result["playback"].objectOrEmpty(), error=null) }
                 refreshNow()
             } catch (e: CancellationException) { throw e }
@@ -123,6 +126,10 @@ object JamSession {
         scope.launch { mutex.withLock {
             try {
                 Backend.post(path, body)
+                if (path.startsWith("/j/") || path.endsWith("start/")) {
+                    applying?.cancelAndJoin()
+                    enterPlayback?.invoke()
+                }
                 if (path.endsWith("leave/") || path.endsWith("stop/")) {
                     applying?.cancelAndJoin()
                     applyPlayback?.invoke(_state.value.playback, false)
@@ -130,7 +137,7 @@ object JamSession {
                 }
                 refreshNow()
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { _state.update { it.copy(busy=false,error=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam") } }
+            catch (e: Exception) { val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"; _state.update { it.copy(busy=false,error=message) }; NetworkFeedback.notify(message) }
         } }
     }
     fun clear() {

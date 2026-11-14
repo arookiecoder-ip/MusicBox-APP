@@ -329,6 +329,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (kotlin.math.abs(playbackManager.getCurrentPosition()-room.positionMs)>1_500) playbackManager.seekTo(room.positionMs)
         }
         jamWasListening=true
+        if (room.durationMs == 0L) {
+            val duration=if(isAlexa || isRemotePhone) echo.state.value.durationMs else playbackManager.getDuration()
+            if(duration > 0) JamSession.command("duration", buildJsonObject { put("entry_id", entry); put("duration_ms", duration) })
+        }
     }
 
     // Prepared once per queue change, before opening either the player or its sheet.
@@ -717,6 +721,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
      * last choice is kept.
      */
     fun onSignedIn() {
+        JamSession.enterPlayback = {
+            ++playbackRequestId
+            pendingPlaybackJob?.cancel(); phoneQueueSyncJob?.cancel(); playlistBackfillJob?.cancel()
+            if (isAlexa) echo.command("pause")
+            else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value,"pause")
+            else playbackManager.pause()
+            jamWasListening=false; jamAppliedEntry=""; jamAppliedQueue=-1
+        }
         JamSession.applyPlayback = ::applyJamPlayback
         JamSession.outputName = { android.os.Build.MODEL + " · " + when {
             isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
@@ -1822,7 +1834,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (JamSession.active) {
             val current=uiState.value.currentTrack ?: return
             viewModelScope.launch {
-                try { JamSession.tracks("append", AlexaBackendApi.getRadio(requireNotNull(current.ytVideoId)).map { BrowseParser.item(kotlinx.serialization.json.Json.encodeToJsonElement(`in`.synthora.musicbox.network.BackendTrack.serializer(), it).objectOrEmpty()).toTrack() }) }
+                try { JamSession.tracks("append", AlexaBackendApi.getRadio(requireNotNull(current.ytVideoId)).map { BrowseParser.item(kotlinx.serialization.json.Json.encodeToJsonElement(AlexaBackendApi.BackendTrack.serializer(), it).objectOrEmpty()).toTrack() }) }
                 catch(e: CancellationException) { throw e }
                 catch(e: Exception) { _messages.tryEmit(e.message ?: "Couldn't load radio") }
             }; return

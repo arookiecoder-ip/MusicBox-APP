@@ -940,7 +940,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        if (isFinishing) `in`.synthora.musicbox.services.MobileDeviceConnection.stop()
+        if (isFinishing && !`in`.synthora.musicbox.viewmodels.JamSession.active) `in`.synthora.musicbox.services.MobileDeviceConnection.stop()
         super.onDestroy()
         // Track app closed and end session
         AnalyticsManager.getIfInitialized()?.let { analytics ->
