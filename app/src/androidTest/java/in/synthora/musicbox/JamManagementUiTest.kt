@@ -26,7 +26,10 @@ class JamManagementUiTest {
         val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
         val directory=java.io.File(context.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
         java.io.File(directory,name+".png").outputStream().use {output->
-            compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,output)
+            compose.waitForIdle()
+            val bitmap=if(name=="jam-participants") requireNotNull(androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
+                else compose.onAllNodes(isRoot()).onLast().captureToImage().asAndroidBitmap()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output)
         }
     }
     private fun host()=JamUiState(active=true,host=true,url="https://example.test/j/abcdefghijk",memberCount=2,
