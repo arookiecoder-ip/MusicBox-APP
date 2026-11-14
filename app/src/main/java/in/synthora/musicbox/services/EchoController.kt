@@ -402,10 +402,12 @@ class EchoController(
     private fun requireSerial(): String =
         _serial.value.ifBlank { throw IllegalStateException("Choose an Echo device first") }
 
-    private suspend fun send(path: String, body: JsonObject) {
+    private suspend fun send(path: String, body: JsonObject) { sendReply(path,body) }
+
+    private suspend fun sendReply(path: String, body: JsonObject):JsonElement {
         mutationEpoch++
         refreshedAt = 0
-        try { write(path, body) }
+        try { return write(path, body) }
         finally { mutationEpoch++; refreshedAt = 0 }
     }
 
@@ -594,15 +596,16 @@ class EchoController(
         val current=_state.value
         val keep=preserveCurrent && current.track?.ytVideoId==tracks[index].ytVideoId
         if(!playing && current.playing) command("pause",refreshAfter=false)
-        send("/api/app/queue/",buildJsonObject {
+        val replace=playing && !(keep && current.playing)
+        val reply=sendReply("/api/app/queue/",buildJsonObject {
             put("action","start");put("after",requireNotNull(tracks[index].ytVideoId))
             put("tracks",JsonArray(tracks.map { kotlinx.serialization.json.Json.encodeToJsonElement(AlexaBackendApi.BackendTrack.serializer(),AlexaBackendApi.backendTrack(it)) }))
             put("queue_index",index);put("position_ms",if(keep) current.livePosition() else positionMs)
-            put("playing",keep && current.playing && playing);put("alexa_serial",serial)
+            put("playing",keep && current.playing && playing);put("alexa_serial",serial);put("start_playback",replace)
             put("output_token",output.text("output_token"));put("command_id",java.util.UUID.randomUUID().toString())
-        })
+        }).objectOrEmpty()
         if(_serial.value!=serial) throw CancellationException("Selected output changed during Jam queue update")
-        if(playing && !(keep && current.playing)) command("play",refreshAfter=false)
+        if(replace && !reply.flag("alexa_scheduled")) command("play",refreshAfter=false)
     }
 
     /** Play one song; the server keeps the queue going with its radio ([radio] forces a new one).
