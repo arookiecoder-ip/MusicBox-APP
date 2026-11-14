@@ -146,4 +146,25 @@ class EchoControllerLifecycleTest {
         } finally { release.complete(Unit); controller.clear() }
     }
 
+    @Test fun outsideSongSelectionAlwaysRequestsANewQueueWhileQueueNavigationKeepsItsIndex() = runBlocking {
+        val prefs = RuntimeEnvironment.getApplication().getSharedPreferences("new-queue-contract", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("echo_serial", "device").commit()
+        val writes = mutableListOf<JsonObject>()
+        val controller = EchoController(this, prefs, { fail(it) }, {},
+            read = { _, _ -> buildJsonObject {} }, write = { path, body ->
+                assertEquals("/alexa/play_queue/", path)
+                writes += body
+                buildJsonObject { put("ok", true) }
+            })
+        try {
+            val track = `in`.synthora.musicbox.models.Track("existing", "Song", "Artist", durationSec = 180, ytVideoId = "AAAAAAAAAAA")
+            controller.playSong(track, radio = false)
+            assertTrue(writes.last().getValue("new_queue").jsonPrimitive.boolean)
+            assertFalse(writes.last().containsKey("queue_index"))
+            controller.playQueueIndex(track, 4)
+            assertEquals(4, writes.last().getValue("queue_index").jsonPrimitive.int)
+            assertFalse(writes.last().containsKey("new_queue"))
+        } finally { controller.clear() }
+    }
+
 }

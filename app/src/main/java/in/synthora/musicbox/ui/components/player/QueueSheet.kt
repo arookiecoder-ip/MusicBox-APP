@@ -9,6 +9,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.testTag
@@ -49,6 +52,15 @@ import `in`.synthora.musicbox.ui.components.QueueSongActions
 import `in`.synthora.musicbox.ui.components.LocalMediaMenu
 import `in`.synthora.musicbox.viewmodels.MusicUiState
 import kotlin.math.roundToInt
+
+/** List edge overscroll belongs to the queue, not the sheet's dismiss gesture. */
+internal object QueueListScrollBoundary : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        Offset(0f, available.y)
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+        Velocity(0f, available.y)
+}
 
 /** The web queue: one numbered list, left drag grip, artwork, duration and a separate more button. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -112,20 +124,23 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
     val dismissScroll = remember(list, dismissDistance) {
         object : NestedScrollConnection {
             var distance = 0f
+            var eligible = false
+            fun beginGesture(atTop: Boolean) { eligible = atTop; distance = 0f }
+            fun endGesture() { eligible = false; distance = 0f }
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (available.y < 0f || list.canScrollBackward) distance = 0f
+                if (available.y < 0f || list.canScrollBackward) { distance = 0f; eligible = false }
                 return Offset.Zero
             }
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                if (source == NestedScrollSource.UserInput && !list.canScrollBackward && available.y > 0f) {
+                if (eligible && source == NestedScrollSource.UserInput && !list.canScrollBackward && available.y > 0f) {
                     distance += available.y
-                    if (distance >= dismissDistance) { distance = 0f; closeQueue() }
+                    if (distance >= dismissDistance) { endGesture(); closeQueue() }
                 }
-                return Offset.Zero
+                return QueueListScrollBoundary.onPostScroll(consumed, available, source)
             }
             override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                distance = 0f
-                return Velocity.Zero
+                endGesture()
+                return QueueListScrollBoundary.onPostFling(consumed, available)
             }
         }
     }
@@ -161,7 +176,17 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
             Text(it, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = onRetry) { Text("Retry") }
         } }
-        LazyColumn(Modifier.weight(1f).nestedScroll(dismissScroll).testTag("Queue rows"), state = list, contentPadding = PaddingValues(bottom = 12.dp)) {
+        LazyColumn(Modifier.weight(1f).nestedScroll(dismissScroll).pointerInput(dismissScroll) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                dismissScroll.beginGesture(!list.canScrollBackward)
+                try {
+                    do { val event = awaitPointerEvent(PointerEventPass.Final) }
+                    while (event.changes.any { it.pressed })
+                } finally { dismissScroll.endGesture() }
+            }
+        }.testTag("Queue rows"), state = list, contentPadding = PaddingValues(bottom = 12.dp)) {
+
             itemsIndexed(order, key = { _, key -> key }, contentType = { _, _ -> "queue-track" }) { position, key ->
                 val track = byKey.getValue(key)
                 val index = keyIndices.getValue(key)

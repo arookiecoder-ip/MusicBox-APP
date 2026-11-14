@@ -96,6 +96,7 @@ import `in`.synthora.musicbox.services.UpdateDownloadState
 import `in`.synthora.musicbox.ui.components.GlassNavBar
 import `in`.synthora.musicbox.ui.components.GlassNavItem
 import `in`.synthora.musicbox.ui.components.GlassNavRail
+import `in`.synthora.musicbox.ui.components.playerDockInput
 import `in`.synthora.musicbox.ui.components.MiniPlayer
 import `in`.synthora.musicbox.ui.theme.GlassBackdrop
 import `in`.synthora.musicbox.ui.theme.isGlassDark
@@ -612,9 +613,9 @@ class MainActivity : ComponentActivity() {
                     containerColor = Color.Transparent,
                     contentColor = MaterialTheme.colorScheme.onBackground,
                     bottomBar = {
-                        if (currentRoute != "settings") {
+                        if (currentRoute != "settings" && currentRoute != "settings/account") {
                             Column(
-                                modifier = Modifier.fillMaxWidth().background(`in`.synthora.musicbox.ui.theme.dockColor()),
+                                modifier = Modifier.fillMaxWidth().playerDockInput().background(`in`.synthora.musicbox.ui.theme.dockColor()),
                                 verticalArrangement = Arrangement.spacedBy(0.dp)
                             ) {
                                 MiniPlayer(musicViewModel = musicViewModel, onExpand = { showPlayerModal = true })

@@ -23,6 +23,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -256,11 +259,10 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
         // Pinned, not part of the scrolling form: on a short screen or with the
         // keyboard open these links would otherwise sit below the fold, and a
         // signed-out install has no other way to reach sign-up or recovery.
-        if (state.stage == AuthStage.SIGNED_OUT) {
+        if (state.stage == AuthStage.SIGNED_OUT && WindowInsets.ime.getBottom(LocalDensity.current) == 0) {
             val footer = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .imePadding()
                 .stableNavigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 6.dp)
             if (state.doorsAvailable == false) {
@@ -451,15 +453,20 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
         GlassAlertDialog(
             onDismissRequest = { managing = null },
             title = { Text(if (provider == "amazon") "Amazon connection" else "YouTube Music connection") },
-            text = { Column {
-                Text("Change the connected account or disconnect this service.")
-                TextButton(onClick = { managing = null; account.disconnectProvider(provider) }, enabled = !state.busy) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
+            text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Choose an action for this connection.")
+                androidx.compose.material3.Button(onClick = {
+                    managing = null
+                    if (provider == "amazon") account.connectAmazon() else account.connectYouTube()
+                }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Change account") }
+                androidx.compose.material3.OutlinedButton(
+                    onClick = { managing = null; account.disconnectProvider(provider) },
+                    enabled = !state.busy, modifier = Modifier.fillMaxWidth()
+                ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
+                TextButton(onClick = { managing = null }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
             } },
-            confirmButton = { TextButton(onClick = {
-                managing = null
-                if (provider == "amazon") account.connectAmazon() else account.connectYouTube()
-            }, enabled = !state.busy) { Text("Change account") } },
-            dismissButton = { TextButton(onClick = { managing = null }) { Text("Cancel") } }
+            confirmButton = {}
+
         )
     }
 }

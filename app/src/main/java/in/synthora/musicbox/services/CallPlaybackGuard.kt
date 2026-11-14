@@ -22,9 +22,9 @@ internal class CallPlaybackGuard(
     private var focusLossAt: Long? = null
     private var normalSince: Long? = null
     private var settlingUntil = 0L
-    private var settlingRetryUsed = false
+    private var settlingRetries = 0
     private var otherAudioSince: Long? = null
-    val isSettlingRetry get() = settlingRetryUsed && resumePending
+    val isSettlingRetry get() = settlingRetries > 0 && resumePending
     fun readyToResume(): Boolean {
         if (!resumePending || isInCall()) { normalSince = null; return false }
         val now = nowMs()
@@ -52,7 +52,7 @@ internal class CallPlaybackGuard(
         resumePending=false
         focusLossAt=null
         settlingUntil=0L
-        settlingRetryUsed=false
+        settlingRetries=0
         normalSince=null
         cancelResume()
         manualDuringCall=isInCall()
@@ -63,7 +63,7 @@ internal class CallPlaybackGuard(
         resumePending=false
         focusLossAt=null
         settlingUntil=0L
-        settlingRetryUsed=false
+        settlingRetries=0
         normalSince=null
         manualDuringCall=false
         ownPauseAck=false
@@ -75,8 +75,9 @@ internal class CallPlaybackGuard(
     fun resumeConsumed() {
         otherAudioSince=null
         val now=nowMs()
-        if (now > settlingUntil || settlingUntil == 0L) settlingRetryUsed=false
-        settlingUntil=now+2_000
+        // Start this window when the renderer is about to resume, after any
+        // asynchronous lease recovery. Retries never extend the call's window.
+        if (settlingUntil == 0L) settlingUntil=now+8_000
         resumePending=false
         focusLossAt=null
         cancelResume()
@@ -90,6 +91,8 @@ internal class CallPlaybackGuard(
     }
     fun modeChanged(wantsPlayback:Boolean) {
         if(isInCall()) {
+            settlingUntil=0L
+            settlingRetries=0
             normalSince=null
             if(!manualDuringCall) {
                 if(wantsPlayback) hold()
@@ -119,11 +122,12 @@ internal class CallPlaybackGuard(
                 focusLossAt=nowMs()
                 onInterruption()
                 if(blocksAutomaticPlayback) { normalSince=null;remember() }
-                else if (!isInCall() && settlingUntil > 0 && nowMs() <= settlingUntil && !settlingRetryUsed) {
-                    // Some modem/VoIP stacks deliver the call's final focus loss
-                    // after NORMAL and the first resume. Repair once, bounded
-                    // by this call, without retrying ordinary later focus loss.
-                    settlingRetryUsed=true
+                else if (!isInCall() && settlingUntil > 0 && nowMs() <= settlingUntil && settlingRetries < 3) {
+                    // Modem/VoIP stacks can deliver several final focus losses
+                    // after NORMAL. Wait for mode to settle again before each
+                    // bounded retry; never fight a later music app indefinitely.
+                    settlingRetries++
+                    normalSince=null
                     remember()
                 }
             }

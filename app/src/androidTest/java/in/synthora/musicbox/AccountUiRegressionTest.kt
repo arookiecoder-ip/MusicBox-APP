@@ -18,6 +18,7 @@ import `in`.synthora.musicbox.network.AccountWebApi
 import `in`.synthora.musicbox.ui.screens.AccountCheckScreen
 import `in`.synthora.musicbox.ui.screens.SignInScreen
 import `in`.synthora.musicbox.ui.theme.JUKETheme
+import `in`.synthora.musicbox.viewmodels.AccountCodeDelivery
 import `in`.synthora.musicbox.viewmodels.AccountStatus
 import `in`.synthora.musicbox.viewmodels.AccountUiState
 import `in`.synthora.musicbox.viewmodels.AccountViewModel
@@ -91,6 +92,32 @@ class AccountUiRegressionTest {
         compose.onNodeWithText("Continue").performClick()
         compose.onNodeWithText("Send code").assertIsDisplayed()
         compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+    }
+
+    @Test fun anotherActionsOtpDoesNotAppearInAuthenticatorSetup() {
+        val account = account()
+        val profile = AccountWebApi.AccountProfile(
+            id = "stable-account-id", username = "testuser", email = "test@example.test", pendingEmail = "",
+            emailVerified = true, verificationPending = false, role = "user", roleText = "User",
+            totpEnabled = false, totpPending = false, mustChangePassword = false,
+            sessions = emptyList(), providers = emptyList(), minPasswordLength = 10
+        )
+        val now = System.currentTimeMillis()
+        compose.setContent {
+            JUKETheme { AccountSettingsScreen(account, AccountUiState(
+                stage = AuthStage.SIGNED_IN, profile = profile,
+                actionMessage = "Earlier email action completed",
+                codeDeliveries = mapOf("email-change" to AccountCodeDelivery(now + 600000, now + 60000))
+            ), {}) }
+        }
+        compose.onAllNodesWithText("Earlier email action completed").assertCountEquals(0)
+        compose.onNodeWithText("Copy account ID").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("stable-account-id").assertIsDisplayed()
+        compose.onNodeWithText("Set up authenticator").performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.onAllNodesWithText("Code expires", substring = true).assertCountEquals(0)
+        compose.onAllNodesWithText("Resend in", substring = true).assertCountEquals(0)
     }
 
 }
