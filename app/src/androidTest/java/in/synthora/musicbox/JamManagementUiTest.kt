@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import `in`.synthora.musicbox.ui.screens.JamSettingsContent
@@ -20,6 +21,13 @@ import org.junit.Test
 /** No network or credentials: exercise the actual host/member management UI. */
 class JamManagementUiTest {
     @get:Rule val compose=createComposeRule()
+    private fun screenshot(name:String) {
+        val context=androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext
+        val directory=java.io.File(context.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
+        java.io.File(directory,name+".png").outputStream().use {output->
+            compose.onRoot().captureToImage().asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG,100,output)
+        }
+    }
     private fun host()=JamUiState(active=true,host=true,url="https://example.test/j/abcdefghijk",memberCount=2,
         members=listOf(JamMember("alice-id","Alice")),
         outputs=listOf(JamOutput("host-phone","Host phone",true,"",username="Host"),JamOutput("alice-phone","Alice phone",true,"",username="Alice")),
@@ -95,6 +103,7 @@ class JamManagementUiTest {
         compose.onNodeWithContentDescription("Play on Tablet · Alice").performScrollTo().performClick()
         compose.runOnIdle{assertEquals(3,state.value.playback["selected"]!!.jsonArray.size)}
         compose.onAllNodesWithText("Audio outputs").assertCountEquals(0)
+        screenshot("jam-play-on-multiple")
     }
     @Test fun memberControlsHostVolumeInSingleModeAndSeparateDeviceVolumesInMultipleMode() {
         val state=mutableStateOf(host().copy(host=false,outputs=listOf(
@@ -108,6 +117,7 @@ class JamManagementUiTest {
         compose.runOnIdle{assertEquals("echo",changes.last().first);assertEquals(70,changes.last().second)
             state.value=state.value.copy(playback=buildJsonObject{put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive("echo"),JsonPrimitive("phone"))))})}
         compose.onAllNodesWithContentDescription("Volume").assertCountEquals(2)
+        screenshot("jam-shared-volume")
         compose.onAllNodesWithContentDescription("Volume").onLast().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetProgress){it(.3f)}
         compose.runOnIdle{assertEquals("phone",changes.last().first);assertEquals(30,changes.last().second)}
     }
