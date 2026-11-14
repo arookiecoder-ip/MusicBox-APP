@@ -177,8 +177,9 @@ open class JamClient internal constructor(
                 if(optimisticTransport==sequence) optimisticTransport=null
                 val accepted=result["playback"].objectOrEmpty()
                 if(accepted.number("revision") < _state.value.playback.number("revision")) return@withLock
-                _state.update { it.copy(playback=accepted, error=null, receivedAt=clock()) }
-                deliver(result["playback"].objectOrEmpty(),_state.value.listen)
+                val listen=if(accepted["selected"] is JsonArray) accepted.array("selected").any {it.jsonPrimitive.content==deviceId()} else _state.value.listen
+                _state.update { it.copy(playback=accepted, listen=listen, error=null, receivedAt=clock()) }
+                deliver(accepted,listen)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 if(commandGeneration!=generation) return@withLock

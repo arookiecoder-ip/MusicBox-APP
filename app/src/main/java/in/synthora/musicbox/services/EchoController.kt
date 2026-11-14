@@ -601,6 +601,7 @@ class EchoController(
             put("playing",keep && current.playing && playing);put("alexa_serial",serial)
             put("output_token",output.text("output_token"));put("command_id",java.util.UUID.randomUUID().toString())
         })
+        if(_serial.value!=serial) throw CancellationException("Selected output changed during Jam queue update")
         if(playing && !(keep && current.playing)) command("play",refreshAfter=false)
     }
 
