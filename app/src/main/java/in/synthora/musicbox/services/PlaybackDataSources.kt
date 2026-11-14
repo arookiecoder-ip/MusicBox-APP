@@ -10,7 +10,8 @@ import `in`.synthora.musicbox.network.Backend
 /** The production audio pipeline is shared with the native playback regression tests. */
 @UnstableApi
 fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = Backend.audioBaseUrl,
-    apiKey: String = Backend.apiKey, transferListener: TransferListener? = null, prefetch: Boolean = false, cacheWarm: Boolean = false, readOnlyCache: Boolean = false): DataSource.Factory {
+    apiKey: String = Backend.apiKey, transferListener: TransferListener? = null, prefetch: Boolean = false, cacheWarm: Boolean = false, readOnlyCache: Boolean = false, jamBaseUrl: String = Backend.baseUrl,
+    jamCookie: (String) -> String? = Backend::jamAudioCookie): DataSource.Factory {
         val httpDataSourceFactory = androidx.media3.datasource.okhttp.OkHttpDataSource.Factory(playbackHttpClient)
         val redirectSafeFactory = DataSource.Factory { SafeAudioRedirectDataSource(httpDataSourceFactory.createDataSource()) }
         transferListener?.let(httpDataSourceFactory::setTransferListener)
@@ -20,6 +21,10 @@ fun playbackDataSources(context: Context, cache: Cache, audioBaseUrl: String = B
                 val credential = if (apiKey.isNotBlank()) "X-Api-Key" to apiKey else
                     kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { `in`.synthora.musicbox.network.AudioCredentials.header() }
                 spec.withAdditionalHeaders(mapOf(credential) + if (prefetch) mapOf("X-MusicBox-Prefetch" to "1") else emptyMap())
+            } else if (`in`.synthora.musicbox.network.isJamAudioRequest(jamBaseUrl, spec.uri.toString())) {
+                val cookie = jamCookie(spec.uri.toString())
+                    ?: throw java.io.IOException("Reconnect to Jam to play this song")
+                spec.withAdditionalHeaders(mapOf("Cookie" to cookie))
             } else spec
         }
         val rawUpstream = DefaultDataSource.Factory(context, authenticatedAudio)

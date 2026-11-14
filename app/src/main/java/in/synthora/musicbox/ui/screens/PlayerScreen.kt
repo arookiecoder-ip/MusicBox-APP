@@ -762,7 +762,7 @@ internal fun OutputPickerContent(
         }
         HorizontalDivider(Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         JamSettings()
-        TextButton(onClick = onRefresh, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
+        TextButton(onClick = { onRefresh(); jamModel.refresh() }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Refresh devices") }
         if (busy) {
             androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth().padding(horizontal = 24.dp))
         }

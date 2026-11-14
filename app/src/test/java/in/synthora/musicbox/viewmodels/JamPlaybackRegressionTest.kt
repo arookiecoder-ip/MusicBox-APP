@@ -109,7 +109,7 @@ class JamPlaybackRegressionTest {
         client.refresh();runCurrent();client.action("/alexa/jam/stop/");runCurrent()
         advanceTimeBy(10_000);runCurrent()
         assertFalse(client.active);assertEquals(1,pauses);assertEquals(0,readsAfterEnd)
-        client.refresh();runCurrent();assertEquals(1,pauses)
+        client.refresh();runCurrent();assertEquals(1,pauses);assertNull(client.state.value.error)
         client.clear()
     }
 
@@ -136,4 +136,12 @@ class JamPlaybackRegressionTest {
         client.clear()
     }
 
+    @Test fun deviceLabelChangesDuringStartupDoNotCancelAudioPreparation()=runTest {
+        var name="Echo";var starts=0;var cancellations=0
+        val client=JamClient(backgroundScope,{_,_->state(playback(true))},{_,_->buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        client.outputName={name}
+        client.applyPlayback={_,_->starts++;try{awaitCancellation()}finally{cancellations++}}
+        client.refresh();runCurrent();name="Phone";advanceTimeBy(1100);runCurrent()
+        assertEquals(1,starts);assertEquals(0,cancellations);client.clear()
+    }
 }

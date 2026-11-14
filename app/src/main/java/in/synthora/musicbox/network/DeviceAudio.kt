@@ -25,3 +25,16 @@ fun isBackendAudioRequest(baseUrl: String, requestUrl: String): Boolean = runCat
         base.effectivePort() == request.effectivePort() &&
         request.path == base.path.orEmpty().trimEnd('/') + "/audio/"
 }.getOrDefault(false)
+
+/** Jam streams use membership cookies, scoped to the configured account origin and path. */
+fun isJamAudioRequest(baseUrl: String, requestUrl: String): Boolean = runCatching {
+    val base = java.net.URI(baseUrl)
+    val request = java.net.URI(requestUrl)
+    fun java.net.URI.portOrDefault() = if (port >= 0) port else if (scheme.equals("https", true)) 443 else 80
+    val prefix = base.path.orEmpty().trimEnd('/') + "/api/jam/audio/"
+    !base.host.isNullOrBlank() && base.scheme?.lowercase() in setOf("http", "https") &&
+        base.scheme.equals(request.scheme, true) && base.host.equals(request.host, true) &&
+        base.portOrDefault() == request.portOrDefault() && request.userInfo == null &&
+        request.rawPath.startsWith(prefix) &&
+        request.rawPath.removePrefix(prefix).matches(Regex("[A-Za-z0-9_-]{11}"))
+}.getOrDefault(false)

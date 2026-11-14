@@ -122,4 +122,19 @@ class JamManagementUiTest {
         compose.runOnIdle{assertEquals("phone",changes.last().first);assertEquals(30,changes.last().second)}
     }
 
+    @Test fun offlineDevicesAreHiddenAndMultipleDeviceVolumesAppearUnderNames() {
+        val phone=`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId
+        val state=host().copy(outputs=listOf(
+            JamOutput(phone,"Model",true,"",username="Host",volume=40,devices=listOf(JamDevice("phone","Model","phone",true))),
+            JamOutput("other","Tablet",true,"",username="Alice",volume=60,devices=listOf(JamDevice("phone","Tablet","phone",true))),
+            JamOutput("offline","Offline Echo",false,"",devices=listOf(JamDevice("alexa:offline","Offline Echo","alexa",true,false)))),
+            playback=buildJsonObject{put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive(phone),JsonPrimitive("other"))))})
+        compose.setContent{JUKETheme{Column{JamDeviceList(state,{_,_->},{_,_,_,_->})}}}
+        compose.onNodeWithText("Model · This device").assertIsDisplayed()
+        compose.onNodeWithText("Tablet").assertIsDisplayed()
+        compose.onAllNodesWithText("Offline Echo").assertCountEquals(0)
+        compose.onAllNodesWithContentDescription("Volume").assertCountEquals(2)
+        assertEquals("Tablet",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],phone))
+        assertEquals("Tablet · This device",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],"other"))
+    }
 }

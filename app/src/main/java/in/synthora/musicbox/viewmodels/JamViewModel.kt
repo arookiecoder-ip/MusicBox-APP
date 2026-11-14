@@ -149,8 +149,9 @@ open class JamClient internal constructor(
 
                 }
                 generation++;optimisticTransport=null
+                playbackError=null
                 rememberActive(false)
-                _state.value = JamUiState(error = if (result.flag("revoked")) "This Jam ended or the host removed you." else null)
+                _state.value = JamUiState()
                 return
             }
             val playback = mergeJamPlayback(known, result["playback"].objectOrEmpty())
@@ -210,7 +211,7 @@ open class JamClient internal constructor(
     private fun deliver(playback: JsonObject, listen: Boolean) {
         if (playbackHeld) return
         val key=listOf(playback.text("queue_epoch"),playback.number("queue_version"),playback.number("queue_index"),
-            playback.flag("playing"),playback.number("seek_revision"),listen,outputName(),playback["targets"])
+            playback.flag("playing"),playback.number("seek_revision"),listen,playback["targets"])
         if(applying?.isActive==true && applyingKey==key) return
         val previous=applying
         previous?.cancel()
@@ -327,10 +328,10 @@ class JamViewModel : ViewModel() {
     fun remove(id: String) = JamSession.action("/alexa/jam/remove/", buildJsonObject { put("member_id", id) })
     fun selectDevice(mode:String, selected:List<String>, output:String, target:String) = JamSession.command("configure",buildJsonObject {
         put("mode",mode);put("selected",JsonArray(selected.map(::JsonPrimitive)))
-        put("targets",JsonObject(JamSession.state.value.playback["targets"].objectOrEmpty()+mapOf(output to JsonPrimitive(target))))
+        put("targets",JsonObject((JamSession.state.value.playback["targets"].objectOrEmpty()+mapOf(output to JsonPrimitive(target))).filterKeys { it in selected }))
     })
     fun configure(mode: String, devices: List<String>) = JamSession.command("configure", buildJsonObject {
         put("mode", mode); put("selected", JsonArray(devices.map(::JsonPrimitive)))
-        put("targets",JamSession.state.value.playback["targets"].objectOrEmpty())
+        put("targets",JsonObject(JamSession.state.value.playback["targets"].objectOrEmpty().filterKeys { it in devices }))
     })
 }

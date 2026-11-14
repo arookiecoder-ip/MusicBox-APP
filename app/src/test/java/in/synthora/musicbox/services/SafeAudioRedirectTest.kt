@@ -82,4 +82,28 @@ class SafeAudioRedirectTest {
         }
     }
 
+    @androidx.media3.common.util.UnstableApi
+    @Test fun productionJamAudioPipelineSendsMembershipCookieAndKeepsItOffOtherRequests() {
+        val server=MockWebServer()
+        val context=org.robolectric.RuntimeEnvironment.getApplication()
+        val directory=java.io.File(context.cacheDir,"jam-audio-${System.nanoTime()}")
+        val cache=androidx.media3.datasource.cache.SimpleCache(directory,androidx.media3.datasource.cache.NoOpCacheEvictor())
+        try {
+            val base=server.url("/").toString().trimEnd('/')
+            val factory=playbackDataSources(context,cache,audioBaseUrl=base,apiKey="unused",
+                jamBaseUrl=base,jamCookie={"session=joined-room"})
+            for(path in listOf("/api/jam/audio/abcdefghijk","/unrelated")) {
+                server.enqueue(MockResponse().setBody("audio").setHeader("Content-Type","audio/mp4"))
+                val source=factory.createDataSource()
+                try {
+                    source.open(DataSpec.Builder().setUri(server.url(path).toString()).build())
+                    val bytes=ByteArray(5);assertEquals(5,source.read(bytes,0,5))
+                    assertEquals("audio",String(bytes))
+                } finally {source.close()}
+                val request=server.takeRequest()
+                assertEquals(if(path.startsWith("/api/jam/"))"session=joined-room" else null,request.getHeader("Cookie"))
+                assertNull(request.getHeader("X-Api-Key"))
+            }
+        } finally {cache.release();directory.deleteRecursively();server.shutdown()}
+    }
 }
