@@ -43,8 +43,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" />
-                <data android:host="testalexa.synthora.in" />
-                <data android:host="alexa.synthora.in" />
+                <data android:host="${jamLinkHost}" />
                 <data android:pathPrefix="/j/" />
                 <data android:pathPrefix="/jam/" />
             </intent-filter>
