@@ -289,7 +289,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val room = decodeJamSnapshot(jam.playback)
             val shown=presentJamPlayback(personal,room,jam.playback.array("selected").isNotEmpty())
             shown.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
-                queueIndex=room.index, duration=room.durationMs,
+                queueIndex=room.index, duration=room.durationMs,isShuffleEnabled=jam.playback.flag("shuffle"),
                 isLoading=shown.isLoading && jam.error==null,
                 phase=if(jam.error!=null && !room.confirmed) `in`.synthora.musicbox.services.PlaybackPhase.FAILED else shown.phase,
                 error=jam.error.takeIf{!room.confirmed},
@@ -2984,7 +2984,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     /** Power tools for the phone queue. The playing song and its position are untouched. */
     fun applyQueueTool(tool: QueueTool) {
         if (JamSession.active) {
-            JamSession.command(when(tool) { QueueTool.SHUFFLE_UPCOMING -> "shuffle"; QueueTool.SORT_UPCOMING -> "sort"; QueueTool.CLEAR_PLAYED -> "clear_played" }); return
+            JamSession.command(when(tool) { QueueTool.SHUFFLE_UPCOMING -> "reshuffle"; QueueTool.SORT_UPCOMING -> "sort"; QueueTool.CLEAR_PLAYED -> "clear_played" }); return
         }
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("tool", buildJsonObject { put("tool", tool.name) }); return }
