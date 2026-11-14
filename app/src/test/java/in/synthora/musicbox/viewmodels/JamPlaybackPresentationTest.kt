@@ -38,5 +38,13 @@ class JamPlaybackPresentationTest {
         val failed=presentJamPlayback(old.copy(error="Echo unavailable"),room,true)
         assertFalse(failed.isLoading);assertEquals(PlaybackPhase.FAILED,failed.phase)
     }
-}
+    @Test fun controllerOnlyMemberShowsAlexaBufferingAndFrozenProgress() {
+        val pending=EchoState(track=track,playing=true,confirmed=false,processing=true,positionMs=45_000)
+        val shown=presentJamPlayback(MusicUiState(),pending,false)
+        assertTrue(shown.isLoading);assertFalse(shown.isPlaying)
+        assertEquals(PlaybackPhase.BUFFERING,shown.phase);assertEquals(45_000L,shown.position)
+        val started=presentJamPlayback(MusicUiState(),pending.copy(confirmed=true,processing=false),false)
+        assertTrue(started.isPlaying);assertFalse(started.isLoading)
+    }
 
+}

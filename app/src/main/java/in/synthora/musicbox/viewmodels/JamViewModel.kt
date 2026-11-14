@@ -148,7 +148,7 @@ open class JamClient internal constructor(
                 members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error"),
                     o.text("username").ifBlank{"Host"},o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
-                    o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true))}) },
+                    o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)}) },
                 playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
                 error=playbackError, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
