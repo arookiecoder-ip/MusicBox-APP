@@ -41,6 +41,13 @@ class JamEchoQueueTest {
             assertEquals("A changed song needs one request, not pause + resume",1,writes.size)
             assertTrue(writes.single().second["start_playback"]!!.jsonPrimitive.boolean)
             assertEquals(45000,writes.single().second["position_ms"]!!.jsonPrimitive.int)
+            writes.clear()
+            controller.applySharedSnapshot(buildJsonObject {
+                put("video_id","bbbbbbbbbbb");put("playing",false);put("playback_processing",true);put("playback_confirmed",false)
+            })
+            controller.followJamQueue(listOf(next),0,45000,true,true)
+            assertEquals("Queue edits during buffering must not restart the Alexa trigger",1,writes.size)
+            assertFalse(writes.single().second["start_playback"]!!.jsonPrimitive.boolean)
             writes.clear();modern=false
             controller.followJamQueue(listOf(next),0,45000,true,false)
             assertEquals(listOf("/api/app/queue/","/alexa/command/"),writes.map {it.first})

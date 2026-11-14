@@ -596,12 +596,13 @@ class EchoController(
         val current=_state.value
         val keep=preserveCurrent && current.track?.ytVideoId==tracks[index].ytVideoId
         if(!playing && current.playing) command("pause",refreshAfter=false)
-        val replace=playing && !(keep && current.playing)
+        val continuing=keep && (current.playing || current.processing)
+        val replace=playing && !continuing
         val reply=sendReply("/api/app/queue/",buildJsonObject {
             put("action","start");put("after",requireNotNull(tracks[index].ytVideoId))
             put("tracks",JsonArray(tracks.map { kotlinx.serialization.json.Json.encodeToJsonElement(AlexaBackendApi.BackendTrack.serializer(),AlexaBackendApi.backendTrack(it)) }))
             put("queue_index",index);put("position_ms",if(keep) current.livePosition() else positionMs)
-            put("playing",keep && current.playing && playing);put("alexa_serial",serial);put("start_playback",replace)
+            put("playing",continuing && playing);put("alexa_serial",serial);put("start_playback",replace)
             put("output_token",output.text("output_token"));put("command_id",java.util.UUID.randomUUID().toString())
         }).objectOrEmpty()
         if(_serial.value!=serial) throw CancellationException("Selected output changed during Jam queue update")
