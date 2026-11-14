@@ -287,7 +287,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked) { personal, jam, liked ->
         if (!jam.active) personal else {
             val room = decodeJamSnapshot(jam.playback)
-            val shown=presentJamPlayback(personal,room,jam.listen)
+            val shown=presentJamPlayback(personal,room,jam.playback.array("selected").isNotEmpty())
             shown.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
                 queueIndex=room.index, duration=room.durationMs,
                 isLoading=shown.isLoading && jam.error==null,
@@ -2389,6 +2389,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun togglePlayPause() {
+        if (JamSession.active && JamSession.state.value.playback.array("selected").isEmpty()) { _messages.tryEmit("Choose a Jam device in Play on");return }
         if (JamSession.active) { JamSession.command(if (JamSession.state.value.playback.flag("playing")) "pause" else "play"); return }
         if (deferUntilPlaybackTargetReady { togglePlayPause() }) return
         if (blockUnavailableAlexaControl()) return

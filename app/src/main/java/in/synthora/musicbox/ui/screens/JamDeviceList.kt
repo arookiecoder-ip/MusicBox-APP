@@ -27,6 +27,7 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
             Switch(checked=multiple,onCheckedChange={onConfigure(if(it)"multiple" else "single",if(it)selected else selected.take(1))},
                 enabled=!state.busy,modifier=Modifier.semantics{contentDescription="Play on multiple devices"})
         }
+        if(state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=8.dp))
         state.outputs.groupBy{it.username}.forEach{(username,outputs)->
             Text(username,style=MaterialTheme.typography.titleSmall,modifier=Modifier.padding(top=16.dp,bottom=8.dp))
             val echoOwners=outputs.flatMap{output->output.devices.filter{it.kind=="alexa"}.map{it.id to output}}.groupBy{it.first}.mapValues{(_,rows)->
@@ -43,7 +44,7 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f).padding(end=12.dp)) {
                             Text(device.name,style=MaterialTheme.typography.bodyLarge)
-                            Text(if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked)"Playing here" else "Available"},
+                            Text(if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked && output.processing)"Buffering…" else if(checked && output.playing)"Playing here" else if(checked)"Selected" else "Available"},
                                 style=MaterialTheme.typography.bodySmall,color=if(output.error.isNotBlank())MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Checkbox(checked=checked,enabled=!state.busy && (checked || output.online && device.online),
@@ -64,10 +65,10 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
 }
 
 @Composable
-internal fun JamVolumeControls(state:JamUiState) {
+internal fun JamVolumeControls(state:JamUiState,onVolume:(String,Int)->Unit={device,value->JamSession.setVolume(device,value)}) {
     val selected=state.playback.array("selected").map{it.jsonPrimitive.content}
     state.outputs.filter{it.id in selected}.forEach{output->
         if(selected.size>1)Text("${output.name} · ${output.username}",style=MaterialTheme.typography.labelMedium,modifier=Modifier.padding(top=8.dp))
-        EchoVolumeRow(volume=output.volume,enabled=output.online,onVolumeChange={JamSession.setVolume(output.id,it)})
+        EchoVolumeRow(volume=output.volume,enabled=output.online,onVolumeChange={onVolume(output.id,it)})
     }
 }

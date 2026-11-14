@@ -18,9 +18,9 @@ import java.util.UUID
 data class JamMember(val id: String, val name: String)
 data class JamDevice(val id:String,val name:String,val kind:String,val active:Boolean=false,val online:Boolean=true)
 data class JamOutput(val id: String, val name: String, val online: Boolean, val error: String,
-    val username:String="Host",val volume:Int?=null,val kind:String="phone",val devices:List<JamDevice> = emptyList())
+    val username:String="Host",val volume:Int?=null,val kind:String="phone",val devices:List<JamDevice> = emptyList(),val playing:Boolean=false,val processing:Boolean=false,val confirmed:Boolean=false)
 data class JamUiState(val active: Boolean = false, val host: Boolean = false, val url: String = "",
-    val busy: Boolean = false, val error: String? = null, val members: List<JamMember> = emptyList(),
+    val busy: Boolean = false, val pendingAction:String="", val error: String? = null, val members: List<JamMember> = emptyList(),
     val outputs: List<JamOutput> = emptyList(), val playback: JsonObject = JsonObject(emptyMap()),
     val listen: Boolean = false, val memberCount: Int = 0, val receivedAt: Long = 0)
 
@@ -162,7 +162,7 @@ open class JamClient internal constructor(
                 members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error"),
                     o.text("username").ifBlank{"Host"},o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
-                    o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)}) },
+                    o.array("devices").map{raw->val d=raw.objectOrEmpty();JamDevice(d.text("id"),d.text("name"),d.text("kind"),d.flag("active"),d["online"]?.jsonPrimitive?.booleanOrNull ?: true)},o.flag("playing"),o.flag("processing"),o.flag("confirmed")) },
                 playback=if(retainPreview) old.playback else playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
                 error=if(playback.flag("playback_confirmed")) null else playbackError ?: result.text("error").takeIf{it.isNotBlank() && it!="null"}, receivedAt=if(retainPreview) old.receivedAt else clock())
             rememberActive(true)
@@ -232,7 +232,7 @@ open class JamClient internal constructor(
     fun command(action: String, fields: JsonObject = JsonObject(emptyMap())) {
         if (!active) return
         if(action=="configure" && _state.value.busy)return
-        if(action=="configure")_state.update{it.copy(busy=true)}
+        if(action=="configure")_state.update{it.copy(busy=true,pendingAction="configure")}
         val commandGeneration=generation
         val sequence=++transportSequence
         val previous=_state.value
@@ -254,7 +254,7 @@ open class JamClient internal constructor(
                 val accepted=result["playback"].objectOrEmpty()
                 if(accepted.number("revision") < _state.value.playback.number("revision")) return@withLock
                 val listen=if(accepted["selected"] is JsonArray) accepted.array("selected").any {it.jsonPrimitive.content==deviceId()} else _state.value.listen
-                _state.update { it.copy(playback=accepted, listen=listen, busy=false,error=null, receivedAt=clock()) }
+                _state.update { it.copy(playback=accepted, listen=listen, busy=false,pendingAction="",error=null, receivedAt=clock()) }
                 deliver(accepted,listen)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -266,7 +266,7 @@ open class JamClient internal constructor(
                 }
                 val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"
                 refreshNow()
-                _state.update { it.copy(error=message,busy=false) }
+                _state.update { it.copy(error=message,busy=false,pendingAction="") }
                 feedback(message)
             }
         } }
@@ -279,7 +279,7 @@ open class JamClient internal constructor(
     })
     fun action(path: String, body: JsonObject = JsonObject(emptyMap())) {
         if (_state.value.busy) return
-        _state.update { it.copy(busy=true,error=null) }
+        _state.update { it.copy(busy=true,pendingAction=path,error=null) }
         val actionGeneration=generation
         scope.launch { mutex.withLock {
             try {
