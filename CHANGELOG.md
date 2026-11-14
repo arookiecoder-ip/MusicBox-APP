@@ -2,6 +2,8 @@
 
 ## 2.5.8
 
+- Stop the dock input shield from consuming descendant pointer events in the Final pass, which cancelled mini-player button taps, long presses and swipes. Verify physical touch input rather than semantics-only clicks.
+
 - Keep mini-player transport taps available during loading, enlarge the touch target, and keep its animation from shrinking the target.
 - Complete local playlist queues even when the initial server mirror fails; retain cancellation when another playback request supersedes it.
 - Restore visible artwork colors in the queue background without darkening the palette twice.

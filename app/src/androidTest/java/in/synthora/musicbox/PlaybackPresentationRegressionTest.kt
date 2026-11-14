@@ -44,11 +44,11 @@ class PlaybackPresentationRegressionTest {
         } }
         val control = compose.onNodeWithTag("mini transport")
         control.assertIsEnabled().assertWidthIsEqualTo(48.dp).assertHeightIsEqualTo(48.dp)
-        control.performClick()
+        control.performTouchInput { click(center) }
         compose.runOnIdle { assertEquals(1, clicks); loading = false }
-        compose.onNodeWithContentDescription("Play").performClick()
+        compose.onNodeWithContentDescription("Play").performTouchInput { click(center) }
         compose.runOnIdle { assertEquals(2, clicks); playing = true }
-        control.assertIsEnabled().assertWidthIsEqualTo(48.dp).performClick()
+        control.assertIsEnabled().assertWidthIsEqualTo(48.dp).performTouchInput { click(center) }
         compose.runOnIdle { assertEquals(3, clicks) }
     }
 
