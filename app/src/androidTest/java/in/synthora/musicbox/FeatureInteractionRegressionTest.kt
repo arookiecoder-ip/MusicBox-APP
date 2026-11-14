@@ -174,10 +174,15 @@ class FeatureInteractionRegressionTest {
             }
         } }
         // Physical input is essential: semantics performClick bypasses pointer cancellation.
-        compose.onNodeWithTag("mini transport").performTouchInput { click(center) }
+        compose.onNodeWithTag("mini transport").performTouchInput {
+            down(center); moveBy(Offset(1f, 0f)); advanceEventTime(40); up()
+        }
         compose.runOnIdle { assertEquals(1, transport); assertEquals(0, expanded) }
         val region = compose.onNodeWithTag("mini gestures")
-        region.performTouchInput { longClick(center) }
+        region.performTouchInput {
+            down(center); advanceEventTime(80); moveBy(Offset(1f, 0f))
+            advanceEventTime(700); moveBy(Offset(1f, 0f)); up()
+        }
         compose.runOnIdle { assertEquals(1, held); assertEquals(0, expanded) }
         region.performTouchInput { swipeLeft(durationMillis = 400) }
         compose.runOnIdle { assertEquals(1, swipes); assertEquals(0, expanded) }
