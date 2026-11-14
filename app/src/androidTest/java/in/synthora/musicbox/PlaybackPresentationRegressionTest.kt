@@ -67,6 +67,8 @@ class PlaybackPresentationRegressionTest {
         compose.waitUntil(5000) { backdrop().let { it.red > it.blue + .1f } }
         val oldBackdrop = backdrop()
         val oldRow = row("red-song")
+        val ordinaryRow=row("blue-song")
+        assertTrue("Artwork blend must remain visible beneath ordinary queue rows", ordinaryRow.red > ordinaryRow.blue + .08f)
         compose.onNodeWithTag("Queue row red-song").assertIsSelected()
         compose.mainClock.autoAdvance = false
         compose.runOnIdle { state = state.copy(currentTrack = songs[1], queueIndex = 1, extractedColors = palette(Color.Blue)) }
@@ -82,6 +84,8 @@ class PlaybackPresentationRegressionTest {
         val end = backdrop()
         assertTrue("Queue follows the new blue artwork", end.blue > end.red + .1f)
         val newRow = row("blue-song")
+        val ordinaryBlueRow=row("red-song")
+        assertTrue("Ordinary rows follow the new artwork too", ordinaryBlueRow.blue > ordinaryBlueRow.red + .08f)
         assertTrue("Selected row follows the new palette", newRow.blue > newRow.red)
         assertTrue("Selected row used the previous palette before switching", oldRow.red > oldRow.blue)
         compose.onNodeWithTag("Queue row blue-song").assertIsSelected()

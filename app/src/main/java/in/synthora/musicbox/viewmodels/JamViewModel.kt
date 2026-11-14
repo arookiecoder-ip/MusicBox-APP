@@ -131,7 +131,7 @@ open class JamClient internal constructor(
         polling = scope.launch {
             while (isActive && active) {
                 refreshNow()
-                delay(1_000)
+                delay(if (_state.value.playback.flag("playing")) 300 else 1_000)
             }
         }
     }
@@ -246,9 +246,17 @@ open class JamClient internal constructor(
             try {
                 if(commandGeneration!=generation)return@withLock
                 val revision=_state.value.playback["revision"] ?: JsonPrimitive(0)
-                val result = write("/api/jam/control/", JsonObject(fields + mapOf(
-                    "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(UUID.randomUUID().toString()),
-                    "revision" to revision))).objectOrEmpty()
+                val commandId=UUID.randomUUID().toString()
+                suspend fun send(expected:JsonElement) = write("/api/jam/control/", JsonObject(fields + mapOf(
+                    "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(commandId),
+                    "revision" to expected))).objectOrEmpty()
+                val result = try { send(revision) } catch (e: BackendHttpException) {
+                    if(e.statusCode!=409 || action!="queue") throw e
+                    // A background recommendation update can advance the room revision.
+                    refreshNow(force=true)
+                    if(commandGeneration!=generation || sequence!=transportSequence) return@withLock
+                    send(_state.value.playback["revision"] ?: JsonPrimitive(0))
+                }
                 if(commandGeneration!=generation) return@withLock
                 if(optimisticTransport!=null && optimisticTransport!=sequence) return@withLock
                 if(optimisticTransport==sequence) optimisticTransport=null

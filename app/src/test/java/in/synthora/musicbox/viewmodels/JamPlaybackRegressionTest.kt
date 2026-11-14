@@ -144,4 +144,16 @@ class JamPlaybackRegressionTest {
         client.refresh();runCurrent();name="Phone";advanceTimeBy(1100);runCurrent()
         assertEquals(1,starts);assertEquals(0,cancellations);client.clear()
     }
+    @Test fun songSelectionRetriesAfterBackgroundRecommendationsChangeRevision()=runTest {
+        var calls=0;val revisions=mutableListOf<Long>();val ids=mutableListOf<String>()
+        val client=JamClient(backgroundScope,{_,_->state(playback(true,if(calls==0)1 else 2))},{path,body->
+            if(path.contains("control")) {
+                calls++;revisions+=body["revision"]!!.jsonPrimitive.long;ids+=body["command_id"]!!.jsonPrimitive.content
+                if(calls==1)throw `in`.synthora.musicbox.network.BackendHttpException(409,"Queue changed")
+                buildJsonObject{put("playback",playback(true,3))}
+            }else buildJsonObject{}
+        },{"phone"},{testScheduler.currentTime},{})
+        client.refresh();runCurrent();client.command("queue");runCurrent()
+        assertEquals(listOf(1L,2L),revisions);assertEquals(ids[0],ids[1]);assertNull(client.state.value.error);client.clear()
+    }
 }
