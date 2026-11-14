@@ -1,4 +1,5 @@
 import java.io.File
+import java.net.URI
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -44,7 +45,7 @@ android {
         // The multi-user account pages (sign-up, verification, password recovery) only exist on the
         // multi-user origin, so that origin is the default for this branch; alexa.synthora.in still runs
         // the pre-multi-user build, whose /signup answers 404.
-        manifestPlaceholders["jamLinkHost"] = java.net.URI(
+        manifestPlaceholders["jamLinkHost"] = URI(
             properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://testalexa.synthora.in")
         ).host ?: "testalexa.synthora.in"
         buildConfigField(
