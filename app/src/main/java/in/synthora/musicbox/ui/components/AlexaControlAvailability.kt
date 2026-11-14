@@ -13,5 +13,6 @@ import `in`.synthora.musicbox.viewmodels.PlaybackOutput
 fun Modifier.alexaControlAvailability(music: MusicViewModel): Modifier {
     val output by music.output.collectAsStateWithLifecycle()
     val amazon by music.echo.amazonConnected.collectAsStateWithLifecycle()
-    return alpha(if (output == PlaybackOutput.ALEXA && amazon == false) .4f else 1f)
+    val jam by `in`.synthora.musicbox.viewmodels.JamSession.state.collectAsStateWithLifecycle()
+    return alpha(if (!jam.active && output == PlaybackOutput.ALEXA && amazon == false) .4f else 1f)
 }

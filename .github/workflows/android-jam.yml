@@ -7,6 +7,7 @@ on:
       - feat/jam-sessions
       - fix/jam-playback-session
       - codex/jam-output-handoff
+      - codex/jam-shared-devices
   workflow_dispatch:
     inputs:
       ui_tests:
@@ -82,7 +83,16 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.JamManagementUiTest,in.synthora.musicbox.JamVisualRegressionTest --no-daemon
+          script: |
+            sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.JamManagementUiTest,in.synthora.musicbox.JamVisualRegressionTest --no-daemon
+            adb pull /sdcard/Android/data/in.synthora.musicbox/files/jam-screenshots jam-screenshots
+
+      - name: Upload Jam device UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jam-ui-screenshots
+          path: jam-screenshots/
 
       - name: Build the signed debug APK
         run: sh ./gradlew assembleDebug --no-daemon

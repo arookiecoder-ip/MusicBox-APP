@@ -37,11 +37,12 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
         serviceScope.coroutineContext[Job]?.invokeOnCompletion { player.removeListener(listener) }
         serviceScope.launch {
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                if (PhonePlaybackOwnership.jamPlayback) { delay(500); continue }
                 val leaseRemaining = PhonePlaybackOwnership.leaseUntilMs - android.os.SystemClock.elapsedRealtime()
                 delay(if (PhonePlaybackOwnership.token.isBlank()) 2_000 else if (leaseRemaining <= 0) 1_000 else leaseRemaining.coerceIn(50, 1_000))
                 // Retain the token so reconnect can reconcile a switch made during the outage.
                 if (PhonePlaybackOwnership.token.isNotBlank() && player.playWhenReady &&
-                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs && !offlineAudioAvailable()) pauseForLease()
+                    android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs && !offlineAudioAvailable()) if (!PhonePlaybackOwnership.jamPlayback) pauseForLease()
             }
         }
         // Ownership remains enforced by the foreground service when the Activity is closed.
@@ -49,6 +50,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
             var lastOwnershipAttempt = 0L
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 delay(1_000)
+                if (PhonePlaybackOwnership.jamPlayback) continue
                 val claim = PhonePlaybackOwnership.token
                 if (claim.isBlank() || !`in`.synthora.musicbox.network.NetworkFeedback.online.value) continue
                 if (PhonePlaybackOwnership.localHandoff) {
@@ -58,9 +60,10 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                         val renewed = kotlinx.coroutines.withTimeoutOrNull(4_000) {
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputRequest("heartbeat", PhonePlaybackOwnership.ownerId, claim)
                         }
+                        if (PhonePlaybackOwnership.jamPlayback) continue
                         if (PhonePlaybackOwnership.token == claim && renewed != null) {
                             if (renewed.belongsToPhone(PhonePlaybackOwnership.ownerId, claim)) PhonePlaybackOwnership.accept(renewed)
-                            else player.pause()
+                            else if (!PhonePlaybackOwnership.jamPlayback) player.pause()
                         }
                     } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                     catch (_: Exception) { /* Existing lease expiry still enforces exclusivity. */ }
@@ -80,6 +83,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                             `in`.synthora.musicbox.network.AlexaBackendApi.phoneOutputStatus()
                         }
                     }
+                    if (PhonePlaybackOwnership.jamPlayback) continue
                     if (status == null) {
                         PhonePlaybackOwnership.ownershipRequestFailed(claim, true)
                         if (canApplyPhoneOwnershipPoll(claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.localHandoff)) ownershipOutage()
@@ -114,7 +118,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
                 if (PhonePlaybackOwnership.token.isNotBlank() &&
                     android.os.SystemClock.elapsedRealtime() >= PhonePlaybackOwnership.leaseUntilMs && !offlineAudioAvailable()) {
                     // During a partition, never keep streaming beyond our exclusive lease.
-                    pauseForLease()
+                    if (!PhonePlaybackOwnership.jamPlayback) pauseForLease()
                 }
             }
         }
@@ -125,6 +129,7 @@ class PhonePlaybackSynchronizer(private val applicationContext: Context,
             var published: PublishedCursor? = null
             while (currentCoroutineContext().isActive) {
                 val event = publications.awaitChange()
+                if (PhonePlaybackOwnership.jamPlayback) continue
                 val claim = PhonePlaybackOwnership.token
                 if (claim.isBlank() || PhonePlaybackOwnership.localHandoff || !PhonePlaybackOwnership.permitsPlayback(claim)) continue
                 try {

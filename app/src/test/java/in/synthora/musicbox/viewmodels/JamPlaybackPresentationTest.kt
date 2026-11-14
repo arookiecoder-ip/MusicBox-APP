@@ -8,34 +8,37 @@ import org.junit.Test
 
 class JamPlaybackPresentationTest {
     private val track=Track("entry","Song","Artist",durationSec=180,ytVideoId="aaaaaaaaaaa")
-    @Test fun bothHandoffDirectionsShowLoadingAndUseTheRendererCursor() {
-        val room=EchoState(track=track,playing=true,positionMs=65_000)
-        for(direction in listOf("phone to Alexa","Alexa to phone")) {
-            val transferring=MusicUiState(currentTrack=track,isPlaying=false,isLoading=true,position=50_000,phase=PlaybackPhase.SWITCHING)
-            val pending=presentJamPlayback(transferring,room,true)
-            assertTrue(direction,pending.isLoading);assertFalse(pending.isPlaying)
-            assertEquals(PlaybackPhase.SWITCHING,pending.phase);assertEquals(50_000L,pending.position)
-            val stillPending=presentJamPlayback(transferring,room.copy(positionMs=75_000),true)
-            assertEquals("Room time must not advance an inaudible output",pending.position,stillPending.position)
-            val ready=presentJamPlayback(transferring.copy(isLoading=false,isPlaying=true,position=51_000,phase=PlaybackPhase.PLAYING),room,true)
+    @Test fun allMembersShowBufferingAndTheSameFrozenCursorUntilAudioConfirms() {
+        val room=EchoState(track=track,playing=true,confirmed=false,processing=true,positionMs=50_000)
+        val host=MusicUiState(currentTrack=track,isPlaying=false,isLoading=true,position=50_000)
+        val guest=MusicUiState(currentTrack=track.copy(ytVideoId="bbbbbbbbbbb"),isPlaying=true,position=90_000)
+        for(local in listOf(host,guest)) {
+            val shown=presentJamPlayback(local,room)
+            assertTrue(shown.isLoading);assertFalse(shown.isPlaying)
+            assertEquals(PlaybackPhase.BUFFERING,shown.phase);assertEquals(50_000L,shown.position)
+            val ready=presentJamPlayback(local,room.copy(positionMs=51_000,confirmed=true,processing=false))
             assertFalse(ready.isLoading);assertTrue(ready.isPlaying);assertEquals(51_000L,ready.position)
         }
     }
-    @Test fun stoppedOrBufferingDeviceDoesNotPretendTheRoomIsAudible() {
-        val room=EchoState(track=track,playing=true,positionMs=90_000)
-        val stopped=MusicUiState(currentTrack=track,position=12_000)
-        assertFalse(presentJamPlayback(stopped,room,true).isPlaying)
-        val buffering=presentJamPlayback(stopped.copy(isLoading=true),room,true)
-        assertTrue(buffering.isLoading);assertEquals(12_000L,buffering.position)
-        val controller=presentJamPlayback(stopped,room,false)
-        assertTrue(controller.isPlaying);assertFalse(controller.isLoading);assertEquals(90_000L,controller.position)
+    @Test fun multipleOutputsKeepOneControllerWhenOneMembersLocalPhoneBuffers() {
+        val room=EchoState(track=track,playing=true,confirmed=true,positionMs=90_000)
+        val local=MusicUiState(currentTrack=track,isLoading=true,position=12_000,error="This phone is buffering")
+        run {
+            val shown=presentJamPlayback(local,room)
+            assertTrue(shown.isPlaying);assertFalse(shown.isLoading);assertNull(shown.error)
+            assertEquals(90_000L,shown.position)
+        }
     }
-    @Test fun newSongWaitsForMatchingOutputAndFailuresStayVisible() {
-        val room=EchoState(track=track,playing=true,positionMs=0)
-        val old=MusicUiState(currentTrack=track.copy(ytVideoId="bbbbbbbbbbb"),isPlaying=true)
-        assertTrue(presentJamPlayback(old,room,true).isLoading)
-        assertFalse(presentJamPlayback(old,room,true).isPlaying)
-        val failed=presentJamPlayback(old.copy(error="Echo unavailable"),room,true)
-        assertFalse(failed.isLoading);assertEquals(PlaybackPhase.FAILED,failed.phase)
+    @Test fun pausedRoomNeverUsesAnUnrelatedPersonalPlaybackClock() {
+        val room=EchoState(track=track,playing=false,confirmed=true,positionMs=30_000)
+        val shown=presentJamPlayback(MusicUiState(isPlaying=true,position=120_000),room)
+        assertFalse(shown.isPlaying);assertFalse(shown.isLoading)
+        assertEquals(PlaybackPhase.PAUSED,shown.phase);assertEquals(30_000L,shown.position)
     }
+    @Test fun deselectingEveryOutputDoesNotLeaveAnEndlessLoadingAnimation() {
+        val room=EchoState(track=track,playing=true,confirmed=false,positionMs=30_000)
+        val shown=presentJamPlayback(MusicUiState(),room,hasOutputs=false)
+        assertFalse(shown.isPlaying);assertFalse(shown.isLoading);assertEquals(30_000L,shown.position)
+    }
+
 }

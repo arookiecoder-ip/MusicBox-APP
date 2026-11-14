@@ -14,6 +14,7 @@ object PhonePlaybackOwnership {
     private lateinit var prefs: SharedPreferences
     private val remote = MutableStateFlow<SharedPlaybackOutput?>(null)
     val remoteOutput = remote.asStateFlow()
+    @Volatile var jamPlayback = false
     @Volatile var token = ""
         private set
     @Volatile var leaseUntilMs = 0L
@@ -30,7 +31,7 @@ object PhonePlaybackOwnership {
     fun ownershipRequestFailed(expectedToken: String, unavailable: Boolean) =
         serverHealth.failed(expectedToken, token, unavailable)
     fun permitsLocalContinuation(expectedToken: String = token): Boolean =
-        !relinquishing && expectedToken == token && !remoteControlled && !localHandoff
+        jamPlayback || !relinquishing && expectedToken == token && !remoteControlled && !localHandoff
     var localHandoff: Boolean
         get() = handingOff || preparation.active
         set(value) { handingOff = value }
@@ -118,9 +119,10 @@ object PhonePlaybackOwnership {
     }
 
     fun permitsPlayback(expectedToken: String = token): Boolean =
-        canStartPhonePlayback(expectedToken, token, relinquishing, leaseUntilMs, SystemClock.elapsedRealtime())
+        jamPlayback || canStartPhonePlayback(expectedToken, token, relinquishing, leaseUntilMs, SystemClock.elapsedRealtime())
 
     fun forget(allowOffline: Boolean = false) {
+        jamPlayback = false
         serverHealth.clear()
         relinquishing = !allowOffline
         remoteControlled = false

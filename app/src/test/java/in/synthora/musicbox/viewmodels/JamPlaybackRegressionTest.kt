@@ -113,4 +113,27 @@ class JamPlaybackRegressionTest {
         client.clear()
     }
 
+    @Test fun memberRoutesVolumeToSelectedHostAndAcknowledgesOnlyOwnCommands()=runTest {
+        val writes=mutableListOf<Pair<String,JsonObject>>()
+        val output=buildJsonObject{put("device","host");put("name","Echo");put("username","Host");put("online",true);put("volume",20)}
+        val room=state(playback(true)).toMutableMap().apply{put("listen",JsonPrimitive(false));put("outputs",JsonArray(listOf(output)));put("playback",JsonObject(playback(true)+mapOf("selected" to JsonArray(listOf(JsonPrimitive("host"))))))}
+        val client=JamClient(backgroundScope,{_,_->JsonObject(room)},{path,body->writes+=path to body;buildJsonObject{}},{"guest"},{testScheduler.currentTime},{})
+        var applied=0;client.applyVolume={applied++}
+        client.refresh();runCurrent();client.setVolume("host",75);advanceTimeBy(151);runCurrent()
+        val sent=writes.last{it.first.contains("control")}.second
+        assertEquals("host",sent["device_id"]!!.jsonPrimitive.content);assertEquals(75,sent["value"]!!.jsonPrimitive.int)
+        assertEquals(0,applied)
+        client.setVolume("not-in-room",10);advanceTimeBy(151);runCurrent()
+        assertEquals(1,writes.count{it.first.contains("control")})
+        client.clear()
+    }
+    @Test fun startRemainsBusyWhileUnrelatedStateRefreshIsInactive()=runTest {
+        val response=CompletableDeferred<JsonElement>()
+        val client=JamClient(backgroundScope,{_,_->buildJsonObject{put("active",false)}},{_,_->response.await()},{"phone"},{testScheduler.currentTime},{})
+        client.action("/alexa/jam/start/");runCurrent();assertTrue(client.state.value.busy)
+        client.refresh();runCurrent();assertTrue(client.state.value.busy)
+        response.complete(buildJsonObject{});runCurrent();assertFalse(client.state.value.busy)
+        client.clear()
+    }
+
 }

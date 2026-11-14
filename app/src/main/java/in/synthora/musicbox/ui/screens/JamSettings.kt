@@ -43,33 +43,12 @@ internal fun JamSettingsContent(
         Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
         if (state.active) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), enabled = state.url.isNotBlank(), onClick = { showQr = true }) { Text("Invite") }
-                Button(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.error), enabled = !state.busy, onClick = { confirmEnd = true }) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.error) else Text(if(state.host) "End Jam" else "Leave Jam") }
+                FilledTonalButton(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), enabled = state.url.isNotBlank() && !state.busy, onClick = { showQr = true }) { Text("Invite") }
+                Button(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.error), enabled = !state.busy, onClick = { confirmEnd = true }) { if (state.busy && state.pendingAction.endsWith("stop/")) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.error) else Text(if(state.host) "End Jam" else "Leave Jam") }
             }
-        } else Button(enabled = !state.busy, onClick = onStart, modifier = Modifier.fillMaxWidth().height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) else Text("Start Jam") }
+        } else Button(enabled = !state.busy, onClick = onStart, modifier = Modifier.fillMaxWidth().height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)) { if (state.busy) {CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary);Spacer(Modifier.width(8.dp));Text("Starting Jam…")} else Text("Start Jam") }
         }
         if (state.active && state.host) {
-            HorizontalDivider(Modifier.padding(vertical=16.dp))
-            Text("Audio outputs", style=MaterialTheme.typography.titleSmall)
-            Text("Choose one output, or select several to play together.", style=MaterialTheme.typography.bodySmall)
-            val multiple=state.playback["mode"]?.toString()?.trim('"') == "multiple"
-            val selected=(state.playback["selected"] as? kotlinx.serialization.json.JsonArray)?.map { it.toString().trim('"') }.orEmpty()
-            Row(Modifier.fillMaxWidth(), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
-                Text("Play on multiple outputs", Modifier.weight(1f))
-                Switch(multiple, modifier=Modifier.semantics { contentDescription="Play on multiple outputs" }, onCheckedChange={ enabled -> onConfigure(if(enabled) "multiple" else "single", if(enabled) selected else selected.take(1)) }, enabled=!state.busy)
-            }
-            state.outputs.forEach { output ->
-                Row(Modifier.fillMaxWidth(), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(output.name, style=MaterialTheme.typography.bodyMedium)
-                        Text(if(!output.online) "Offline" else output.error.ifBlank { "Connected" }, style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Checkbox(output.id in selected, modifier=Modifier.semantics { contentDescription="Audio output: ${output.name}" }, onCheckedChange={ checked ->
-                        onConfigure(if(multiple) "multiple" else "single", if(!multiple) if(checked) listOf(output.id) else emptyList() else if(checked) selected+output.id else selected-output.id)
-                    }, enabled=!state.busy && (output.online || output.id in selected))
-                }
-            }
-            if(state.outputs.isEmpty()) Text("Connected outputs will appear here.", style=MaterialTheme.typography.bodySmall)
             HorizontalDivider(Modifier.padding(vertical=16.dp))
             Text("Participants", style=MaterialTheme.typography.titleSmall)
             Text("You · Host", Modifier.padding(vertical=8.dp))
