@@ -19,7 +19,7 @@ data class JamOutput(val id: String, val name: String, val online: Boolean, val 
 data class JamUiState(val active: Boolean = false, val host: Boolean = false, val url: String = "",
     val busy: Boolean = false, val error: String? = null, val members: List<JamMember> = emptyList(),
     val outputs: List<JamOutput> = emptyList(), val playback: JsonObject = JsonObject(emptyMap()),
-    val listen: Boolean = false, val memberCount: Int = 0)
+    val listen: Boolean = false, val memberCount: Int = 0, val receivedAt: Long = 0)
 
 /** Only verified, configured Music Box hosts may supply invitations. */
 internal fun jamInviteToken(url: String, base: String): String? = runCatching {
@@ -42,11 +42,35 @@ object JamSession {
     private var polling: Job? = null
     private var applying: Job? = null
     private var lastSuccess = 0L
+    private var playbackError: String? = null
+    private var generation=0L
+    private var prefs: android.content.SharedPreferences? = null
+    fun init(context: Context): Boolean {
+        prefs=context.getSharedPreferences("jam_session",Context.MODE_PRIVATE)
+        val restore=prefs?.getBoolean("active",false)==true
+        if(restore) _state.value=JamUiState(active=true)
+        return restore
+    }
+    private fun rememberActive(active: Boolean) { prefs?.edit()?.putBoolean("active",active)?.apply() }
+    val positionMs: Long get() {
+        val room=_state.value
+        val base=room.playback.number("position_ms")
+        val position=base + if(room.playback.flag("playing")) (android.os.SystemClock.elapsedRealtime()-room.receivedAt).coerceAtLeast(0) else 0
+        val duration=room.playback.number("duration_ms")
+        return if(duration>0) position.coerceAtMost(duration) else position
+    }
+    private suspend fun silence() {
+        applying?.cancelAndJoin()
+        try { withTimeout(6_000) { applyPlayback?.invoke(_state.value.playback, false) } }
+        catch (_: TimeoutCancellationException) { NetworkFeedback.notify("The audio output did not confirm its pause.") }
+        catch(e: CancellationException) { throw e }
+        catch(_: Exception) { NetworkFeedback.notify("Couldn't pause this audio output. Check its connection.") }
+    }
     var enterPlayback: (suspend () -> Unit)? = null
     var applyPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
     var outputName: () -> String = { android.os.Build.MODEL + " · audio output" }
 
-    fun refresh() { scope.launch { refreshNow() } }
+    fun refresh() { scope.launch { refreshNow(); if(active) follow() } }
     private fun follow() {
         if (polling?.isActive == true) return
         polling = scope.launch {
@@ -57,14 +81,16 @@ object JamSession {
         }
     }
     private suspend fun refreshNow() {
+        val requestGeneration=generation
         try {
             val result = Backend.get("/api/jam/state/", mapOf("device_id" to PhonePlaybackOwnership.ownerId)).objectOrEmpty()
+            if(requestGeneration != generation) return
             if (!result.flag("active")) {
                 if (active || result.flag("revoked")) {
-                    applying?.cancelAndJoin()
-                    applyPlayback?.invoke(_state.value.playback, false)
-                    if (result.flag("revoked")) Backend.post("/api/jam/leave/")
+                    silence()
+
                 }
+                rememberActive(false)
                 _state.value = JamUiState(error = if (result.flag("revoked")) "This Jam ended or the host removed you." else null)
                 return
             }
@@ -74,14 +100,17 @@ object JamSession {
             _state.value = JamUiState(active=true, host=result.flag("host"), url=result.text("url"),
                 members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error")) },
-                playback=playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt())
+                playback=playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
+                error=playbackError, receivedAt=android.os.SystemClock.elapsedRealtime())
+            rememberActive(true)
             lastSuccess = android.os.SystemClock.elapsedRealtime()
-            Backend.post("/api/jam/presence/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId); put("name", outputName()) })
+            Backend.post("/api/jam/presence/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId); put("name", outputName()); put("error", playbackError.orEmpty()) })
             if (applying?.isActive != true) applying = scope.launch {
-                try { applyPlayback?.invoke(playback, result.flag("listen")) }
+                try { applyPlayback?.invoke(playback, result.flag("listen")); playbackError=null }
                 catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
-                    _state.update { it.copy(error=networkErrorMessage(e) ?: e.message ?: "This output could not play.") }
+                    playbackError=networkErrorMessage(e) ?: e.message ?: "This output could not play."
+                    _state.update { it.copy(error=playbackError) }
                     runCatching { Backend.post("/api/jam/presence/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId); put("name", outputName()); put("error", "Playback unavailable on this output") }) }
                 }
             }
@@ -90,8 +119,7 @@ object JamSession {
         catch (e: Exception) {
             _state.update { it.copy(busy=false, error=networkErrorMessage(e) ?: e.message ?: "Couldn't reconnect to Jam") }
             if (active && android.os.SystemClock.elapsedRealtime() - lastSuccess > 12_000) {
-                applying?.cancelAndJoin()
-                applyPlayback?.invoke(_state.value.playback, false)
+                silence()
             }
         }
     }
@@ -103,7 +131,7 @@ object JamSession {
                 val result = Backend.post("/api/jam/control/", JsonObject(fields + mapOf(
                     "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(UUID.randomUUID().toString()),
                     "revision" to revision))).objectOrEmpty()
-                _state.update { it.copy(playback=result["playback"].objectOrEmpty(), error=null) }
+                _state.update { it.copy(playback=result["playback"].objectOrEmpty(), error=null, receivedAt=android.os.SystemClock.elapsedRealtime()) }
                 refreshNow()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -126,13 +154,17 @@ object JamSession {
         scope.launch { mutex.withLock {
             try {
                 Backend.post(path, body)
+                generation++
                 if (path.startsWith("/j/") || path.endsWith("start/")) {
                     applying?.cancelAndJoin()
-                    enterPlayback?.invoke()
+                    try { withTimeout(6_000) { enterPlayback?.invoke() } }
+                    catch (_: TimeoutCancellationException) { NetworkFeedback.notify("The audio output is reconnecting.") }
+                    catch(e: CancellationException) { throw e }
+                    catch(_: Exception) { NetworkFeedback.notify("Joined Jam. Your audio output needs to reconnect.") }
                 }
                 if (path.endsWith("leave/") || path.endsWith("stop/")) {
-                    applying?.cancelAndJoin()
-                    applyPlayback?.invoke(_state.value.playback, false)
+                    silence()
+                    rememberActive(false)
                     _state.value=JamUiState()
                 }
                 refreshNow()
@@ -141,7 +173,7 @@ object JamSession {
         } }
     }
     fun clear() {
-        polling?.cancel(); applying?.cancel(); _state.value=JamUiState()
+        generation++; polling?.cancel(); applying?.cancel(); playbackError=null; rememberActive(false); _state.value=JamUiState()
     }
 }
 
