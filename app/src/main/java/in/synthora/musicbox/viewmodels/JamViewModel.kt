@@ -122,6 +122,9 @@ open class JamClient internal constructor(
     }
     var outputName: () -> String = { android.os.Build.MODEL + " · audio output" }
 
+    fun start()=action("/alexa/jam/start/",buildJsonObject {
+        put("device_id",deviceId());put("name",outputName());put("status",outputStatus());put("kind",outputStatus().text("kind"));put("devices",outputDevices())
+    })
     fun refresh() { scope.launch { refreshNow(); if(active) follow() } }
     private fun follow() {
         if (polling?.isActive == true) return
@@ -317,7 +320,7 @@ object JamSession : JamClient(
 class JamViewModel : ViewModel() {
     val state = JamSession.state
     fun refresh() = JamSession.refresh()
-    fun start() = JamSession.action("/alexa/jam/start/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
+    fun start() = JamSession.start()
     fun stop() = JamSession.action("/alexa/jam/stop/")
     fun leave() = JamSession.action("/api/jam/leave/")
     fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })

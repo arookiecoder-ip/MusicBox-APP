@@ -800,7 +800,7 @@ class PlaybackService : MediaLibraryService() {
                 val cached = config != null && fullyCachedSource(config.uri.toString(), config.customCacheKey)
                 val online = `in`.synthora.musicbox.network.NetworkFeedback.online.value
                 val authorized = (PhonePlaybackOwnership.permitsPlayback(claimAtStart) &&
-                    (claimAtStart.isNotBlank() || PhonePlaybackOwnership.preparingSong)) || canContinueCurrentAudioOffline()
+                    (claimAtStart.isNotBlank() || PhonePlaybackOwnership.preparingSong || PhonePlaybackOwnership.jamPlayback)) || canContinueCurrentAudioOffline()
                 if (!authorized && (!online || !AlexaBackendApi.isConfigured())) {
                     check(downloaded || cached) { "This song isn't fully saved. Connect to the internet to resume it." }
                     check(!PhonePlaybackOwnership.remoteControlled && !PhonePlaybackOwnership.localHandoff) { "Playback is controlled by another device." }
