@@ -182,6 +182,14 @@ object Backend {
         // request is not a user-visible failure; feature loaders show pending work.
         try {
             try { performCall(method, path, query, body, headers = headers) }
+            catch (error: BackendAuthException) {
+                // A YouTube/Alexa/optional endpoint can reject access while the
+                // Music Box account cookie remains valid. Only the account door
+                // establishes expiry; outages must retain protected cookies.
+                throw verifiedAccountFailure(path,error) {
+                    performCall(HttpMethod.Get,"/api/account",emptyMap(),null)
+                }
+            }
             catch (error: BackendHttpException) {
                 if (method != HttpMethod.Get || error.statusCode != 429 || error.retryAfterMs == null) throw error
                 delay(error.retryAfterMs)

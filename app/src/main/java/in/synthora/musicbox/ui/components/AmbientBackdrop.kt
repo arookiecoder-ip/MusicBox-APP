@@ -33,7 +33,7 @@ internal fun homeBlendPalette(seed: Long, minute: Long): List<Color> {
 internal fun AnimatedAmbientBackdrop(palette: List<Color>, modifier: Modifier = Modifier,
     extent: Float = 1f, baseColor: Color = MaterialTheme.colorScheme.background) {
     val fallback=listOf(Color(0xFF9276DF),Color(0xFF457FB8),Color(0xFFB45986))
-    val colors=palette.takeIf { it.size>=3 } ?: fallback
+    val colors=palette.takeIf { it.size>=3 && it.any { color -> color.luminance()>.04f } } ?: fallback
     var dimensions by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     var previous by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     var current by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -51,6 +51,9 @@ internal fun AnimatedAmbientBackdrop(palette: List<Color>, modifier: Modifier = 
         previous = null
     }
     Canvas(modifier.background(baseColor).testTag("Ambient backdrop").onSizeChanged { dimensions = it }) {
+        // Sheet measurement and rasterization are asynchronous. Keep a visible
+        // blend during the first frame, resize, or cancelled palette raster work.
+        if(current==null) drawRect(Brush.verticalGradient(listOf(colors[0].copy(alpha=.25f),colors[1].copy(alpha=.20f),baseColor)))
         val destination = androidx.compose.ui.unit.IntSize(size.width.toInt(), (size.height * extent.coerceIn(0f, 1f)).toInt())
         if (destination.width > 0 && destination.height > 0) {
             previous?.let { drawImage(it.asImageBitmap(), dstSize = destination, filterQuality = FilterQuality.Low) }

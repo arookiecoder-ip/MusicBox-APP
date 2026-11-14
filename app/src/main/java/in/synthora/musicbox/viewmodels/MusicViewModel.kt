@@ -318,9 +318,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val seekChanged=jamSeekRevision != snapshot.number("seek_revision")
         val actualEntry = if(isAlexa || isRemotePhone) echo.state.value.track?.ytVideoId else playbackManager.snapshot.value.currentId
         val expectedEntry = if(isAlexa || isRemotePhone) room.track?.ytVideoId else entry
+        if(!jamWasListening && actualEntry==expectedEntry &&
+            (if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange())==room.playing &&
+            (if(isAlexa || isRemotePhone) echo.state.value.queue.map {it.ytVideoId} else _uiState.value.queue.map {it.ytVideoId})==room.queue.map {it.ytVideoId}) {
+            jamWasListening=true;jamAppliedQueue=room.queueVersion;jamAppliedEntry=entry;jamAppliedOutput=outputKey
+            jamSeekRevision=snapshot.number("seek_revision");jamInstallAt=android.os.SystemClock.elapsedRealtime()
+        }
         val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry && actualEntry != expectedEntry || jamAppliedQueue != room.queueVersion || actualEntry != expectedEntry && android.os.SystemClock.elapsedRealtime()-jamInstallAt>8_000
         if (replace) {
-            if (isAlexa) echo.transferQueue(room.queue, index, room.positionMs, room.playing)
+            if (isAlexa) echo.followJamQueue(room.queue, index, room.positionMs, room.playing, preserveCurrent=actualEntry==expectedEntry)
             else if (isRemotePhone) `in`.synthora.musicbox.services.MobileDeviceConnection.control(_remoteMobileOutput.value, "queue", buildJsonObject {
                 put("tracks", kotlinx.serialization.json.Json.encodeToJsonElement(kotlinx.serialization.builtins.ListSerializer(Track.serializer()), room.queue))
                 put("index", index); put("position_ms", room.positionMs); put("playing", room.playing)

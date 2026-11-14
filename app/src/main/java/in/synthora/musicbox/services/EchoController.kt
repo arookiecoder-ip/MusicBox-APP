@@ -585,6 +585,25 @@ class EchoController(
         } else refresh(stateOnly = true)
     }
 
+    /** Jam follows the account's selected Echo, never a phone ownership lease. */
+    suspend fun followJamQueue(tracks: List<Track>, index: Int, positionMs: Long, playing: Boolean, preserveCurrent: Boolean) {
+        require(index in tracks.indices) { "Choose a song in the Jam queue" }
+        val serial=requireSerial()
+        val output=read("/api/app/output/",emptyMap()).objectOrEmpty()
+        check(output.text("playback_output")=="alexa" && output.text("output_serial")==serial) { "Playback output changed. Refresh devices." }
+        val current=_state.value
+        val keep=preserveCurrent && current.track?.ytVideoId==tracks[index].ytVideoId
+        if(!playing && current.playing) command("pause",refreshAfter=false)
+        send("/api/app/queue/",buildJsonObject {
+            put("action","start");put("after",requireNotNull(tracks[index].ytVideoId))
+            put("tracks",JsonArray(tracks.map { kotlinx.serialization.json.Json.encodeToJsonElement(AlexaBackendApi.BackendTrack.serializer(),AlexaBackendApi.backendTrack(it)) }))
+            put("queue_index",index);put("position_ms",if(keep) current.livePosition() else positionMs)
+            put("playing",keep && current.playing && playing);put("alexa_serial",serial)
+            put("output_token",output.text("output_token"));put("command_id",java.util.UUID.randomUUID().toString())
+        })
+        if(playing && !(keep && current.playing)) command("play",refreshAfter=false)
+    }
+
     /** Play one song; the server keeps the queue going with its radio ([radio] forces a new one).
      *  [suppressRadio] leaves the queue as just this song: used for fast playlist
      *  starts where the remainder is backfilled right after (see MusicViewModel). */

@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonElement
 import java.util.UUID
 
 // A room is independent of the signed-in account's personal library and output lease.
@@ -39,8 +40,14 @@ internal fun mergeJamPlayback(previous: JsonObject, incoming: JsonObject): JsonO
 }
 
 /** Application-owned polling also runs while the playback service keeps the process alive. */
-object JamSession {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+open class JamClient internal constructor(
+    private val scope: CoroutineScope,
+    private val read: suspend (String, Map<String,String>) -> JsonElement,
+    private val write: suspend (String, JsonObject) -> JsonElement,
+    private val deviceId: () -> String,
+    private val clock: () -> Long,
+    private val feedback: (String) -> Unit
+) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(JamUiState())
     val state = _state.asStateFlow()
@@ -61,16 +68,16 @@ object JamSession {
     val positionMs: Long get() {
         val room=_state.value
         val base=room.playback.number("position_ms")
-        val position=base + if(room.playback.flag("playing")) (android.os.SystemClock.elapsedRealtime()-room.receivedAt).coerceAtLeast(0) else 0
+        val position=base + if(room.playback.flag("playing")) (clock()-room.receivedAt).coerceAtLeast(0) else 0
         val duration=room.playback.number("duration_ms")
         return if(duration>0) position.coerceAtMost(duration) else position
     }
     private suspend fun silence() {
         applying?.cancelAndJoin()
         try { withTimeout(6_000) { applyPlayback?.invoke(_state.value.playback, false) } }
-        catch (_: TimeoutCancellationException) { NetworkFeedback.notify("The audio output did not confirm its pause.") }
+        catch (_: TimeoutCancellationException) { feedback("The audio output did not confirm its pause.") }
         catch(e: CancellationException) { throw e }
-        catch(_: Exception) { NetworkFeedback.notify("Couldn't pause this audio output. Check its connection.") }
+        catch(_: Exception) { feedback("Couldn't pause this audio output. Check its connection.") }
     }
     var enterPlayback: (suspend () -> Unit)? = null
     var applyPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
@@ -90,8 +97,8 @@ object JamSession {
         val requestGeneration=generation
         try {
             val known=_state.value.playback
-            val query=mapOf("device_id" to PhonePlaybackOwnership.ownerId) + if(known.text("queue_epoch").isNotBlank()) mapOf("queue_epoch" to known.text("queue_epoch"), "queue_version" to known.number("queue_version").toString()) else emptyMap()
-            val result = Backend.get("/api/jam/state/", query).objectOrEmpty()
+            val query=mapOf("device_id" to deviceId()) + if(known.text("queue_epoch").isNotBlank()) mapOf("queue_epoch" to known.text("queue_epoch"), "queue_version" to known.number("queue_version").toString()) else emptyMap()
+            val result = read("/api/jam/state/", query).objectOrEmpty()
             if(requestGeneration != generation) return
             if (!result.flag("active")) {
                 if (active || result.flag("revoked")) {
@@ -109,44 +116,58 @@ object JamSession {
                 members=result.array("members").map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error")) },
                 playback=playback, listen=result.flag("listen"), memberCount=result.number("member_count").toInt(),
-                error=playbackError, receivedAt=android.os.SystemClock.elapsedRealtime())
+                error=playbackError, receivedAt=clock())
             rememberActive(true)
-            lastSuccess = android.os.SystemClock.elapsedRealtime()
-            Backend.post("/api/jam/presence/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId); put("name", outputName()); put("error", playbackError.orEmpty()) })
-            if (applying?.isActive != true) applying = scope.launch {
-                try { applyPlayback?.invoke(playback, result.flag("listen")); playbackError=null }
-                catch (e: CancellationException) { throw e }
-                catch (e: Exception) {
-                    playbackError=networkErrorMessage(e) ?: e.message ?: "This output could not play."
-                    _state.update { it.copy(error=playbackError) }
-                    runCatching { Backend.post("/api/jam/presence/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId); put("name", outputName()); put("error", "Playback unavailable on this output") }) }
-                }
-            }
+            lastSuccess = clock()
+            deliver(playback,result.flag("listen"))
+            write("/api/jam/presence/", buildJsonObject { put("device_id", deviceId()); put("name", outputName()); put("error", playbackError.orEmpty()) })
             follow()
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
             _state.update { it.copy(busy=false, error=networkErrorMessage(e) ?: e.message ?: "Couldn't reconnect to Jam") }
-            if (active && android.os.SystemClock.elapsedRealtime() - lastSuccess > 12_000) {
+            if (active && clock() - lastSuccess > 12_000) {
                 silence()
+            }
+        }
+    }
+    private var applyingKey: List<Any?>? = null
+    private fun deliver(playback: JsonObject, listen: Boolean) {
+        val key=listOf(playback.text("queue_epoch"),playback.number("queue_version"),playback.number("queue_index"),
+            playback.flag("playing"),playback.number("seek_revision"),listen,outputName())
+        if(applying?.isActive==true && applyingKey==key) return
+        val previous=applying
+        previous?.cancel()
+        applyingKey=key
+        applying=scope.launch {
+            previous?.join()
+            try {applyPlayback?.invoke(playback,listen);playbackError=null}
+            catch(e: CancellationException){throw e}
+            catch(e: Exception){
+                playbackError=networkErrorMessage(e) ?: e.message ?: "This output could not play."
+                _state.update {it.copy(error=playbackError)}
             }
         }
     }
     fun command(action: String, fields: JsonObject = JsonObject(emptyMap())) {
         if (!active) return
         val revision=_state.value.playback["revision"] ?: JsonPrimitive(0)
+        val commandGeneration=generation
         scope.launch { mutex.withLock {
             try {
-                val result = Backend.post("/api/jam/control/", JsonObject(fields + mapOf(
+                val result = write("/api/jam/control/", JsonObject(fields + mapOf(
                     "action" to JsonPrimitive(action), "command_id" to JsonPrimitive(UUID.randomUUID().toString()),
                     "revision" to revision))).objectOrEmpty()
-                _state.update { it.copy(playback=result["playback"].objectOrEmpty(), error=null, receivedAt=android.os.SystemClock.elapsedRealtime()) }
-                refreshNow()
+                if(commandGeneration!=generation) return@withLock
+                val accepted=result["playback"].objectOrEmpty()
+                if(accepted.number("revision") < _state.value.playback.number("revision")) return@withLock
+                _state.update { it.copy(playback=accepted, error=null, receivedAt=clock()) }
+                deliver(result["playback"].objectOrEmpty(),_state.value.listen)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
                 val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"
                 refreshNow()
                 _state.update { it.copy(error=message) }
-                NetworkFeedback.notify(message)
+                feedback(message)
             }
         } }
     }
@@ -159,16 +180,18 @@ object JamSession {
     fun action(path: String, body: JsonObject = JsonObject(emptyMap())) {
         if (_state.value.busy) return
         _state.update { it.copy(busy=true,error=null) }
+        val actionGeneration=generation
         scope.launch { mutex.withLock {
             try {
-                Backend.post(path, body)
+                val response=write(path, body).objectOrEmpty()
+                if(actionGeneration!=generation) return@withLock
                 generation++
-                if (path.startsWith("/j/") || path.endsWith("start/")) {
+                if (path.startsWith("/j/") && !response.flag("host")) {
                     applying?.cancelAndJoin()
                     try { withTimeout(6_000) { enterPlayback?.invoke() } }
-                    catch (_: TimeoutCancellationException) { NetworkFeedback.notify("The audio output is reconnecting.") }
+                    catch (_: TimeoutCancellationException) { feedback("The audio output is reconnecting.") }
                     catch(e: CancellationException) { throw e }
-                    catch(_: Exception) { NetworkFeedback.notify("Joined Jam. Your audio output needs to reconnect.") }
+                    catch(_: Exception) { feedback("Joined Jam. Your audio output needs to reconnect.") }
                 }
                 if (path.endsWith("leave/") || path.endsWith("stop/")) {
                     silence()
@@ -177,7 +200,7 @@ object JamSession {
                 }
                 refreshNow()
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"; _state.update { it.copy(busy=false,error=message) }; NetworkFeedback.notify(message) }
+            catch (e: Exception) { val message=networkErrorMessage(e) ?: e.message ?: "Couldn't update Jam"; _state.update { it.copy(busy=false,error=message) }; feedback(message) }
         } }
     }
     fun clear() {
@@ -185,13 +208,19 @@ object JamSession {
     }
 }
 
+object JamSession : JamClient(
+    CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate),
+    {path,query->Backend.get(path,query)}, {path,body->Backend.post(path,body)},
+    {PhonePlaybackOwnership.ownerId}, {android.os.SystemClock.elapsedRealtime()}, {NetworkFeedback.notify(it)}
+)
+
 class JamViewModel : ViewModel() {
     val state = JamSession.state
     fun refresh() = JamSession.refresh()
-    fun start() = JamSession.action("/alexa/jam/start/", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
+    fun start() = JamSession.action("/alexa/jam/start/", buildJsonObject { put("device_id", deviceId()) })
     fun stop() = JamSession.action("/alexa/jam/stop/")
     fun leave() = JamSession.action("/api/jam/leave/")
-    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
+    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", deviceId()) })
     fun remove(id: String) = JamSession.action("/alexa/jam/remove/", buildJsonObject { put("member_id", id) })
     fun configure(mode: String, devices: List<String>) = JamSession.command("configure", buildJsonObject {
         put("mode", mode); put("selected", JsonArray(devices.map(::JsonPrimitive)))
