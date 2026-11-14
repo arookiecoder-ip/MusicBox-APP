@@ -81,7 +81,7 @@ class JamManagementUiTest {
         compose.onNodeWithText("Starting Jam…").assertIsDisplayed()
         compose.onNode(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)).assertExists()
     }
-    @Test fun ownPhoneAndEchoCanBothBeSelectedInTheMainGroupedList() {
+    @Test fun multipleDeviceModeDisablesEchoButAllowsPhonesAndTablets() {
         val state=mutableStateOf(host().copy(outputs=listOf(
             JamOutput("host-phone","Phone",true,"",username="Host",devices=listOf(JamDevice("phone","Phone","phone",true))),
             JamOutput("host-echo","Echo",true,"",username="Host",kind="alexa",devices=listOf(JamDevice("alexa:serial","Echo","alexa",true))),
@@ -98,10 +98,10 @@ class JamManagementUiTest {
         compose.onNodeWithText("Host").assertIsDisplayed()
         compose.onNodeWithText("Alice").performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription("Play on multiple devices").performScrollTo().performClick()
-        compose.onNodeWithContentDescription("Play on Echo · Host").performScrollTo().performClick()
-        compose.runOnIdle{assertEquals(setOf("host-phone","host-echo"),state.value.playback["selected"]!!.jsonArray.map{it.jsonPrimitive.content}.toSet())}
+        compose.onNodeWithContentDescription("Play on Echo · Host").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle{assertEquals(setOf("host-phone"),state.value.playback["selected"]!!.jsonArray.map{it.jsonPrimitive.content}.toSet())}
         compose.onNodeWithContentDescription("Play on Tablet · Alice").performScrollTo().performClick()
-        compose.runOnIdle{assertEquals(3,state.value.playback["selected"]!!.jsonArray.size)}
+        compose.runOnIdle{assertEquals(2,state.value.playback["selected"]!!.jsonArray.size)}
         compose.onAllNodesWithText("Audio outputs").assertCountEquals(0)
         screenshot("jam-play-on-multiple")
     }

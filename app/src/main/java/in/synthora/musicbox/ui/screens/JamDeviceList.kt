@@ -24,7 +24,7 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
     Column(Modifier.fillMaxWidth().padding(horizontal=24.dp)) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             Text("Play on multiple devices",Modifier.weight(1f))
-            Switch(checked=multiple,onCheckedChange={onConfigure(if(it)"multiple" else "single",if(it)selected else selected.take(1))},
+            Switch(checked=multiple,onCheckedChange={onConfigure(if(it)"multiple" else "single",if(it)selected.filter { id -> state.outputs.any { output -> output.id==id && output.kind!="alexa" && !targets.text(id).startsWith("alexa:") } } else selected.take(1))},
                 enabled=!state.busy,modifier=Modifier.semantics{contentDescription="Play on multiple devices"})
         }
         if(state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical=8.dp))
@@ -37,17 +37,18 @@ internal fun JamDeviceList(state:JamUiState,onConfigure:(String,List<String>)->U
                 val devices=output.devices.ifEmpty{listOf(JamDevice("current",output.name,output.kind,true))}
                 val target=targets.text(output.id).ifBlank{devices.firstOrNull{it.active}?.id ?: devices.first().id}
                 devices.filter{it.online && (it.kind!="alexa" || echoOwners[it.id]==output.id)}.forEach{device->
-                    val checked=output.id in selected && device.id==target
+                    val echoDisabled=multiple && device.kind=="alexa"
+                    val checked=!echoDisabled && output.id in selected && device.id==target
                     Row(Modifier.fillMaxWidth().heightIn(min=64.dp),verticalAlignment=Alignment.CenterVertically) {
                         Icon(if(device.kind=="alexa")Icons.Outlined.Speaker else Icons.Outlined.PhoneAndroid,null,
                             tint=if(checked)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.size(24.dp))
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f).padding(end=12.dp)) {
                             Text(jamDeviceLabel(output, device),style=MaterialTheme.typography.bodyLarge)
-                            Text(if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked && output.processing)"Buffering…" else if(checked && output.playing)"Playing here" else if(checked)"Selected" else "Available"},
+                            Text(if(echoDisabled)"Available in single-device mode" else if(!output.online || !device.online)"Offline" else output.error.ifBlank{if(checked && output.processing)"Buffering…" else if(checked && output.playing)"Playing here" else if(checked)"Selected" else "Available"},
                                 style=MaterialTheme.typography.bodySmall,color=if(output.error.isNotBlank())MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Checkbox(checked=checked,enabled=!state.busy && (checked || output.online && device.online),
+                        Checkbox(checked=checked,enabled=!state.busy && !echoDisabled && (checked || output.online && device.online),
                             onCheckedChange={enable->
                                 val next=if(!enable)selected-output.id else if(multiple)(selected+output.id).distinct() else listOf(output.id)
                                 if(device.id=="current")onConfigure(if(multiple)"multiple" else "single",next)
