@@ -320,8 +320,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if((!jamWasListening || jamAppliedOutput != outputKey) && actualEntry==expectedEntry &&
             (if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange())==room.playing &&
             (if(isAlexa || isRemotePhone) echo.state.value.queue.map {it.ytVideoId} else _uiState.value.queue.map {it.ytVideoId})==room.queue.map {it.ytVideoId}) {
+            // Preserve a seek received during the handoff; the new output must apply it once.
+            if (!jamWasListening) jamSeekRevision=snapshot.number("seek_revision")
             jamWasListening=true;jamAppliedQueue=room.queueVersion;jamAppliedEntry=entry;jamAppliedOutput=outputKey
-            jamAppliedPlaying=room.playing;jamSeekRevision=snapshot.number("seek_revision")
+            jamAppliedPlaying=room.playing
         }
         val seekChanged=jamSeekRevision != snapshot.number("seek_revision")
         val replace = !jamWasListening || jamAppliedOutput != outputKey || jamAppliedEntry != entry && actualEntry != expectedEntry || jamAppliedQueue != room.queueVersion
