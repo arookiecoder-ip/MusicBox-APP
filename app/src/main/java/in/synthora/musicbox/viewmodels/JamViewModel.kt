@@ -32,6 +32,12 @@ internal fun jamInviteToken(url: String, base: String): String? = runCatching {
         ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,128}")) }
 }.getOrNull()
 
+internal fun mergeJamPlayback(previous: JsonObject, incoming: JsonObject): JsonObject {
+    if(incoming["queue"] != null) return incoming
+    check(incoming.text("queue_epoch").isNotBlank() && incoming.text("queue_epoch") == previous.text("queue_epoch")) { "Jam queue needs a refresh" }
+    return JsonObject(incoming + mapOf("queue" to (previous["queue"] ?: JsonArray(emptyList()))))
+}
+
 /** Application-owned polling also runs while the playback service keeps the process alive. */
 object JamSession {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -83,7 +89,9 @@ object JamSession {
     private suspend fun refreshNow() {
         val requestGeneration=generation
         try {
-            val result = Backend.get("/api/jam/state/", mapOf("device_id" to PhonePlaybackOwnership.ownerId)).objectOrEmpty()
+            val known=_state.value.playback
+            val query=mapOf("device_id" to PhonePlaybackOwnership.ownerId) + if(known.text("queue_epoch").isNotBlank()) mapOf("queue_epoch" to known.text("queue_epoch"), "queue_version" to known.number("queue_version").toString()) else emptyMap()
+            val result = Backend.get("/api/jam/state/", query).objectOrEmpty()
             if(requestGeneration != generation) return
             if (!result.flag("active")) {
                 if (active || result.flag("revoked")) {
@@ -94,7 +102,7 @@ object JamSession {
                 _state.value = JamUiState(error = if (result.flag("revoked")) "This Jam ended or the host removed you." else null)
                 return
             }
-            val playback = result["playback"].objectOrEmpty()
+            val playback = mergeJamPlayback(known, result["playback"].objectOrEmpty())
             val old = _state.value
             if (old.url == result.text("url") && playback.number("revision") < old.playback.number("revision")) return
             _state.value = JamUiState(active=true, host=result.flag("host"), url=result.text("url"),
