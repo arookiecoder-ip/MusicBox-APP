@@ -1115,6 +1115,7 @@ class PlaybackService : MediaLibraryService() {
     private var lastContinuationSeed = ""
     private var continuationRetryAt = 0L
     private fun maybeExtendPhoneQueue() {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active) return
         if (!player.playWhenReady || !`in`.synthora.musicbox.network.NetworkFeedback.online.value ||
             !PhonePlaybackOwnership.permitsPlayback() || PhonePlaybackOwnership.token.isBlank() ||
             outputPrefs.getString("playback_output", "PHONE") == "ALEXA" || queueContinuationJob?.isActive == true ||
@@ -1902,6 +1903,20 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             @Player.Command playerCommand: Int
         ): Int {
+            if (`in`.synthora.musicbox.viewmodels.JamSession.active && controller.uid != android.os.Process.myUid()) {
+                val action=when(playerCommand) {
+                    Player.COMMAND_PLAY_PAUSE -> if(`in`.synthora.musicbox.viewmodels.JamSession.state.value.playback["playing"].toString()=="true") "pause" else "play"
+                    Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> "next"
+                    Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> "previous"
+                    Player.COMMAND_SET_REPEAT_MODE -> "repeat"
+                    Player.COMMAND_SET_SHUFFLE_MODE -> "shuffle"
+                    else -> null
+                }
+                if(action != null) {
+                    `in`.synthora.musicbox.viewmodels.JamSession.command(action)
+                    return androidx.media3.session.SessionError.ERROR_NOT_SUPPORTED
+                }
+            }
             rememberManualTrackChangeRequest(playerCommand)
             if (playerCommand == Player.COMMAND_PLAY_PAUSE) {
                 cancelledMedia3Resume = false
@@ -1923,6 +1938,17 @@ class PlaybackService : MediaLibraryService() {
                 intent.getParcelableExtra(Intent.EXTRA_KEY_EVENT)
             }
 
+            if (keyEvent?.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0 && `in`.synthora.musicbox.viewmodels.JamSession.active) {
+                val action=when(keyEvent.keyCode) {
+                    KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> "pause"
+                    KeyEvent.KEYCODE_MEDIA_PLAY -> "play"
+                    KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> if(`in`.synthora.musicbox.viewmodels.JamSession.state.value.playback["playing"].toString()=="true") "pause" else "play"
+                    KeyEvent.KEYCODE_MEDIA_NEXT -> "next"
+                    KeyEvent.KEYCODE_MEDIA_PREVIOUS -> "previous"
+                    else -> null
+                }
+                if(action != null) { `in`.synthora.musicbox.viewmodels.JamSession.command(action); return true }
+            }
             if (keyEvent?.action == KeyEvent.ACTION_DOWN && keyEvent.repeatCount == 0) {
                 when (keyEvent.keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PAUSE, KeyEvent.KEYCODE_MEDIA_STOP -> cancelSessionResume()
@@ -1955,6 +1981,9 @@ class PlaybackService : MediaLibraryService() {
             controllerInfo: MediaSession.ControllerInfo,
             playerCommands: Player.Commands
         ) {
+            if (`in`.synthora.musicbox.viewmodels.JamSession.active && controllerInfo.uid != android.os.Process.myUid() && playerCommands.contains(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
+                `in`.synthora.musicbox.viewmodels.JamSession.command("seek", kotlinx.serialization.json.buildJsonObject { put("position_ms", kotlinx.serialization.json.JsonPrimitive(player.currentPosition.coerceAtLeast(0))) })
+            }
             maybeStartPlaybackAfterManualTrackChange()
             super.onPlayerInteractionFinished(session, controllerInfo, playerCommands)
         }
