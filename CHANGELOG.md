@@ -2,6 +2,8 @@
 
 ## 2.5.8
 
+- Forward HTTP response headers through the audio redirect wrapper so ETag/range checks and completed-cache fallback retain the server representation identity. Retain the audio recovery fixes already merged from feat/alexa-backend.
+
 - Stop the dock input shield from consuming descendant pointer events in the Final pass, which cancelled mini-player button taps, long presses and swipes. Verify physical touch input rather than semantics-only clicks.
 
 - Keep mini-player transport taps available during loading, enlarge the touch target, and keep its animation from shrinking the target.
