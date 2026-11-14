@@ -109,7 +109,7 @@ class JamPlaybackRegressionTest {
         client.refresh();runCurrent();client.action("/alexa/jam/stop/");runCurrent()
         advanceTimeBy(10_000);runCurrent()
         assertFalse(client.active);assertEquals(1,pauses);assertEquals(0,readsAfterEnd)
-        client.refresh();runCurrent();assertEquals(1,pauses)
+        client.refresh();runCurrent();assertEquals(1,pauses);assertNull(client.state.value.error)
         client.clear()
     }
 
@@ -136,4 +136,31 @@ class JamPlaybackRegressionTest {
         client.clear()
     }
 
+    @Test fun deviceLabelChangesDuringStartupDoNotCancelAudioPreparation()=runTest {
+        var name="Echo";var starts=0;var cancellations=0
+        val client=JamClient(backgroundScope,{_,_->state(playback(true))},{_,_->buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        client.outputName={name}
+        client.applyPlayback={_,_->starts++;try{awaitCancellation()}finally{cancellations++}}
+        client.refresh();runCurrent();name="Phone";advanceTimeBy(1100);runCurrent()
+        assertEquals(1,starts);assertEquals(0,cancellations);client.clear()
+    }
+    @Test fun songSelectionRetriesAfterBackgroundRecommendationsChangeRevision()=runTest {
+        var calls=0;val revisions=mutableListOf<Long>();val ids=mutableListOf<String>()
+        val client=JamClient(backgroundScope,{_,_->state(playback(true,if(calls==0)1 else 2))},{path,body->
+            if(path.contains("control")) {
+                calls++;revisions+=body["revision"]!!.jsonPrimitive.long;ids+=body["command_id"]!!.jsonPrimitive.content
+                if(calls==1)throw `in`.synthora.musicbox.network.BackendHttpException(409,"Queue changed")
+                buildJsonObject{put("playback",playback(true,3))}
+            }else buildJsonObject{}
+        },{"phone"},{testScheduler.currentTime},{})
+        client.refresh();runCurrent();client.command("queue");runCurrent()
+        assertEquals(listOf(1L,2L),revisions);assertEquals(ids[0],ids[1]);assertNull(client.state.value.error);client.clear()
+    }
+    @Test fun recommendationsDoNotCancelTheCurrentSongsAudioPreparation()=runTest {
+        var version=1;var started=0;var cancelled=0
+        val client=JamClient(backgroundScope,{_,_->state(JsonObject(playback(true)+mapOf("entry_id" to JsonPrimitive("same-song"),"queue_version" to JsonPrimitive(version))))},{_,_->buildJsonObject{}},{"phone"},{testScheduler.currentTime},{})
+        client.applyPlayback={_,_->started++;try{awaitCancellation()}finally{cancelled++}}
+        client.refresh();runCurrent();version=2;advanceTimeBy(1100);runCurrent()
+        assertEquals(1,started);assertEquals(0,cancelled);client.clear()
+    }
 }

@@ -81,7 +81,7 @@ class JamManagementUiTest {
         compose.onNodeWithText("Starting Jam…").assertIsDisplayed()
         compose.onNode(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)).assertExists()
     }
-    @Test fun ownPhoneAndEchoCanBothBeSelectedInTheMainGroupedList() {
+    @Test fun multipleDeviceModeDisablesEchoButAllowsPhonesAndTablets() {
         val state=mutableStateOf(host().copy(outputs=listOf(
             JamOutput("host-phone","Phone",true,"",username="Host",devices=listOf(JamDevice("phone","Phone","phone",true))),
             JamOutput("host-echo","Echo",true,"",username="Host",kind="alexa",devices=listOf(JamDevice("alexa:serial","Echo","alexa",true))),
@@ -98,10 +98,10 @@ class JamManagementUiTest {
         compose.onNodeWithText("Host").assertIsDisplayed()
         compose.onNodeWithText("Alice").performScrollTo().assertIsDisplayed()
         compose.onNodeWithContentDescription("Play on multiple devices").performScrollTo().performClick()
-        compose.onNodeWithContentDescription("Play on Echo · Host").performScrollTo().performClick()
-        compose.runOnIdle{assertEquals(setOf("host-phone","host-echo"),state.value.playback["selected"]!!.jsonArray.map{it.jsonPrimitive.content}.toSet())}
+        compose.onNodeWithContentDescription("Play on Echo · Host").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle{assertEquals(setOf("host-phone"),state.value.playback["selected"]!!.jsonArray.map{it.jsonPrimitive.content}.toSet())}
         compose.onNodeWithContentDescription("Play on Tablet · Alice").performScrollTo().performClick()
-        compose.runOnIdle{assertEquals(3,state.value.playback["selected"]!!.jsonArray.size)}
+        compose.runOnIdle{assertEquals(2,state.value.playback["selected"]!!.jsonArray.size)}
         compose.onAllNodesWithText("Audio outputs").assertCountEquals(0)
         screenshot("jam-play-on-multiple")
     }
@@ -122,4 +122,19 @@ class JamManagementUiTest {
         compose.runOnIdle{assertEquals("phone",changes.last().first);assertEquals(30,changes.last().second)}
     }
 
+    @Test fun offlineDevicesAreHiddenAndMultipleDeviceVolumesAppearUnderNames() {
+        val phone=`in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId
+        val state=host().copy(outputs=listOf(
+            JamOutput(phone,"Model",true,"",username="Host",volume=40,devices=listOf(JamDevice("phone","Model","phone",true))),
+            JamOutput("other","Tablet",true,"",username="Alice",volume=60,devices=listOf(JamDevice("phone","Tablet","phone",true))),
+            JamOutput("offline","Offline Echo",false,"",devices=listOf(JamDevice("alexa:offline","Offline Echo","alexa",true,false)))),
+            playback=buildJsonObject{put("mode","multiple");put("selected",JsonArray(listOf(JsonPrimitive(phone),JsonPrimitive("other"))))})
+        compose.setContent{JUKETheme{Column{JamDeviceList(state,{_,_->},{_,_,_,_->})}}}
+        compose.onNodeWithText("Model · This device").assertIsDisplayed()
+        compose.onNodeWithText("Tablet").assertIsDisplayed()
+        compose.onAllNodesWithText("Offline Echo").assertCountEquals(0)
+        compose.onAllNodesWithContentDescription("Volume").assertCountEquals(2)
+        assertEquals("Tablet",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],phone))
+        assertEquals("Tablet · This device",`in`.synthora.musicbox.ui.screens.jamDeviceLabel(state.outputs[1],state.outputs[1].devices[0],"other"))
+    }
 }

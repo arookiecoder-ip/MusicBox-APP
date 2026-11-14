@@ -32,4 +32,16 @@ class DeviceAudioTest {
         assertFalse(isBackendAudioRequest(base, "https://audio.example.com/audio/"))
         assertFalse(isBackendAudioRequest(base, "https://audio.example.com/music/audio/unrelated"))
     }
+    @Test fun jamAuthenticationIsLimitedToMembershipAudioOnConfiguredAccountOrigin() {
+        val base="https://account.example/music/"
+        assertTrue(isJamAudioRequest(base,"https://ACCOUNT.example:443/music/api/jam/audio/abcdefghijk?wait=1"))
+        for(url in listOf("https://other.example/music/api/jam/audio/abcdefghijk",
+            "http://account.example/music/api/jam/audio/abcdefghijk",
+            "https://account.example:444/music/api/jam/audio/abcdefghijk",
+            "https://account.example/api/jam/audio/abcdefghijk",
+            "https://account.example/music/api/jam/audio/../private",
+            "https://account.example/music/api/jam/audio/%61bcdefghijk",
+            "https://attacker@account.example/music/api/jam/audio/abcdefghijk",
+            "https://account.example/music/audio/?video_id=abcdefghijk")) assertFalse(url,isJamAudioRequest(base,url))
+    }
 }

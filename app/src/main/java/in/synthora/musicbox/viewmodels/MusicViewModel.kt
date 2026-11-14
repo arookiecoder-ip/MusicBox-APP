@@ -814,6 +814,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 put("volume",if(remote)state.volume ?: 50 else (audio.getStreamVolume(android.media.AudioManager.STREAM_MUSIC)*100/audio.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC).coerceAtLeast(1)))
             }
         }
+        JamSession.localCorrection = { position ->
+            if(JamSession.active && JamSession.state.value.listen && !isAlexa && !isRemotePhone &&
+                !jamApplying.value && playbackManager.isPlayingFlow.value && !playbackManager.isBufferingFlow.value)
+                playbackManager.seekTo(position)
+        }
         JamSession.outputDevices = {
             JsonArray(listOf(buildJsonObject {put("id","phone");put("name",android.os.Build.MODEL);put("kind","phone");put("active",!isAlexa && !isRemotePhone);put("online",true)})+
                 echo.devices.value.filter{it.controllable}.map{device->buildJsonObject {
@@ -825,11 +830,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             when {isAlexa->echo.setVolume(value);isRemotePhone->setRemotePhoneVolume(value);else->setPhoneVolume(value)}
         }
         JamSession.applyOutput = { /* Physical Echo outputs are driven by the shared backend. */ }
-        JamSession.outputName = { android.os.Build.MODEL + " · " + when {
-            isAlexa -> echo.devices.value.firstOrNull { it.serial == echo.serial.value }?.name.orEmpty().ifBlank { "Alexa" }
-            isRemotePhone -> mobileDevices.value.firstOrNull { it.id == _remoteMobileOutput.value.owner }?.name.orEmpty().ifBlank { "remote phone" }
-            else -> "This phone"
-        } }
+        JamSession.outputName = { android.os.Build.MODEL }
         JamSession.refresh()
         collectionCache.clear()
         downloads.collections.value.filter { it.title.isBlank() || it.title == "Untitled" }.forEach { refreshDownloadedDetails(it.key) }
@@ -2354,7 +2355,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             downloads.localTrack(track) ?: run {
                 val videoId = requireNotNull(track.ytVideoId) { "${track.title} can't be played" }
                 val online = `in`.synthora.musicbox.network.NetworkFeedback.online.value
-                val url = if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback) Backend.baseUrl+"/api/jam/audio/"+videoId else if (i == startIndex && online) AlexaBackendApi.getStreamUrl(videoId) else AlexaBackendApi.audioUrl(videoId)
+                val url = if (`in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback) Backend.baseUrl+"/api/jam/audio/"+videoId+"?wait=1" else if (i == startIndex && online) AlexaBackendApi.getStreamUrl(videoId) else AlexaBackendApi.audioUrl(videoId)
                 if (i == startIndex && !online) {
                     val cache = `in`.synthora.musicbox.services.PlaybackService.StreamCacheManager.getCache(getApplication())
                     val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(cache.getContentMetadata(url))

@@ -300,6 +300,13 @@ object Backend {
         )
     }
 
+    /** Only membership-authorized Jam streams may receive the account cookie. */
+    fun jamAudioCookie(requestUrl: String): String? {
+        if (!isJamAudioRequest(baseUrl, requestUrl)) return null
+        val url = requestUrl.toHttpUrlOrNull() ?: return null
+        return jar.loadForRequest(url).joinToString("; ") { "${it.name}=${it.value}" }.takeIf { it.isNotBlank() }
+    }
+
     /** Cookie headers for the account sign-in browser, so it opens with the same session. */
     fun cookieHeaders(): List<String> = browserCookieHeaders(baseUrl, jar.all())
 }

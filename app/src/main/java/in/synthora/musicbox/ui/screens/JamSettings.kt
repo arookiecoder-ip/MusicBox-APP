@@ -39,7 +39,7 @@ internal fun JamSettingsContent(
     Column(Modifier.padding(16.dp)) {
         Text("Jam", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
         Text(if (state.active) "${state.memberCount} people · one shared queue" else "Listen together. Your likes and playlists stay yours.", style = MaterialTheme.typography.bodyMedium)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = onRefresh) { Text("Retry") } }
+        state.error?.takeIf { state.active }?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
         if (state.active) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

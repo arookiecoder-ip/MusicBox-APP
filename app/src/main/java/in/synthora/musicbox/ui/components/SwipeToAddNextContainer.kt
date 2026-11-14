@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -52,7 +53,7 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
     val left by rememberUpdatedState(onLeft)
     val right by rememberUpdatedState(onRight)
     val haptic = rememberJukeHaptics()
-    val rowBackground = if (removing) `in`.synthora.musicbox.ui.theme.glassSheetColor() else MaterialTheme.colorScheme.background
+    val rowBackground = if (removing) Color.Transparent else MaterialTheme.colorScheme.background
     val scope = rememberCoroutineScope()
     var offset by remember { mutableFloatStateOf(0f) }
     var width by remember { mutableFloatStateOf(0f) }
