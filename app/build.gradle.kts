@@ -1,4 +1,5 @@
 import java.io.File
+import java.net.URI
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -18,8 +19,8 @@ android {
         applicationId = "in.synthora.musicbox"
         minSdk = 26
         targetSdk = 36
-        versionCode = 125
-        versionName = "2.5.7"
+        versionCode = 126
+        versionName = "2.5.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -41,6 +42,9 @@ android {
             "\"${properties.getProperty("POSTHOG_HOST", "")}\""
         )
         // Account sessions and playback use the primary multi-user Music Box server.
+        manifestPlaceholders["jamLinkHost"] = URI(
+            properties.getProperty("MULTIUSER_SESSION_BASE_URL", "https://alexa.synthora.in")
+        ).host ?: "alexa.synthora.in"
         buildConfigField(
             "String",
             "ALEXA_SESSION_BASE_URL",

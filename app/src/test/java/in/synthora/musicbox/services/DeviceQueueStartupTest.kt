@@ -34,4 +34,31 @@ class DeviceQueueStartupTest {
         assertFalse(played)
         assertFalse(synchronized)
     }
+    @Test fun playlistBackfillRunsAfterFailedInitialMirror() = runBlocking {
+        val events = mutableListOf<String>()
+        val queue = mutableListOf(1)
+        val job = DeviceQueueStartup.start(this, { "stream" }, { events += "play" },
+            synchronize = { events += "publish"; throw IOException("Offline") },
+            onSyncError = { events += "error" },
+            afterSynchronization = {
+                fillPhonePlaylist((2..1000).toList(), 200, { true }, { queue.addAll(it) }, {})
+                events += "backfill"
+            })
+        job.join()
+        assertEquals(listOf("play", "publish", "error", "backfill"), events)
+        assertEquals((1..1000).toList(), queue)
+    }
+
+    @Test fun cancelledInitialMirrorNeverBackfillsAnObsoleteQueue() = runBlocking {
+        val publishing = CompletableDeferred<Unit>()
+        var backfilled = false
+        val job = DeviceQueueStartup.start(this, { "stream" }, {},
+            synchronize = { publishing.complete(Unit); awaitCancellation() },
+            onSyncError = { fail("Cancellation is not a sync failure") },
+            afterSynchronization = { backfilled = true })
+        publishing.await()
+        job.cancelAndJoin()
+        assertFalse(backfilled)
+    }
+
 }

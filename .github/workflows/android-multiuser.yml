@@ -82,7 +82,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.QueueSelectionRegressionTest --no-daemon
+          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.QueueSelectionRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest --no-daemon
 
 
       - name: Build the signed debug APK

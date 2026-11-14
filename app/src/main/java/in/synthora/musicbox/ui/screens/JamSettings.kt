@@ -7,6 +7,8 @@ import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -19,23 +21,71 @@ import `in`.synthora.musicbox.viewmodels.JamViewModel
 @Composable
 fun JamSettings(jam: JamViewModel = viewModel()) {
     val state by jam.state.collectAsStateWithLifecycle()
+    LaunchedEffect(jam) { jam.refresh() }
+    JamSettingsContent(state, jam::start, jam::stop, jam::leave, jam::remove, jam::configure, jam::refresh)
+}
+
+@Composable
+internal fun JamSettingsContent(
+    state: `in`.synthora.musicbox.viewmodels.JamUiState,
+    onStart: () -> Unit, onStop: () -> Unit, onLeave: () -> Unit,
+    onRemove: (String) -> Unit, onConfigure: (String, List<String>) -> Unit, onRefresh: () -> Unit
+) {
     val context = LocalContext.current
     val share = rememberShareAction()
     var confirmEnd by remember { mutableStateOf(false) }
     var showQr by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { jam.refresh() }
+    var removeMember by remember { mutableStateOf<`in`.synthora.musicbox.viewmodels.JamMember?>(null) }
     Column(Modifier.padding(16.dp)) {
         Text("Jam", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-        Text("Invite friends to the shared Alexa queue with a web app link.", style = MaterialTheme.typography.bodyMedium)
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = jam::refresh) { Text("Retry") } }
+        Text(if (state.active) "${state.memberCount} people · one shared queue" else "Listen together. Your likes and playlists stay yours.", style = MaterialTheme.typography.bodyMedium)
+        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = onRefresh) { Text("Retry") } }
         Box(Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp), contentAlignment = androidx.compose.ui.Alignment.Center) {
         if (state.active) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), enabled = state.url.isNotBlank(), onClick = { showQr = true }) { Text("Manage") }
-                Button(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.error), enabled = !state.busy, onClick = { confirmEnd = true }) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.error) else Text("End Jam") }
+                FilledTonalButton(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), enabled = state.url.isNotBlank(), onClick = { showQr = true }) { Text("Invite") }
+                Button(modifier = Modifier.weight(1f).height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.error), enabled = !state.busy, onClick = { confirmEnd = true }) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.error) else Text(if(state.host) "End Jam" else "Leave Jam") }
             }
-        } else Button(enabled = !state.busy, onClick = jam::start, modifier = Modifier.fillMaxWidth().height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) else Text("Start Jam") }
+        } else Button(enabled = !state.busy, onClick = onStart, modifier = Modifier.fillMaxWidth().height(48.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)) { if (state.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) else Text("Start Jam") }
         }
+        if (state.active && state.host) {
+            HorizontalDivider(Modifier.padding(vertical=16.dp))
+            Text("Audio outputs", style=MaterialTheme.typography.titleSmall)
+            Text("Choose one output, or select several to play together.", style=MaterialTheme.typography.bodySmall)
+            val multiple=state.playback["mode"]?.toString()?.trim('"') == "multiple"
+            val selected=(state.playback["selected"] as? kotlinx.serialization.json.JsonArray)?.map { it.toString().trim('"') }.orEmpty()
+            Row(Modifier.fillMaxWidth(), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Play on multiple outputs", Modifier.weight(1f))
+                Switch(multiple, modifier=Modifier.semantics { contentDescription="Play on multiple outputs" }, onCheckedChange={ enabled -> onConfigure(if(enabled) "multiple" else "single", if(enabled) selected else selected.take(1)) }, enabled=!state.busy)
+            }
+            state.outputs.forEach { output ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(output.name, style=MaterialTheme.typography.bodyMedium)
+                        Text(if(!output.online) "Offline" else output.error.ifBlank { "Connected" }, style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Checkbox(output.id in selected, modifier=Modifier.semantics { contentDescription="Audio output: ${output.name}" }, onCheckedChange={ checked ->
+                        onConfigure(if(multiple) "multiple" else "single", if(!multiple) if(checked) listOf(output.id) else emptyList() else if(checked) selected+output.id else selected-output.id)
+                    }, enabled=!state.busy && (output.online || output.id in selected))
+                }
+            }
+            if(state.outputs.isEmpty()) Text("Connected outputs will appear here.", style=MaterialTheme.typography.bodySmall)
+            HorizontalDivider(Modifier.padding(vertical=16.dp))
+            Text("Participants", style=MaterialTheme.typography.titleSmall)
+            Text("You · Host", Modifier.padding(vertical=8.dp))
+            state.members.forEach { member ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                    Text(member.name, Modifier.weight(1f))
+                    TextButton(modifier=Modifier.semantics { contentDescription="Remove ${member.name}" }, onClick={removeMember=member}, enabled=!state.busy) { Text("Remove", color=MaterialTheme.colorScheme.error) }
+                }
+            }
+        }
+    }
+    removeMember?.let { member ->
+        GlassAlertDialog(onDismissRequest={removeMember=null}, title={Text("Remove ${member.name}?")},
+            text={Text("Their playback and controls will disconnect. They cannot rejoin this Jam with the same account.")},
+            confirmButton={TextButton(onClick={removeMember=null; onRemove(member.id)}){Text("Remove")}},
+            dismissButton={TextButton(onClick={removeMember=null}){Text("Cancel")}})
     }
     if (showQr && state.url.isNotBlank()) {
         val bitmap = remember(state.url) {
@@ -57,8 +107,8 @@ fun JamSettings(jam: JamViewModel = viewModel()) {
             } },
             confirmButton = { TextButton(onClick = { showQr = false }) { Text("Done") } })
     }
-    if (confirmEnd) GlassAlertDialog(onDismissRequest = { confirmEnd = false }, title = { Text("End this Jam?") },
-        text = { Text("The shared link will stop working for everyone in this Jam.") },
-        confirmButton = { TextButton(onClick = { confirmEnd = false; jam.stop() }) { Text("End Jam") } },
+    if (confirmEnd) GlassAlertDialog(onDismissRequest = { confirmEnd = false }, title = { Text(if(state.host) "End this Jam?" else "Leave this Jam?") },
+        text = { Text(if(state.host) "Playback stops for the group and the invite expires." else "Your output disconnects. Everyone else can keep listening.") },
+        confirmButton = { TextButton(onClick = { confirmEnd = false; if(state.host) onStop() else onLeave() }) { Text(if(state.host) "End Jam" else "Leave Jam") } },
         dismissButton = { TextButton(onClick = { confirmEnd = false }) { Text("Cancel") } })
 }

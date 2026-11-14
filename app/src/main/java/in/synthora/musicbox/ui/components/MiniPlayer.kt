@@ -57,6 +57,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.platform.testTag
@@ -260,6 +261,9 @@ fun MiniPlayer(
                 .fillMaxWidth()
                 .glassFloat(GlassShapes.Bar, GlassLevel.Regular)
                 .clipToBounds()
+        ) {
+            // Keep swipe/expand gestures outside the separate transport touch target.
+            Box(modifier = Modifier.fillMaxWidth().padding(end = 54.dp).clipToBounds().onSizeChanged { cardWidthPx = it.width.toFloat() }
                 .combinedClickable(
                     onClickLabel = "Open player",
                     role = Role.Button,
@@ -312,8 +316,7 @@ fun MiniPlayer(
                         }
                     )
                 }
-        ) {
-            Box(modifier = Modifier.fillMaxWidth().padding(end = 46.dp).clipToBounds().onSizeChanged { cardWidthPx = it.width.toFloat() }) {
+            ) {
             Box(modifier = Modifier.fillMaxWidth().graphicsLayer { translationX = offsetX.value }) {
                 Row(
                     modifier = Modifier
@@ -401,46 +404,38 @@ fun MiniPlayer(
             }
             }
             Box(Modifier.align(Alignment.CenterEnd).padding(end = 6.dp)) {
-                    val miniPlayScale = remember { Animatable(1f) }
-                    LaunchedEffect(uiState.isPlaying) {
-                        miniPlayScale.animateTo(0.85f, tween(90, easing = FastOutSlowInEasing))
-                        miniPlayScale.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
-                    }
-                    IconButton(
-                        enabled = !uiState.isLoading,
-                        onClick = {
-                            haptic.heavyClick()
-                            musicViewModel.togglePlayPause()
-                        },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .scale(miniPlayScale.value).alexaControlAvailability(musicViewModel)
-                    ) {
-                        if (uiState.isLoading) {
-                            androidx.compose.material3.CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                        } else Crossfade(
-                            targetState = uiState.isPlaying,
-                            animationSpec = tween(
-                                durationMillis = 180,
-                                easing = FastOutSlowInEasing
-                            ),
-                            label = "miniPlayPauseIcon"
-                        ) { isPlaying ->
-                            Icon(
-                                painter = painterResource(
-                                    if (isPlaying) `in`.synthora.musicbox.R.drawable.baseline_pause_24
-                                    else `in`.synthora.musicbox.R.drawable.baseline_play_24
-                                ),
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                modifier = Modifier.size(24.dp),
-                                tint = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
+                MiniPlayerTransport(uiState.isPlaying, uiState.isLoading,
+                    onClick = { haptic.heavyClick(); musicViewModel.togglePlayPause() },
+                    modifier = Modifier.alexaControlAvailability(musicViewModel))
             }
             // Keep the line fixed to both dock edges, including during a track swipe.
             MiniPlayerProgress(musicViewModel, Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(1.dp))
 
+        }
+    }
+}
+
+/** Keep the transport hit target stable through both loading and icon animations. */
+@androidx.compose.runtime.Composable
+internal fun MiniPlayerTransport(isPlaying: Boolean, isLoading: Boolean, onClick: () -> Unit,
+    modifier: Modifier = Modifier) {
+    val miniPlayScale = remember { Animatable(1f) }
+    LaunchedEffect(isPlaying) {
+        miniPlayScale.animateTo(0.85f, tween(90, easing = FastOutSlowInEasing))
+        miniPlayScale.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
+    }
+    IconButton(onClick = onClick, modifier = modifier.size(48.dp)) {
+        if (isLoading) {
+            androidx.compose.material3.CircularProgressIndicator(
+                Modifier.size(24.dp).semantics { contentDescription = "Cancel loading playback" }, strokeWidth = 2.dp)
+        } else Crossfade(targetState = isPlaying,
+            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+            label = "miniPlayPauseIcon") { playing ->
+            Icon(painter = painterResource(if (playing) `in`.synthora.musicbox.R.drawable.baseline_pause_24
+                else `in`.synthora.musicbox.R.drawable.baseline_play_24),
+                contentDescription = if (playing) "Pause" else "Play",
+                modifier = Modifier.size(24.dp).scale(miniPlayScale.value),
+                tint = MaterialTheme.colorScheme.onSurface)
         }
     }
 }

@@ -234,7 +234,7 @@ class RemotePlaybackService : MediaSessionService() {
         }
         remote.refresh(); updateLike()
         boundaryJob?.cancel(); boundaryJob = null
-        if (boundaryPreview != null || PlaybackCoordinator.notificationLoading.value) return
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active || boundaryPreview != null || PlaybackCoordinator.notificationLoading.value) return
         if (state.durationMs > 0 && state.livePosition(now) < state.durationMs - 2_000) attemptedBoundary = null
         val key = state.remoteBoundaryKey()
         if (attemptedBoundary == key) return
@@ -314,6 +314,7 @@ class RemotePlaybackService : MediaSessionService() {
     }
 
     private suspend fun command(action: String) {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active) { `in`.synthora.musicbox.viewmodels.JamSession.command(action); return }
         cancelBoundaryPreview()
         remote.snapshot = echo.state.value
         val skipping = action in setOf("next", "previous")
@@ -546,7 +547,9 @@ class RemotePlaybackService : MediaSessionService() {
             when (seekCommand) {
                 Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> command("next")
                 Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> command("previous")
-                else -> if (phoneControlsSelected()) MobileDeviceConnection.control(MobileDeviceConnection.output.value, "seek",
+                else -> if (`in`.synthora.musicbox.viewmodels.JamSession.active) `in`.synthora.musicbox.viewmodels.JamSession.command("seek",
+                    kotlinx.serialization.json.buildJsonObject { put("position_ms", kotlinx.serialization.json.JsonPrimitive(positionMs.coerceAtLeast(0))) })
+                    else if (phoneControlsSelected()) MobileDeviceConnection.control(MobileDeviceConnection.output.value, "seek",
                     kotlinx.serialization.json.buildJsonObject { put("position_ms", kotlinx.serialization.json.JsonPrimitive(positionMs.coerceAtLeast(0))) })
                     else echo.seek(positionMs.coerceAtLeast(0))
             }

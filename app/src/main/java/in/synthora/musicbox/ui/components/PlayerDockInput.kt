@@ -1,7 +1,6 @@
 package `in`.synthora.musicbox.ui.components
 
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 
@@ -9,9 +8,10 @@ import androidx.compose.ui.zIndex
 internal fun Modifier.playerDockInput(): Modifier = zIndex(1f).pointerInput(Unit) {
     awaitPointerEventScope {
         while (true) {
-            // Let mini-player buttons, taps and swipes handle the event first.
-            // A non-clickable skeleton must still keep it off content below.
-            awaitPointerEvent(PointerEventPass.Final).changes.forEach { it.consume() }
+            // Register the dock as a hit target so empty/loading areas shield
+            // siblings underneath. Do not consume descendant events: consuming
+            // in Final cancels button presses, long presses and drag detectors.
+            awaitPointerEvent()
         }
     }
 }

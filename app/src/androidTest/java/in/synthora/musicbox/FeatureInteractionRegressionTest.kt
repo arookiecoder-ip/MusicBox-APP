@@ -2,6 +2,11 @@ package `in`.synthora.musicbox
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import `in`.synthora.musicbox.ui.components.MiniPlayerTransport
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -150,6 +155,41 @@ class FeatureInteractionRegressionTest {
         assertEquals(1, expanded); assertEquals(0, behind)
         compose.onNodeWithTag("dock").performTouchInput { click(Offset(2f, 2f)) }
         assertEquals(0, behind)
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test fun dockPreservesPhysicalTransportTapsLongPressesAndSwipes() {
+        var behind = 0; var expanded = 0; var held = 0; var swipes = 0; var transport = 0
+        compose.setContent { JUKETheme {
+            Box(Modifier.size(320.dp, 80.dp)) {
+                Button(onClick = { behind++ }, modifier = Modifier.fillMaxSize()) { Text("Behind") }
+                Row(Modifier.fillMaxSize().playerDockInput()) {
+                    Box(Modifier.weight(1f).fillMaxHeight().testTag("mini gestures")
+                        .combinedClickable(onClick = { expanded++ }, onLongClick = { held++ })
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(onDragEnd = { swipes++ }) { change, _ -> change.consume() }
+                        }) { Text("Current song") }
+                    MiniPlayerTransport(false, false, { transport++ }, Modifier.testTag("mini transport"))
+                }
+            }
+        } }
+        // Physical input is essential: semantics performClick bypasses pointer cancellation.
+        compose.onNodeWithTag("mini transport").performTouchInput {
+            down(center); moveBy(Offset(1f, 0f)); advanceEventTime(40); up()
+        }
+        compose.runOnIdle { assertEquals(1, transport); assertEquals(0, expanded) }
+        val region = compose.onNodeWithTag("mini gestures")
+        region.performTouchInput {
+            down(center); advanceEventTime(80); moveBy(Offset(1f, 0f))
+            advanceEventTime(700); moveBy(Offset(1f, 0f)); up()
+        }
+        compose.runOnIdle { assertEquals(1, held); assertEquals(0, expanded) }
+        region.performTouchInput { swipeLeft(durationMillis = 400) }
+        compose.runOnIdle { assertEquals(1, swipes); assertEquals(0, expanded) }
+        region.performTouchInput { swipeRight(durationMillis = 400) }
+        compose.runOnIdle { assertEquals(2, swipes); assertEquals(0, expanded) }
+        region.performTouchInput { click(center) }
+        compose.runOnIdle { assertEquals(1, expanded); assertEquals(0, behind) }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
