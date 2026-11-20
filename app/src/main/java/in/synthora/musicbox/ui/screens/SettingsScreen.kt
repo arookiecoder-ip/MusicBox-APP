@@ -191,7 +191,8 @@ fun SettingsScreen(
                 GlassCard(Modifier.fillMaxWidth().border(1.dp,MaterialTheme.colorScheme.outlineVariant,RectangleShape).clickable {
                     val intent=android.content.Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
                         android.net.Uri.parse("package:"+context.packageName))
-                    context.startActivity(intent)
+                    if(intent.resolveActivity(context.packageManager)!=null)context.startActivity(intent)
+                    else context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:"+context.packageName)))
                 }) {
                     Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {

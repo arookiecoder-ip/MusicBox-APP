@@ -79,7 +79,7 @@ internal fun parseEchoSnapshot(np: JsonObject, now: Long, previousVolume: Int?, 
     }
     val volume = (np["volume"] as? JsonPrimitive)?.intOrNull?.coerceIn(0, 100)
     return EchoState(
-        lyricsControlOffsetMs=echoLyricsOffset(previous,track?.uuid,np.number("position_ms"),np.text("output_epoch")),
+        lyricsControlOffsetMs=echoLyricsOffset(previous,track?.uuid,np.number("position_ms"),np.text("output_epoch"),videoId),
         track = track,
         queue = queue,
         index = if (track != null && queue.getOrNull(index)?.uuid == track.uuid) index else -1,
@@ -123,8 +123,9 @@ internal fun transportStateSettled(state: EchoState, requestedPlaying: Boolean):
         state.playing == requestedPlaying && state.confirmed && !state.processing
 
 /** A transport correction belongs to this queue entry and output generation only. */
-internal fun echoLyricsOffset(previous:EchoState?,entry:String?,position:Long,epoch:String):Long {
-    if(entry==null || entry!=previous?.track?.uuid || epoch!=previous.sharedOutput.epoch)return 0
-    val restarted=previous.durationMs>0 && previous.positionMs>=previous.durationMs-2000 && position+2000<previous.positionMs
+internal fun echoLyricsOffset(previous:EchoState?,entry:String?,position:Long,epoch:String,video:String?=null):Long {
+    if(previous==null || entry==null || epoch!=previous.sharedOutput.epoch)return 0
+    if(entry!=previous.track?.uuid && !(previous.index<0 && video!=null && video==previous.track?.ytVideoId))return 0
+    val restarted=previous.playing && previous.confirmed && !previous.processing && previous.durationMs>0 && previous.positionMs>=previous.durationMs-2000 && position+2000<previous.positionMs
     return if(restarted)0 else previous.lyricsControlOffsetMs
 }

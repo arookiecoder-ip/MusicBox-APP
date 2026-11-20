@@ -9,11 +9,13 @@ class EchoLyricsOffsetTest {
         put("queue",buildJsonArray{add(buildJsonObject{put("video_id","abcdefghijk");put("entry_id",entry)})})
     },0,null,false)
     @Test fun temporaryCorrectionIsKeptForOneEntryAndResetsForAnotherOrRepeatedSong() {
-        val previous=snapshot().copy(lyricsControlOffsetMs=-1500)
+        val previous=snapshot().copy(lyricsControlOffsetMs=-1500,playing=true,confirmed=true)
         assertEquals(-1500L,echoLyricsOffset(previous,previous.track!!.uuid,5000,"output"))
         assertEquals(0L,echoLyricsOffset(previous,"different",5000,"output"))
         assertEquals(0L,echoLyricsOffset(previous,previous.track!!.uuid,5000,"other-output"))
         assertEquals(0L,echoLyricsOffset(previous.copy(positionMs=9800),previous.track!!.uuid,100,"output"))
+        assertEquals(-1500L,echoLyricsOffset(previous.copy(positionMs=9800,processing=true),previous.track!!.uuid,100,"output"))
+        assertEquals(-1500L,echoLyricsOffset(previous.copy(positionMs=9800,playing=false),previous.track!!.uuid,100,"output"))
         assertEquals(-1500L,echoLyricsOffset(previous.copy(positionMs=100),previous.track!!.uuid,100,"output"))
     }
 }
