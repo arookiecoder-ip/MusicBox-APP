@@ -349,6 +349,8 @@ class MainActivity : ComponentActivity() {
                         }
                         "artist","album" -> navController.navigate("${link.route}/${link.id}")
                         "account" -> navController.navigate("settings/account")
+                        "settings" -> navController.navigate("settings")
+                        "search" -> {searchViewModel.updateQuery(link.id);searchViewModel.search(link.id);navController.navigate("search")}
                         "signup" -> account.openSignup()
                         "forgot" -> account.openForgotPassword()
                         "web","jam-room" -> openWebsite(if(link.route=="web")link.id else `in`.synthora.musicbox.network.Backend.baseUrl+"/jam-room/")

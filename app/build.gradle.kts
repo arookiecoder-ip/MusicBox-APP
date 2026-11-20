@@ -223,3 +223,8 @@ val verifyReleaseSigning by tasks.registering {
 tasks.matching { it.name == "validateSigningRelease" }.configureEach {
     dependsOn(verifyReleaseSigning)
 }
+
+// Use Maven Central's canonical host for Robolectric SDK downloads on clean CI runners.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+}

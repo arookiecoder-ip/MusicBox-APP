@@ -27,7 +27,9 @@ internal fun appLink(input:String,base:String):AppLink? = runCatching {
     }
     if(own)return when(parts.firstOrNull()) {
         null,"home","remote" -> AppLink("home")
-        "account","settings" -> AppLink("account")
+        "search" -> AppLink("search",uri.rawQuery.orEmpty().split('&').firstOrNull{it.substringBefore('=')=="q"}?.substringAfter('=',"")?.let{URLDecoder.decode(it,"UTF-8")}.orEmpty())
+        "account" -> AppLink("account")
+        "settings" -> AppLink("settings")
         "login" -> AppLink("home")
         "signup" -> AppLink("signup")
         "forgot-password" -> AppLink("forgot")
