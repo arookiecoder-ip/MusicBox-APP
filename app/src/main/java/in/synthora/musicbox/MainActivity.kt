@@ -251,6 +251,16 @@ class MainActivity : ComponentActivity() {
                         openWebsite(`in`.synthora.musicbox.network.Backend.baseUrl + "/jam-invite/" + inviteToken)
                     }
                 }
+                LaunchedEffect(pendingAppLink.value,accountState.stage) {
+                    if(accountState.stage!=AuthStage.SIGNED_OUT)return@LaunchedEffect
+                    val link=pendingAppLink.value?.let{`in`.synthora.musicbox.network.appLink(it,`in`.synthora.musicbox.network.Backend.baseUrl)} ?: return@LaunchedEffect
+                    when(link.route) {
+                        "signup" -> {pendingAppLink.value=null;account.openSignup()}
+                        "forgot" -> {pendingAppLink.value=null;account.openForgotPassword()}
+                        "web" -> {pendingAppLink.value=null;openWebsite(link.id)}
+                        "home" -> pendingAppLink.value=null
+                    }
+                }
                 val joiningState by jamViewModel.state.collectAsStateWithLifecycle()
                 LaunchedEffect(joiningState.active,joiningState.busy,joiningState.error) {
                     if(inviteToken!=null && joiningState.active && joiningState.url.endsWith("/"+inviteToken) && !joiningState.busy && joiningState.error==null)pendingJamInvite.value=null

@@ -13,6 +13,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -203,13 +206,13 @@ fun AccountSettingsScreen(
             }
 
             AccountSection("Two-step verification", status=if(profile.totpEnabled)"On" else "Off",statusOn=profile.totpEnabled) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                     if(profile.totpEnabled) androidx.compose.material3.FilledTonalButton(
-                        onClick={dialog=AccountDialog.TOTP_BEGIN},enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f)
+                        onClick={dialog=AccountDialog.TOTP_BEGIN},enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f).fillMaxHeight().heightIn(min=48.dp)
                     ){Text("Change authenticator")}
                     androidx.compose.material3.FilledTonalButton(
                         onClick={dialog=if(state.totp!=null)AccountDialog.TOTP_CONFIRM else if(profile.totpEnabled)AccountDialog.TOTP_DISABLE else AccountDialog.TOTP_BEGIN},
-                        enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f),
+                        enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f).fillMaxHeight().heightIn(min=48.dp),
                         colors=ButtonDefaults.filledTonalButtonColors(
                             containerColor=if(profile.totpEnabled)MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
                             contentColor=if(profile.totpEnabled)MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
