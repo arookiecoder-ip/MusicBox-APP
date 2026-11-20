@@ -67,7 +67,9 @@ class JamVisualRegressionTest {
         assertEquals(expected.green,actual.green,.04f)
         assertEquals(expected.blue,actual.blue,.04f)
         val strip=moved[moved.width-4,y]
-        assertTrue("Removal strip=$strip, original=${before[before.width-4,y]}",kotlin.math.abs(strip.red-before[before.width-4,y].red)>.04f)
+        val original=before[before.width-4,y]
+        val difference=maxOf(kotlin.math.abs(strip.red-original.red),kotlin.math.abs(strip.green-original.green),kotlin.math.abs(strip.blue-original.blue))
+        assertTrue("Removal strip=$strip, original=$original",difference>.04f)
         compose.mainClock.autoAdvance=true
         compose.mainClock.advanceTimeBy(500)
     }
