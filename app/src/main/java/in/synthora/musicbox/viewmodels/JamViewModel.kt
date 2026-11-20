@@ -163,7 +163,7 @@ open class JamClient internal constructor(
         polling = scope.launch {
             while (isActive && active) {
                 refreshNow()
-                delay(if (_state.value.playback.flag("playing")) {if(foreground())300 else 1000} else 5000)
+                delay(if (foreground() && _state.value.playback.flag("playing")) 300 else 1000)
             }
         }
     }
