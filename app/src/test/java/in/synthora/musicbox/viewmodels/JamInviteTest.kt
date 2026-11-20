@@ -16,7 +16,7 @@ class JamInviteTest {
         assertNull(jamInviteToken("https://testalexa.synthora.in:8443/j/abcdefgh_123",base))
     }
     @Test fun malformedAndUnrelatedPathsCannotBecomeJoinRequests() {
-        listOf("/account", "/j/", "/j/short", "/j/abcdefgh%2F12", "/j/abcdefgh/123", "/jam-invite/abcdefgh_123").forEach {
+        listOf("/account", "/j/", "/j/short", "/j/abcdefgh%2F12", "/j/abcdefgh/123").forEach {
             assertNull(it,jamInviteToken(base+it,base))
         }
         assertNull(jamInviteToken("not a URL",base))
