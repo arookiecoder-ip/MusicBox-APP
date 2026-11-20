@@ -55,8 +55,7 @@ class JamVisualRegressionTest {
         val node=compose.onNodeWithTag("Swipe canvas")
         val before=node.captureToImage().toPixelMap()
         val distance=before.width/4
-        compose.mainClock.autoAdvance=false
-        node.performTouchInput {down(center);moveBy(Offset(-distance.toFloat(),0f));up()}
+        node.performTouchInput {down(center);moveBy(Offset(-distance.toFloat(),0f))}
         compose.onNodeWithText("Remove from queue").assertExists()
         val moved=node.captureToImage().toPixelMap()
         val y=moved.height-4
@@ -70,8 +69,7 @@ class JamVisualRegressionTest {
         val original=before[before.width-4,y]
         val difference=maxOf(kotlin.math.abs(strip.red-original.red),kotlin.math.abs(strip.green-original.green),kotlin.math.abs(strip.blue-original.blue))
         assertTrue("Removal strip=$strip, original=$original",difference>.04f)
-        compose.mainClock.autoAdvance=true
-        compose.mainClock.advanceTimeBy(500)
+        node.performTouchInput {up()}
     }
     @Test fun blackOrMissingArtworkStillHasAVisibleQueueBlend() {
         val palette=mutableStateOf<List<Color>>(emptyList())
