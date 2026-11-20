@@ -191,4 +191,28 @@ class AccountUiRegressionTest {
         compose.onAllNodesWithText("Manage").assertCountEquals(2)
     }
 
+    @Test fun closedSignupOnlyHidesCreationWhilePasswordRecoveryRemains() {
+        val account=account()
+        var open by mutableStateOf(false)
+        compose.setContent{JUKETheme(darkTheme=true){androidx.compose.material3.Surface {
+            SignInScreen(AccountUiState(stage=AuthStage.SIGNED_OUT,doorsAvailable=true,signupAvailable=open),account)
+        }}}
+        compose.onAllNodesWithText("Create account").assertCountEquals(0)
+        compose.onNodeWithText("Forgot password?").assertIsDisplayed()
+        compose.runOnIdle{open=true}
+        compose.onNodeWithText("Create account").assertIsDisplayed()
+    }
+    @Test fun authenticatorSetupHasAnAccessibleCopyAction() {
+        val account=account()
+        compose.setContent{JUKETheme(darkTheme=true){androidx.compose.material3.Surface {
+            AccountSettingsScreen(account,AccountUiState(stage=AuthStage.SIGNED_IN,
+                profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+                verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+                sessions=emptyList(),providers=emptyList(),minPasswordLength=10),
+                totp=`in`.synthora.musicbox.viewmodels.TotpEnrollment("ABCDEFGHIJKLMNOP","test@example.test","Music Box","")),{})
+        }}}
+        compose.onNodeWithContentDescription("Copy authenticator setup key").assertIsDisplayed().performClick()
+        compose.onNodeWithText("Scan and confirm").assertIsDisplayed()
+    }
+
 }

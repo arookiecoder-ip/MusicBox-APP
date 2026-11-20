@@ -100,7 +100,7 @@ class UiRefinementRegressionTest {
             JUKETheme(darkTheme = true) {
                 `in`.synthora.musicbox.ui.screens.SignInScreen(
                     `in`.synthora.musicbox.viewmodels.AccountUiState(
-                        stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT
+                        signupAvailable=true,stage = `in`.synthora.musicbox.viewmodels.AuthStage.SIGNED_OUT
                     ),
                     account
                 )
