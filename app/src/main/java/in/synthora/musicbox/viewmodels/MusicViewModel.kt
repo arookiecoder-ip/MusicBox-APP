@@ -305,8 +305,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var jamAppliedPlaying = false
     private var jamSeekRevision = -1L
     private var jamRateCorrection:Job?=null
+    private var jamRateEpoch=0L
     private var jamTimingIntent=""
-    private fun resetJamRate() {if(jamRateCorrection==null)return;jamRateCorrection?.cancel();jamRateCorrection=null;playbackManager.setJamPlaybackSpeed(1f)}
+    private fun resetJamRate() {
+        if(jamRateCorrection==null)return
+        jamRateEpoch++
+        jamRateCorrection?.cancel();jamRateCorrection=null
+        playbackManager.setJamPlaybackSpeed(1f)
+    }
     private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean) {
         val timingIntent=listOf(snapshot.text("entry_id"),snapshot.number("seek_revision"),snapshot.flag("playing")).joinToString(":")
         if(!listen || timingIntent!=jamTimingIntent){resetJamRate();jamTimingIntent=timingIntent}
@@ -824,7 +830,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val drift=position-playbackManager.getCurrentPosition()
                 val speed=1f+(drift/5000f).coerceIn(-.02f,.02f)
                 playbackManager.setJamPlaybackSpeed(speed)
-                jamRateCorrection=viewModelScope.launch {try{delay(5000)}finally{playbackManager.setJamPlaybackSpeed(1f)}}
+                val epoch=jamRateEpoch
+                jamRateCorrection=viewModelScope.launch {
+                    try{delay(5000)}finally{if(epoch==jamRateEpoch)playbackManager.setJamPlaybackSpeed(1f)}
+                }
             }
         }
         JamSession.outputDevices = {
