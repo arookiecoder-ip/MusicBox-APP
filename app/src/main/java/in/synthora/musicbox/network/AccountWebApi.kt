@@ -86,18 +86,18 @@ object AccountWebApi {
      * unhappy, so the sign-in screen can stop offering doors that cannot open.
      * Null means the server could not be asked (offline, timeouts).
      */
-    suspend fun doorsAvailable(): Boolean? = try {
-        when (Backend.formGet("/signup").status) {
-            404 -> false
-            503 -> true // Sign-ups are closed, but the recovery doors do exist.
-            in 200..399 -> true
-            else -> null
-        }
-    } catch (e: kotlinx.coroutines.CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        null
+    data class DoorAvailability(val available:Boolean,val signupOpen:Boolean)
+    internal fun doorAvailability(status:Int):DoorAvailability? = when(status) {
+        404 -> DoorAvailability(false,false)
+        503 -> DoorAvailability(true,false)
+        in 200..399 -> DoorAvailability(true,true)
+        else -> null
     }
+    suspend fun doorAvailability():DoorAvailability? = try {
+        doorAvailability(Backend.formGet("/signup").status)
+    } catch(e:kotlinx.coroutines.CancellationException){throw e}
+      catch(_:Exception){null}
+    suspend fun doorsAvailable():Boolean? = doorAvailability()?.available
 
     suspend fun openSignup(): SignupGate {
         val response = Backend.formGet("/signup")

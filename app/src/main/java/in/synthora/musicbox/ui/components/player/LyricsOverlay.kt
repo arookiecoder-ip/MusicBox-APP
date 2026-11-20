@@ -125,6 +125,7 @@ fun LyricsOverlay(
     var lastTick by remember(currentTrack.uuid) {
         mutableIntStateOf((currentTrack.lyricsOffsetMs / 100L).toInt())
     }
+    LaunchedEffect(currentTrack.uuid,currentTrack.lyricsOffsetMs){localOffsetMs=currentTrack.lyricsOffsetMs.toFloat();lastTick=(currentTrack.lyricsOffsetMs/100).toInt()}
     var showSyncControls by remember(currentTrack.uuid) { mutableStateOf(false) }
     var lyricsPending by remember(currentTrack.uuid) { mutableStateOf(false) }
 
@@ -158,7 +159,6 @@ fun LyricsOverlay(
 
         if (syncedLyrics != null) {
             val lyricLines by produceState<List<`in`.synthora.musicbox.ui.screens.LyricLine>>(emptyList(), syncedLyrics, localOffsetMs) {
-                value = emptyList()
                 value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
                     parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
                 }

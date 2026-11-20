@@ -79,6 +79,10 @@ class EchoController(
 
     private val _state = MutableStateFlow(EchoState())
     val state: StateFlow<EchoState> = _state.asStateFlow()
+    fun setLyricsControlOffset(entry:String,offset:Long) {
+        _state.update{if(it.track?.uuid==entry && it.sharedOutput.mode!="phone")it.copy(lyricsControlOffsetMs=offset) else it}
+    }
+
 
     private var pollJob: Job? = null
     private var eventJob: Job? = null
@@ -419,7 +423,7 @@ class EchoController(
         val intent = if (transport) ++transportIntent else transportIntent
         // Update before acquiring the lock: even three rapid taps must each
         // reverse the latest requested direction, not the last HTTP response.
-        if (transport) _state.update { it.copy(playing = action == "play", positionMs = it.livePosition(), anchoredAt = SystemClock.elapsedRealtime()) }
+        if (transport) _state.update { it.copy(lyricsControlOffsetMs=if(it.sharedOutput.mode!="phone")-1500 else it.lyricsControlOffsetMs,playing = action == "play", positionMs = it.livePosition(), anchoredAt = SystemClock.elapsedRealtime()) }
         transportLock.withLock {
             // Keep an in-flight Amazon request ordered, but drop obsolete queued taps.
             if (transport && intent != transportIntent) return@withLock
@@ -461,11 +465,12 @@ class EchoController(
     suspend fun seek(positionMs: Long, refreshAfter: Boolean = true, expectedPhoneToken: String? = null) {
         val serial = requireSerial()
         val previous = _state.value
+        previous.track?.uuid?.let{setLyricsControlOffset(it,-1500)}
         val position = positionMs.coerceIn(0, if (previous.durationMs > 0) (previous.durationMs - 1_000).coerceAtLeast(0) else Long.MAX_VALUE)
         val intent = ++seekIntent
         val now = SystemClock.elapsedRealtime()
         pendingSeek = EchoSeekPreview(previous, position, Long.MAX_VALUE)
-        _state.value = previous.copy(positionMs = position, anchoredAt = now,
+        _state.value = previous.copy(lyricsControlOffsetMs=if(previous.sharedOutput.mode!="phone")-1500 else previous.lyricsControlOffsetMs,positionMs = position, anchoredAt = now,
             processing = previous.playing, confirmed = !previous.playing)
         transportLock.withLock {
             if (intent != seekIntent || serial != _serial.value) return@withLock

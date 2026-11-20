@@ -62,6 +62,9 @@ jobs:
           MULTIUSER_BASE_URL=https://alexa.synthora.in
           EOF
 
+      - name: Prepare the checksum-verified test SDK
+        run: bash scripts/prepare_robolectric_sdk.sh
+
       - name: Compile and run JVM regressions
         run: sh ./gradlew testDebugUnitTest --no-daemon
 

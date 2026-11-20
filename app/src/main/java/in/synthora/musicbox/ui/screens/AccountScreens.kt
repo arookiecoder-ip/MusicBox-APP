@@ -282,7 +282,7 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                 )
             } else {
                 Row(footer, horizontalArrangement = Arrangement.SpaceEvenly) {
-                    TextButton(onClick = { haptic.click(); account.openSignup() }, enabled = !state.busy) {
+                    if(state.signupAvailable) TextButton(onClick = { haptic.click(); account.openSignup() }, enabled = !state.busy) {
                         Text("Create account")
                     }
                     TextButton(onClick = { haptic.click(); account.openForgotPassword() }, enabled = !state.busy) {

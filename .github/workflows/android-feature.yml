@@ -352,7 +352,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           (cd candidate && sha256sum --check SHA256SUMS.txt)
-          gh release download v2.5.13 --repo "$GITHUB_REPOSITORY" --pattern 'Music-Box-2.5.13.apk' --pattern SHA256SUMS.txt --dir baseline
+          gh release download v2.5.14 --repo "$GITHUB_REPOSITORY" --pattern 'Music-Box-2.5.14.apk' --pattern SHA256SUMS.txt --dir baseline
           (cd baseline && sha256sum --check SHA256SUMS.txt)
       - name: Enable emulator virtualization
         run: |

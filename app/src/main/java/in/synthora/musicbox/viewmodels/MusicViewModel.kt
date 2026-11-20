@@ -74,6 +74,7 @@ import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
 
 /** Where music plays: the selected Echo (through the server) or this phone. */
@@ -284,11 +285,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             android.os.SystemClock.elapsedRealtime(), null, false, jamDecoded?.queue.orEmpty(), jamDecoded).also {jamDecoded=it}
     }
 
-    val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked) { personal, jam, liked ->
+    val uiState: StateFlow<MusicUiState> = combine(personalUiState, JamSession.state, AccountRepository.liked,_echoLyrics) { personal, jam, liked, lyrics ->
         if (!jam.active) personal else {
             val room = decodeJamSnapshot(jam.playback)
             val shown=presentJamPlayback(personal,room,jam.playback.array("selected").isNotEmpty())
-            shown.copy(currentTrack=room.track?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
+            val current=room.track?.let {track->
+                val cached=lyrics[track.ytVideoId] ?: personal.currentTrack?.takeIf{it.ytVideoId==track.ytVideoId} ?: track
+                track.copy(syncedLyrics=cached.syncedLyrics,plainLyrics=cached.plainLyrics,
+                    romanizedSyncedLyrics=cached.romanizedSyncedLyrics,romanizedPlainLyrics=cached.romanizedPlainLyrics,
+                    lyricsOffsetMs=if(jam.playback["targets"].objectOrEmpty().values.any{it.jsonPrimitive.content.startsWith("alexa:")})
+                        (if(jam.lyricsControlEntry==jam.playback.text("entry_id"))jam.lyricsControlOffsetMs else 0) else cached.lyricsOffsetMs)
+            }
+            shown.copy(currentTrack=current?.withLike(liked), queue=room.queue.map { it.withLike(liked) },
                 queueIndex=room.index, duration=room.durationMs,isShuffleEnabled=jam.playback.flag("shuffle"),
                 isLoading=shown.isLoading && jam.error==null,
                 phase=if(jam.error!=null && !room.confirmed) `in`.synthora.musicbox.services.PlaybackPhase.FAILED else shown.phase,
@@ -409,7 +417,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 lyricsOffsetMs = cached.lyricsOffsetMs
             )
         }
-        val current = state.track?.withLyrics()
+        val current = state.track?.withLyrics()?.let{if(isAlexa)it.copy(lyricsOffsetMs=state.lyricsControlOffsetMs) else it}
         return MusicUiState(
             currentTrack = current,
             queue = echoQueuePresentation.present(state.queue, active = current),
@@ -427,7 +435,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var hasStartedDeferredStartupWork = false
 
     fun saveLyricsOffset(track: Track, offsetMs: Long) {
-        if (isAlexa || isRemotePhone) {
+        if(JamSession.active && JamSession.state.value.playback["targets"].objectOrEmpty().values.any{it.jsonPrimitive.content.startsWith("alexa:")}) {
+            JamSession.setLyricsOffset(track.uuid,offsetMs);return
+        }
+        if(isAlexa) {echo.setLyricsControlOffset(track.uuid,offsetMs);return}
+        if (isAlexa || isRemotePhone || JamSession.active) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update { it + (videoId to (it[videoId] ?: track).copy(lyricsOffsetMs = offsetMs)) }
             return
@@ -468,7 +480,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (romanizedSyncedLyrics.isNullOrBlank() && romanizedPlainLyrics.isNullOrBlank()) {
             return
         }
-        if (isAlexa || isRemotePhone) {
+        if (isAlexa || isRemotePhone || JamSession.active) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update {
                 val base = it[videoId] ?: track
@@ -2838,7 +2850,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshLyrics(track: Track) {
         if (lyricsRefreshJobs[track.uuid]?.isActive == true) return
-        val isEcho = isAlexa || isRemotePhone
+        val isEcho = isAlexa || isRemotePhone || JamSession.active
         lyricsRefreshJobs[track.uuid] = viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
