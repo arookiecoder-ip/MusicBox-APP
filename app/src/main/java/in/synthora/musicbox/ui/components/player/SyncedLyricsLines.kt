@@ -42,12 +42,13 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
         }
         item?.let {
             list.animateScrollBy(lyricCenterDelta(it.offset, it.size,
-                layout.viewportStartOffset, layout.viewportEndOffset))
+                layout.viewportStartOffset, layout.viewportEndOffset),
+                animationSpec=androidx.compose.animation.core.tween(420,easing=androidx.compose.animation.core.FastOutSlowInEasing))
         }
     }
     LaunchedEffect(lines) {
         snapshotFlow { Triple(currentActive, dragged, list.layoutInfo.viewportEndOffset - list.layoutInfo.viewportStartOffset) }.collectLatest { (index, dragging, _) ->
-            if (!dragging) { delay(350); center(index) }
+            if (!dragging) { center(index) }
         }
     }
     BoxWithConstraints(modifier.testTag("Synced lyrics")) {

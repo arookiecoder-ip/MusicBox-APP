@@ -28,6 +28,7 @@ data class EchoState(
     val processing: Boolean = false,
     val sharedOutput: SharedPlaybackOutput = SharedPlaybackOutput(),
     val queueVersion: Long = -1,
+    val lyricsControlOffsetMs:Long=0,
     val playbackRevision: Long = -1
 ) {
     /** Pause is not buffering, even while its acknowledgment is pending. */
@@ -78,6 +79,7 @@ internal fun parseEchoSnapshot(np: JsonObject, now: Long, previousVolume: Int?, 
     }
     val volume = (np["volume"] as? JsonPrimitive)?.intOrNull?.coerceIn(0, 100)
     return EchoState(
+        lyricsControlOffsetMs=echoLyricsOffset(previous,track?.uuid,np.number("position_ms"),np.text("output_epoch")),
         track = track,
         queue = queue,
         index = if (track != null && queue.getOrNull(index)?.uuid == track.uuid) index else -1,
@@ -119,3 +121,10 @@ internal fun notificationQueueWindow(state: EchoState): Pair<List<Track>, Int> {
 internal fun transportStateSettled(state: EchoState, requestedPlaying: Boolean): Boolean =
     state.sharedOutput.mode != "phone" && !state.sharedOutput.handoffPending &&
         state.playing == requestedPlaying && state.confirmed && !state.processing
+
+/** A transport correction belongs to this queue entry and output generation only. */
+internal fun echoLyricsOffset(previous:EchoState?,entry:String?,position:Long,epoch:String):Long {
+    if(entry==null || entry!=previous?.track?.uuid || epoch!=previous.sharedOutput.epoch)return 0
+    val restarted=previous.durationMs>0 && previous.positionMs>=previous.durationMs-2000 && position+2000<previous.positionMs
+    return if(restarted)0 else previous.lyricsControlOffsetMs
+}

@@ -45,6 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -199,31 +200,19 @@ fun AccountSettingsScreen(
 
             }
 
-            AccountSection("Two-step verification") {
-                Text(
-                    if (profile.totpEnabled) "On — this account asks for a 6-digit authenticator code at sign-in."
-                    else "Off — add an authenticator app to protect sign-in.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-                if (profile.totpPending) {
-                    Text("A new authenticator is waiting to be confirmed.", color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+            AccountSection("Two-step verification", status=if(profile.totpEnabled)"On" else "Off",statusOn=profile.totpEnabled) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                    if(profile.totpEnabled) androidx.compose.material3.FilledTonalButton(
+                        onClick={dialog=AccountDialog.TOTP_BEGIN},enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f)
+                    ){Text("Change authenticator")}
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick={dialog=if(state.totp!=null)AccountDialog.TOTP_CONFIRM else if(profile.totpEnabled)AccountDialog.TOTP_DISABLE else AccountDialog.TOTP_BEGIN},
+                        enabled=!state.busy,shape=RoundedCornerShape(6.dp),modifier=Modifier.weight(1f),
+                        colors=ButtonDefaults.filledTonalButtonColors(
+                            containerColor=if(profile.totpEnabled)MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor=if(profile.totpEnabled)MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
+                    ){Text(if(profile.totpEnabled)"Remove" else "Set up authenticator")}
                 }
-                if (profile.totpEnabled) {
-                    TextButton(onClick = { dialog = AccountDialog.TOTP_BEGIN }, enabled = !state.busy) { Text("Change authenticator") }
-                }
-                androidx.compose.material3.FilledTonalButton(
-                    shape=RoundedCornerShape(6.dp),
-                    colors=ButtonDefaults.filledTonalButtonColors(containerColor=if(profile.totpEnabled)MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor=if(profile.totpEnabled)MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer),
-                    onClick = {
-                        if (state.totp != null) dialog = AccountDialog.TOTP_CONFIRM
-                        else if (profile.totpEnabled) dialog = AccountDialog.TOTP_DISABLE
-                        else dialog = AccountDialog.TOTP_BEGIN
-                    },
-                    enabled = !state.busy,
-                    modifier = Modifier.padding(top = 4.dp)
-                ) { Text(if (profile.totpEnabled) "Turn off verification" else "Set up authenticator") }
             }
 
             AccountSection("Signed-in devices") {
@@ -305,6 +294,8 @@ private enum class AccountDialog {
 private fun AccountSection(
     title: String,
     danger: Boolean = false,
+    status:String?=null,
+    statusOn:Boolean=false,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(
@@ -319,12 +310,11 @@ private fun AccountSection(
             )
             .padding(20.dp)
     ) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.Bold,
-            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-        )
+        Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+            Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleSmall,fontWeight=FontWeight.Bold,
+                color=if(danger)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+            status?.let{Text(it,color=if(statusOn)Color(0xFF81C784) else MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelLarge)}
+        }
         Spacer(Modifier.height(16.dp))
         content()
     }
@@ -344,6 +334,7 @@ private fun AccountActionRow(title: String, detail: String, action: String, onCl
 
 @Composable
 private fun DialogError(state: AccountUiState) {
+    if(state.busy)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp);Text("Processing…",style=MaterialTheme.typography.bodySmall)}
     state.error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }
@@ -566,7 +557,7 @@ private fun TotpConfirmDialog(
         title = { Text("Scan and confirm") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Scan this in Google Authenticator, Aegis, 1Password or any TOTP app, then type the code it shows.")
+                Text("Scan with your authenticator, then enter its code.")
                 if (bitmap != null) {
                     Image(
                         bitmap.asImageBitmap(),
@@ -574,11 +565,11 @@ private fun TotpConfirmDialog(
                         modifier = Modifier.fillMaxWidth().height(220.dp)
                     )
                 }
-                Text(
-                    "Can't scan? Enter this key manually:\n${enrollment.secret}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text(enrollment.secret,Modifier.weight(1f),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    val clipboard=LocalClipboardManager.current
+                    IconButton(onClick={clipboard.setText(AnnotatedString(enrollment.secret))}){Icon(Icons.Default.ContentCopy,"Copy authenticator setup key")}
+                }
                 GlassTextField(
                     code, { value -> code = value.filter(Char::isDigit).take(6) }, "000000", centered = true,
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(

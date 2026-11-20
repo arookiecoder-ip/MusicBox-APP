@@ -85,6 +85,7 @@ data class AccountUiState(
     val stage: AuthStage = AuthStage.CHECKING,
     /** Whether this server has account pages; null while unknown or offline. */
     val doorsAvailable: Boolean? = null,
+    val signupAvailable: Boolean = false,
     val door: AuthDoorState = AuthDoorState(),
     val profile: AccountWebApi.AccountProfile? = null,
     val profileLoading: Boolean = false,
@@ -240,9 +241,9 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
     fun checkDoors() {
         if (doorsJob?.isActive == true) return
         doorsJob = viewModelScope.launch {
-            val available = AccountWebApi.doorsAvailable() ?: return@launch
+            val available = AccountWebApi.doorAvailability() ?: return@launch
             if (_state.value.stage != AuthStage.SIGNED_IN) {
-                _state.update { it.copy(doorsAvailable = available) }
+                _state.update { it.copy(doorsAvailable = available.available,signupAvailable=available.signupOpen) }
             }
         }
     }

@@ -22,6 +22,7 @@ data class JamOutput(val id: String, val name: String, val online: Boolean, val 
 data class JamUiState(val active: Boolean = false, val host: Boolean = false, val url: String = "",
     val busy: Boolean = false, val pendingAction:String="", val error: String? = null, val members: List<JamMember> = emptyList(),
     val outputs: List<JamOutput> = emptyList(), val playback: JsonObject = JsonObject(emptyMap()),
+    val lyricsControlEntry:String="", val lyricsControlOffsetMs:Long=0,
     val listen: Boolean = false, val hostName:String="Host", val localSyncKey:String="", val memberCount: Int = 0, val receivedAt: Long = 0)
 
 /** Only verified, configured Music Box hosts may supply invitations. */
@@ -191,7 +192,7 @@ open class JamClient internal constructor(
             if (old.url == result.text("url") && playback.number("revision") < old.playback.number("revision")) return
             val retainPreview=optimisticTransport!=null && result.flag("listen") &&
                 old.playback.text("queue_epoch")==playback.text("queue_epoch") && old.playback.text("entry_id")==playback.text("entry_id")
-            _state.value = JamUiState(active=true, host=result.flag("host"), url=result.text("url"),
+            _state.value = JamUiState(lyricsControlEntry=old.lyricsControlEntry.takeIf{old.playback.text("queue_epoch")==playback.text("queue_epoch") && old.playback.text("entry_id")==playback.text("entry_id")}.orEmpty(),lyricsControlOffsetMs=old.lyricsControlOffsetMs,active=true, host=result.flag("host"), url=result.text("url"),
                 members=(if(result["participants"] is JsonArray)result.array("participants") else result.array("members")).map { JamMember(it.objectOrEmpty().text("id"), it.objectOrEmpty().text("name")) },
                 outputs=result.array("outputs").map { val o=it.objectOrEmpty(); JamOutput(o.text("device"), o.text("name"), o.flag("online"), o.text("error"),
                     o.text("username").ifBlank{"Host"},if(o.text("device")==deviceId() && localVolumePreview?.second?.let{it>clock()}==true) localVolumePreview?.first else o["volume"]?.jsonPrimitive?.intOrNull,o.text("kind"),
@@ -268,6 +269,9 @@ open class JamClient internal constructor(
         if(action=="configure")_state.update{it.copy(busy=true,pendingAction="configure")}
         val commandGeneration=generation
         val sequence=++transportSequence
+        if(action in setOf("play","pause","seek") && _state.value.playback["targets"].objectOrEmpty().values.any{it.jsonPrimitive.content.startsWith("alexa:")}) {
+            _state.update{it.copy(lyricsControlEntry=it.playback.text("entry_id"),lyricsControlOffsetMs=-1500)}
+        }
         val previous=_state.value
         if(action in setOf("play","pause") && previous.listen && previewTransport?.invoke(action)==true) {
             val position=positionMs

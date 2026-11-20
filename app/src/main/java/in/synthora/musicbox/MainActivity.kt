@@ -183,6 +183,7 @@ class MainActivity : ComponentActivity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    private val pendingAppLink=mutableStateOf<String?>(null)
     private val pendingJamInvite = mutableStateOf<String?>(null)
     private val showPlayerOnLaunch = mutableStateOf(false)
     private var downloadsOpenTrigger by mutableIntStateOf(0)
@@ -202,6 +203,7 @@ class MainActivity : ComponentActivity() {
         `in`.synthora.musicbox.ui.theme.GlassPrefs.solid =
             getSharedPreferences("ui_prefs", MODE_PRIVATE).getBoolean("solid_surfaces", false)
 
+        pendingAppLink.value=savedInstanceState?.getString("app_link")
         pendingJamInvite.value = savedInstanceState?.getString("jam_invite")
         // Check intent immediately
         handlePlayerIntent(intent)
@@ -246,7 +248,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(inviteToken, accountState.stage) {
                     if (inviteToken != null && accountState.stage == AuthStage.SIGNED_OUT) {
                         pendingJamInvite.value=null
-                        startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(`in`.synthora.musicbox.network.Backend.baseUrl + "/jam-invite/" + inviteToken)))
+                        openWebsite(`in`.synthora.musicbox.network.Backend.baseUrl + "/jam-invite/" + inviteToken)
                     }
                 }
                 val joiningState by jamViewModel.state.collectAsStateWithLifecycle()
@@ -332,6 +334,26 @@ class MainActivity : ComponentActivity() {
                     ViewModelProvider(this@MainActivity)
                 }
 
+                val incomingLink=pendingAppLink.value
+                LaunchedEffect(incomingLink) {
+                    val link=incomingLink?.let{`in`.synthora.musicbox.network.appLink(it,`in`.synthora.musicbox.network.Backend.baseUrl)} ?: return@LaunchedEffect
+                    pendingAppLink.value=null
+                    when(link.route) {
+                        "song" -> {musicViewModel.playYoutubeLink(`in`.synthora.musicbox.network.YoutubeLink(videoId=link.id));showPlayerOnLaunch.value=true}
+                        "playlist" -> {
+                            val item=`in`.synthora.musicbox.network.BrowseParser.item(kotlinx.serialization.json.buildJsonObject {
+                                put("id",kotlinx.serialization.json.JsonPrimitive(link.id));put("playlist_id",kotlinx.serialization.json.JsonPrimitive(link.id));put("title",kotlinx.serialization.json.JsonPrimitive("Playlist"))
+                            },"playlist")
+                            activityViewModelProvider[PlaylistDetailViewModel::class.java].loadPlaylistDetails(item)
+                            navController.navigate("playlist/${link.id}")
+                        }
+                        "artist","album" -> navController.navigate("${link.route}/${link.id}")
+                        "account" -> navController.navigate("settings/account")
+                        "signup" -> account.openSignup()
+                        "forgot" -> account.openForgotPassword()
+                        "web","jam-room" -> openWebsite(if(link.route=="web")link.id else `in`.synthora.musicbox.network.Backend.baseUrl+"/jam-room/")
+                    }
+                }
                 val context = LocalContext.current
                 var showPlayerModal by remember { mutableStateOf(false) }
                 LaunchedEffect(inviteToken){if(inviteToken!=null)showPlayerModal=false}
@@ -925,15 +947,25 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString("jam_invite", pendingJamInvite.value)
+        outState.putString("app_link",pendingAppLink.value)
         super.onSaveInstanceState(outState)
     }
 
+    private fun openWebsite(url:String) {
+        val probe=Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://example.org"))
+        val browsers=packageManager.queryIntentActivities(probe,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        val preferred=packageManager.resolveActivity(probe,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+        val selected=browsers.firstOrNull{it.activityInfo.packageName==preferred} ?: browsers.firstOrNull{it.activityInfo.packageName!=packageName}
+        if(selected!=null)startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse(url)).setPackage(selected.activityInfo.packageName))
+        else Toast.makeText(this,"Install a browser to open this account page",Toast.LENGTH_LONG).show()
+    }
+
     private fun handlePlayerIntent(intent: Intent?) {
-        intent?.data?.toString()?.let { url ->
-            `in`.synthora.musicbox.viewmodels.jamInviteToken(url, `in`.synthora.musicbox.network.Backend.baseUrl)?.let {
-                pendingJamInvite.value=it
-                intent.data=null
-            }
+        val incoming=if(intent?.action==Intent.ACTION_SEND)intent.getStringExtra(Intent.EXTRA_TEXT) else intent?.data?.toString()
+        incoming?.let { text ->
+            val url=Regex("""https?://\S+""").find(text)?.value ?: text
+            val link=`in`.synthora.musicbox.network.appLink(url,`in`.synthora.musicbox.network.Backend.baseUrl)
+            if(link!=null){if(link.route=="jam")pendingJamInvite.value=link.id else pendingAppLink.value=url;intent?.data=null;intent?.removeExtra(Intent.EXTRA_TEXT)}
         }
         if (intent?.getBooleanExtra(`in`.synthora.musicbox.services.DownloadService.OPEN_DOWNLOADS, false) == true) {
             showPlayerOnLaunch.value = false
