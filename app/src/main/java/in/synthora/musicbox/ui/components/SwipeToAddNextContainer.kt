@@ -43,13 +43,13 @@ fun SwipeToAddNextContainer(onAddNext: () -> Unit, onAddToQueue: () -> Unit,
 
 @Composable
 internal fun SwipeToRemoveQueueRow(enabled: Boolean, onRemove: () -> Unit,
-    modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    DirectionalRowSwipe(if (enabled) onRemove else null, null, modifier, removing = true, content = content)
+    modifier: Modifier = Modifier, background:(@Composable ()->Unit)?=null, content: @Composable () -> Unit) {
+    DirectionalRowSwipe(if (enabled) onRemove else null, null, modifier, removing = true, background=background,content = content)
 }
 
 @Composable
 private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
-    modifier: Modifier, removing: Boolean, content: @Composable () -> Unit) {
+    modifier: Modifier, removing: Boolean, background:(@Composable ()->Unit)?=null, content: @Composable () -> Unit) {
     val left by rememberUpdatedState(onLeft)
     val right by rememberUpdatedState(onRight)
     val haptic = rememberJukeHaptics()
@@ -122,6 +122,9 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                 Text(if (removing) "Remove from queue" else if (positive) "Add to queue" else "Play next")
             }
         }
-        Box(Modifier.fillMaxWidth().graphicsLayer { translationX = offset }.background(rowBackground)) { content() }
+        Box(Modifier.fillMaxWidth().graphicsLayer { translationX = offset }.background(rowBackground)) {
+            if(background!=null)Box(Modifier.matchParentSize()){background()}
+            content()
+        }
     }
 }

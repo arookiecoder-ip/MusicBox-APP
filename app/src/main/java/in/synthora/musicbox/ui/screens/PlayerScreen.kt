@@ -494,7 +494,7 @@ fun PlayerScreen(
         JUKETheme(darkTheme=true) { ModalBottomSheet(
             onDismissRequest = { showOutputSheet = false },
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded=true),
-            containerColor=MaterialTheme.colorScheme.surfaceContainerHigh,tonalElevation=0.dp
+            containerColor=MaterialTheme.colorScheme.surfaceContainerHigh,tonalElevation=0.dp,shape=androidx.compose.ui.graphics.RectangleShape
         ) {
             OutputPickerContent(
                 isAlexa = isAlexa,

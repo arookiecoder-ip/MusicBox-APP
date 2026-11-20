@@ -38,6 +38,11 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.LinkOff
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -452,20 +457,26 @@ fun AccountStatusCard(state: AccountUiState, account: AccountViewModel) {
     managing?.let { provider ->
         GlassAlertDialog(
             onDismissRequest = { managing = null },
-            title = { Text(if (provider == "amazon") "Amazon connection" else "YouTube Music connection") },
+            shape=RoundedCornerShape(12.dp),
+            title = {Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                Text(if (provider == "amazon") "Amazon connection" else "YouTube Music connection",Modifier.weight(1f))
+                IconButton(onClick={managing=null}){Icon(Icons.Default.Close,"Close connection options")}
+            }},
             text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Choose an action for this connection.")
                 androidx.compose.material3.Button(onClick = {
                     managing = null
                     if (provider == "amazon") account.connectAmazon() else account.connectYouTube()
-                }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("Change account") }
+                }, enabled = !state.busy, shape=RectangleShape,modifier = Modifier.fillMaxWidth().heightIn(min=52.dp),
+                    colors=androidx.compose.material3.ButtonDefaults.buttonColors(containerColor=MaterialTheme.colorScheme.primaryContainer,contentColor=MaterialTheme.colorScheme.onPrimaryContainer)) {
+                    Icon(Icons.Default.Person,null);Text("Change account",Modifier.weight(1f).padding(start=12.dp))
+                }
                 androidx.compose.material3.OutlinedButton(
                     onClick = { managing = null; account.disconnectProvider(provider) },
-                    enabled = !state.busy, modifier = Modifier.fillMaxWidth()
-                ) { Text("Disconnect", color = MaterialTheme.colorScheme.error) }
-                TextButton(onClick = { managing = null }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                    enabled = !state.busy, shape=RectangleShape,modifier = Modifier.fillMaxWidth().heightIn(min=52.dp)
+                ) {Icon(Icons.Default.LinkOff,null,tint=MaterialTheme.colorScheme.error);Text("Disconnect",Modifier.weight(1f).padding(start=12.dp), color = MaterialTheme.colorScheme.error)}
             } },
-            confirmButton = {}
+            confirmButton = {TextButton(onClick={managing=null}){Text("Cancel")}}
 
         )
     }

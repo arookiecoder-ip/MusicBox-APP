@@ -1,6 +1,12 @@
 package `in`.synthora.musicbox
 
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
@@ -29,6 +35,14 @@ import org.junit.Test
 /** Exercise native account screens without sending credentials or changing remote accounts. */
 class AccountUiRegressionTest {
     @get:Rule val compose = createComposeRule()
+    private fun screenshot(name:String) {
+        compose.waitForIdle()
+        val instrumentation=InstrumentationRegistry.getInstrumentation()
+        val directory=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
+        val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        java.io.File(directory,"account-$name.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+        bitmap.recycle()
+    }
     private fun account() = AccountViewModel(
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
     )
@@ -111,13 +125,70 @@ class AccountUiRegressionTest {
             ), {}) }
         }
         compose.onAllNodesWithText("Earlier email action completed").assertCountEquals(0)
-        compose.onNodeWithText("Copy account ID").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Copy account ID").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("stable-account-id").assertIsDisplayed()
         compose.onNodeWithText("Set up authenticator").performScrollTo().performClick()
         compose.onNodeWithText("Send code").assertIsDisplayed()
         compose.onAllNodesWithText("Verification code").assertCountEquals(0)
         compose.onAllNodesWithText("Code expires", substring = true).assertCountEquals(0)
         compose.onAllNodesWithText("Resend in", substring = true).assertCountEquals(0)
+    }
+
+    @Test fun passwordIdentityDialogShowsSendThenOnlyOtpAndVerify() {
+        val account=account()
+        val profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+            verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+            sessions=emptyList(),providers=emptyList(),minPasswordLength=10)
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.SIGNED_IN,profile=profile))
+        compose.setContent{JUKETheme(darkTheme=true){AccountSettingsScreen(account,state,{})}}
+        compose.onAllNodesWithText("User").assertCountEquals(0)
+        compose.onAllNodesWithText("Copy account ID").assertCountEquals(0)
+        screenshot("overview")
+        compose.onAllNodesWithText("Change")[1].performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.onAllNodesWithText("Verify").assertCountEquals(0)
+        screenshot("identity-send-code")
+        compose.runOnIdle{state=state.copy(codeDeliveries=mapOf("reset" to AccountCodeDelivery(System.currentTimeMillis()+600000,0)))}
+        compose.onNodeWithText("Verification code").assertIsDisplayed()
+        compose.onAllNodesWithText("Send code").assertCountEquals(0)
+        compose.onNodeWithText("Verify").assertIsNotEnabled()
+        screenshot("identity-otp")
+        compose.onNodeWithText("Verification code").performTextInput("123456")
+        compose.onNodeWithText("Verify").assertIsEnabled()
+    }
+    @Test fun emailIdentityUsesTheSameSeparatedDeliveryAndVerificationSteps() {
+        val account=account()
+        val profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+            verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+            sessions=emptyList(),providers=emptyList(),minPasswordLength=10)
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.SIGNED_IN,profile=profile))
+        compose.setContent{JUKETheme(darkTheme=true){AccountSettingsScreen(account,state,{})}}
+        compose.onAllNodesWithText("Change")[0].performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.runOnIdle{state=state.copy(codeDeliveries=mapOf("email-change" to AccountCodeDelivery(System.currentTimeMillis()+600000,0)))}
+        compose.onNodeWithText("Verification code").assertIsDisplayed()
+        compose.onNodeWithText("Verify").assertIsDisplayed()
+        compose.onAllNodesWithText("Send code").assertCountEquals(0)
+    }
+    @Test fun providerManagementOffersDistinctActionsAndDismissesWithoutDisconnecting() {
+        val account=account()
+        compose.setContent {JUKETheme(darkTheme=true) {
+            `in`.synthora.musicbox.ui.screens.AccountStatusCard(
+                AccountUiState(stage=AuthStage.SIGNED_IN,status=AccountStatus(amazonConnected=true,youtubeLibrary=true,alexaAccessEnabled=true)),account)
+        }}
+        compose.onAllNodesWithText("Manage")[0].performClick()
+        compose.onNodeWithText("Amazon connection").assertIsDisplayed()
+        compose.onNodeWithText("Change account").assertIsDisplayed()
+        compose.onNodeWithText("Disconnect").assertIsDisplayed()
+        screenshot("amazon-management")
+        compose.onNodeWithContentDescription("Close connection options").performClick()
+        compose.onAllNodesWithText("Manage")[1].performClick()
+        compose.onNodeWithText("YouTube Music connection").assertIsDisplayed()
+        screenshot("youtube-management")
+        compose.onNodeWithText("Cancel").performClick()
+        compose.onAllNodesWithText("Manage").assertCountEquals(2)
     }
 
 }

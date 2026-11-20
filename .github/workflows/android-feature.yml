@@ -331,3 +331,44 @@ jobs:
             interaction-window.txt
             interaction-system-logcat.txt
             interaction-service-state.txt
+
+  stable-install:
+    if: ${{ inputs.stable_release == true }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [33, 36]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release
+          path: candidate
+      - name: Verify downloaded stable artifact and fetch the previous release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd candidate && sha256sum --check SHA256SUMS.txt)
+          gh release download v2.5.13 --repo "$GITHUB_REPOSITORY" --pattern 'Music-Box-2.5.13.apk' --pattern SHA256SUMS.txt --dir baseline
+          (cd baseline && sha256sum --check SHA256SUMS.txt)
+      - name: Enable emulator virtualization
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, upgrade and cold-launch the actual stable APK
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          script: bash scripts/smoke_install_apk.sh baseline/*.apk candidate/*.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stable-install-api-${{ matrix.api }}
+          path: install-results/

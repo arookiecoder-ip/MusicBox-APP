@@ -5,6 +5,8 @@ import `in`.synthora.musicbox.ui.components.stableNavigationBarsPadding
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -150,8 +152,10 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
     val accent by animateColorAsState(colors?.primary?.let { lerp(it, Color.White, .65f) }
         ?: MaterialTheme.colorScheme.primary, tween(700), label = "Queue accent")
     val palette = remember(colors) { colors?.let { listOf(it.primary, it.secondary, it.tertiary) }.orEmpty() }
-    Box(Modifier.fillMaxSize().testTag("Queue palette background")) {
-    `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(palette, Modifier.matchParentSize(), baseColor = Color(0xFF101015))
+    val ambient=remember{`in`.synthora.musicbox.ui.components.AmbientBackdropState()}
+    var sheetTop by remember{mutableFloatStateOf(0f)}
+    Box(Modifier.fillMaxSize().testTag("Queue palette background").onGloballyPositioned{sheetTop=it.positionInRoot().y}) {
+    `in`.synthora.musicbox.ui.components.AnimatedAmbientBackdrop(palette, Modifier.matchParentSize(), baseColor = Color(0xFF101015),state=ambient)
     Column(Modifier.fillMaxSize().stableNavigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -221,6 +225,7 @@ fun QueueBottomSheetContent(currentTrack: Track, queue: List<Track>, queueIndex:
                     exit = androidx.compose.animation.shrinkVertically(animationSpec = androidx.compose.animation.core.tween(250), shrinkTowards = Alignment.Top)) {
                 `in`.synthora.musicbox.ui.components.SwipeToRemoveQueueRow(
                     enabled = editable && !active && !dragging,
+                    background={`in`.synthora.musicbox.ui.components.AmbientRowBackground(ambient,sheetTop)},
                     onRemove = {
                         if (!hidden) {
                             hidden = true
@@ -269,7 +274,7 @@ private fun QueueWebRow(track: Track, number: Int, active: Boolean, playing: Boo
         Box(Modifier.size(40.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
             key(track.uuid, track.ytVideoId, track.thumbnailUri) {
                 `in`.synthora.musicbox.ui.components.ListArtwork(track.thumbnailUri, 40.dp,
-                    Modifier.fillMaxSize().testTag("Queue artwork ${track.uuid}"))
+                    Modifier.fillMaxSize().testTag("Queue artwork ${track.uuid}"),videoId=track.ytVideoId)
             }
             if (active) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) {
                 QueuePlayingBars(playing, accent, Modifier.size(24.dp).testTag("Queue playing bars"))

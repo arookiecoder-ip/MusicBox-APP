@@ -1502,6 +1502,7 @@ class PlaybackService : MediaLibraryService() {
                 delay(5_000)
                 try {
                     if (player.isPlaying) saveResumptionState()
+                    if (`in`.synthora.musicbox.viewmodels.JamSession.active) {updatePreloader();continue}
                     if (resumeCommands.wantsPlay && player.playWhenReady && PhonePlaybackOwnership.token.isBlank() &&
                         `in`.synthora.musicbox.network.NetworkFeedback.online.value) resumeFromSession(explicit=false)
                     publishResumedQueue()
@@ -1595,7 +1596,16 @@ class PlaybackService : MediaLibraryService() {
         val sessionPlayer = ResumableSessionPlayer(player, { resumeFromSession() },
             onPause = { callGuard.explicitPause(); cancelSessionResume(); player.pause() },
             onStop = { callGuard.explicitPause(); saveResumptionState(); cancelSessionResume(); player.stop() })
-        mediaSession = MediaLibrarySession.Builder(this, sessionPlayer, MediaLibrarySessionCallback())
+        mediaSession = MediaLibrarySession.Builder(this, JamSessionPlayer(sessionPlayer) { action,value ->
+            val session=mediaSession
+            val controller=session?.controllerForCurrentRequest
+            val shared=`in`.synthora.musicbox.viewmodels.JamSession.active && controller!=null &&
+                (controller.uid!=android.os.Process.myUid() || session?.isMediaNotificationController(controller)==true)
+            if(shared) `in`.synthora.musicbox.viewmodels.JamSession.command(action,kotlinx.serialization.json.buildJsonObject {
+                if(value!=null)put(if(action=="select")"index" else "position_ms",kotlinx.serialization.json.JsonPrimitive(value))
+            })
+            shared
+        }, MediaLibrarySessionCallback())
             .apply {
                 sessionActivityPendingIntent?.let { setSessionActivity(it) }
             }
@@ -1626,6 +1636,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active && player.playWhenReady) {
+            super.onTaskRemoved(rootIntent);return
+        }
         PhonePlaybackOwnership.taskDismissed()
         saveResumptionState()
         cancelSessionResume()
@@ -1912,20 +1925,6 @@ class PlaybackService : MediaLibraryService() {
             controller: MediaSession.ControllerInfo,
             @Player.Command playerCommand: Int
         ): Int {
-            if (`in`.synthora.musicbox.viewmodels.JamSession.active && controller.uid != android.os.Process.myUid()) {
-                val action=when(playerCommand) {
-                    Player.COMMAND_PLAY_PAUSE -> if(`in`.synthora.musicbox.viewmodels.JamSession.state.value.playback["playing"].toString()=="true") "pause" else "play"
-                    Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> "next"
-                    Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> "previous"
-                    Player.COMMAND_SET_REPEAT_MODE -> "repeat"
-                    Player.COMMAND_SET_SHUFFLE_MODE -> "shuffle"
-                    else -> null
-                }
-                if(action != null) {
-                    `in`.synthora.musicbox.viewmodels.JamSession.command(action)
-                    return androidx.media3.session.SessionError.ERROR_NOT_SUPPORTED
-                }
-            }
             rememberManualTrackChangeRequest(playerCommand)
             if (playerCommand == Player.COMMAND_PLAY_PAUSE) {
                 cancelledMedia3Resume = false
@@ -1990,9 +1989,6 @@ class PlaybackService : MediaLibraryService() {
             controllerInfo: MediaSession.ControllerInfo,
             playerCommands: Player.Commands
         ) {
-            if (`in`.synthora.musicbox.viewmodels.JamSession.active && controllerInfo.uid != android.os.Process.myUid() && playerCommands.contains(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) {
-                `in`.synthora.musicbox.viewmodels.JamSession.command("seek", kotlinx.serialization.json.buildJsonObject { put("position_ms", kotlinx.serialization.json.JsonPrimitive(player.currentPosition.coerceAtLeast(0))) })
-            }
             maybeStartPlaybackAfterManualTrackChange()
             super.onPlayerInteractionFinished(session, controllerInfo, playerCommands)
         }

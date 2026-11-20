@@ -32,7 +32,8 @@ class LocalJamProtocolTest {
         assertFalse(matches(JsonObject(p-"position")));assertFalse(matches(JsonObject(p+mapOf("position" to JsonPrimitive(-1)))))
     }
     @Test fun driftCorrectionIsBoundedAndIgnoresJitterStallsAndTrackBoundaries() {
-        assertNull(LocalJamProtocol.correction(1000,1050,20,100000))
+        assertNull(LocalJamProtocol.correction(1000,1010,20,100000))
+        assertEquals(1070L,LocalJamProtocol.correction(1000,1060,20,100000))
         assertEquals(1250L,LocalJamProtocol.correction(1000,1500,20,100000))
         assertEquals(750L,LocalJamProtocol.correction(1000,500,20,100000))
         assertNull(LocalJamProtocol.correction(1000,1500,201,100000))

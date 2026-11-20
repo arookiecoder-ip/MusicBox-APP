@@ -80,7 +80,7 @@ internal fun JamSettingsContent(
     }
     if(showParticipants && state.active) {
         ModalBottomSheet(onDismissRequest={showParticipants=false},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),
-            containerColor=`in`.synthora.musicbox.ui.theme.glassSheetColor(),tonalElevation=0.dp) {
+            containerColor=`in`.synthora.musicbox.ui.theme.glassSheetColor(),tonalElevation=0.dp,shape=androidx.compose.ui.graphics.RectangleShape) {
             Column(Modifier.fillMaxWidth().heightIn(max=560.dp).navigationBarsPadding().padding(horizontal=24.dp)) {
                 Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {

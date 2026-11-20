@@ -14,11 +14,13 @@ import `in`.synthora.musicbox.network.rowArtworkUrl
 
 /** Small rows never fetch/decode full hero artwork or animate each newly visible cover. */
 @Composable
-fun ListArtwork(url: String?, size: Dp, modifier: Modifier = Modifier) {
+fun ListArtwork(url: String?, size: Dp, modifier: Modifier = Modifier, videoId:String?=null) {
     val context = LocalContext.current
     val pixels = with(LocalDensity.current) { size.roundToPx() }.coerceAtLeast(1)
-    val request = remember(url, pixels, context) {
-        ImageRequest.Builder(context).data(rowArtworkUrl(url.orEmpty(), pixels))
+    val request = remember(url, pixels, context,videoId) {
+        val source=url?.takeIf {runCatching{java.net.URI(it).let{uri->uri.scheme in setOf("https","http","content","file","android.resource") || (uri.scheme==null && it.startsWith("/"))}}.getOrDefault(false)}
+            ?: videoId?.takeIf{it.matches(Regex("[A-Za-z0-9_-]{11}"))}?.let{"https://i.ytimg.com/vi/$it/hqdefault.jpg"}.orEmpty()
+        ImageRequest.Builder(context).data(rowArtworkUrl(source, pixels))
             .size(pixels).precision(Precision.INEXACT).crossfade(false).build()
     }
     AsyncImage(request, null, modifier, contentScale = ContentScale.Crop)
