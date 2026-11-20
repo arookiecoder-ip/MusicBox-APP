@@ -159,7 +159,6 @@ fun LyricsOverlay(
 
         if (syncedLyrics != null) {
             val lyricLines by produceState<List<`in`.synthora.musicbox.ui.screens.LyricLine>>(emptyList(), syncedLyrics, localOffsetMs) {
-                value = emptyList()
                 value = kotlinx.coroutines.withContext(`in`.synthora.musicbox.services.PresentationDispatchers.lyrics) {
                     parseSyncedLyrics(syncedLyrics, localOffsetMs.toLong())
                 }

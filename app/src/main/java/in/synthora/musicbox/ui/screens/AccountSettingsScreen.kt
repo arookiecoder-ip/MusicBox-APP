@@ -32,6 +32,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.material3.TextButton
@@ -119,7 +120,8 @@ fun AccountSettingsScreen(
             IconButton(onClick = onNavigateBack) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
-            Text("Account", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("Account",Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            if(state.busy)ProcessingAccountAction()
         }
 
         if (profile == null) {
@@ -333,8 +335,19 @@ private fun AccountActionRow(title: String, detail: String, action: String, onCl
 }
 
 @Composable
+private fun ProcessingAccountAction() {
+    val animation=androidx.compose.animation.core.rememberInfiniteTransition(label="Account request")
+    val opacity by animation.animateFloat(initialValue=.45f,targetValue=1f,
+        animationSpec=androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(650),androidx.compose.animation.core.RepeatMode.Reverse),label="Processing text")
+    Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp)
+        Text("Processing…",Modifier.alpha(opacity),style=MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
 private fun DialogError(state: AccountUiState) {
-    if(state.busy)Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)){CircularProgressIndicator(Modifier.size(16.dp),strokeWidth=2.dp);Text("Processing…",style=MaterialTheme.typography.bodySmall)}
+    if(state.busy)ProcessingAccountAction()
     state.error?.let {
         Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
     }

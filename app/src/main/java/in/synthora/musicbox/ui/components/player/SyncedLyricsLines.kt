@@ -47,7 +47,7 @@ fun SyncedLyricsLines(lines: List<LyricLine>, position: Long, onSeek: (Long) -> 
         }
     }
     LaunchedEffect(lines) {
-        snapshotFlow { Triple(currentActive, dragged, list.layoutInfo.viewportEndOffset - list.layoutInfo.viewportStartOffset) }.collectLatest { (index, dragging, _) ->
+        snapshotFlow { Triple(currentActive, dragged, list.layoutInfo.viewportSize) }.collectLatest { (index, dragging, _) ->
             if (!dragging) { center(index) }
         }
     }
