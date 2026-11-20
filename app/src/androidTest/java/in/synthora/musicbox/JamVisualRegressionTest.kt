@@ -54,11 +54,12 @@ class JamVisualRegressionTest {
         compose.waitForIdle()
         val node=compose.onNodeWithTag("Swipe canvas")
         val before=node.captureToImage().toPixelMap()
-        node.performTouchInput {down(center);moveBy(Offset(-48f,0f))}
+        val distance=before.width/4
+        node.performTouchInput {down(center);moveBy(Offset(-distance.toFloat(),0f))}
         val moved=node.captureToImage().toPixelMap()
         val y=moved.height-4
         val x=20
-        val expected=before[x+48,y]
+        val expected=before[x+distance,y]
         val actual=moved[x,y]
         assertEquals(expected.red,actual.red,.04f)
         assertEquals(expected.green,actual.green,.04f)
