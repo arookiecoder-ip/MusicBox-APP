@@ -263,6 +263,9 @@ open class JamClient internal constructor(
             }
         }
     }
+    fun setLyricsOffset(entry:String,value:Long) {
+        _state.update{if(it.active && it.playback.text("entry_id")==entry)it.copy(lyricsControlEntry=entry,lyricsControlOffsetMs=value) else it}
+    }
     fun command(action: String, fields: JsonObject = JsonObject(emptyMap())) {
         if (!active) return
         if(action=="configure" && _state.value.busy)return

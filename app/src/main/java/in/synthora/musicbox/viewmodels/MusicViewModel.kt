@@ -435,8 +435,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var hasStartedDeferredStartupWork = false
 
     fun saveLyricsOffset(track: Track, offsetMs: Long) {
+        if(JamSession.active && JamSession.state.value.playback["targets"].objectOrEmpty().values.any{it.jsonPrimitive.content.startsWith("alexa:")}) {
+            JamSession.setLyricsOffset(track.uuid,offsetMs);return
+        }
         if(isAlexa) {echo.setLyricsControlOffset(track.uuid,offsetMs);return}
-        if (isAlexa || isRemotePhone) {
+        if (isAlexa || isRemotePhone || JamSession.active) {
             val videoId = track.ytVideoId ?: return
             _echoLyrics.update { it + (videoId to (it[videoId] ?: track).copy(lyricsOffsetMs = offsetMs)) }
             return
@@ -2847,7 +2850,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshLyrics(track: Track) {
         if (lyricsRefreshJobs[track.uuid]?.isActive == true) return
-        val isEcho = isAlexa || isRemotePhone
+        val isEcho = isAlexa || isRemotePhone || JamSession.active
         lyricsRefreshJobs[track.uuid] = viewModelScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
