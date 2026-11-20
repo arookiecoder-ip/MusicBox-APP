@@ -83,10 +83,7 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: |
-            trap 'adb pull /sdcard/Android/data/in.synthora.musicbox/files/jam-screenshots jam-screenshots || true' EXIT
-            sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.injected.androidTest.leaveApksInstalledAfterRun=true -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.JamManagementUiTest,in.synthora.musicbox.JamVisualRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.RemoteNotificationLifecycleTest --no-daemon
-            adb pull /sdcard/Android/data/in.synthora.musicbox/files/jam-screenshots jam-screenshots
+          script: bash scripts/run_jam_ui_regressions.sh
 
       - name: Upload Jam device UI screenshots
         if: always()
