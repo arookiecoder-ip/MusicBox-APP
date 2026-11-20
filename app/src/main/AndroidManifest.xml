@@ -46,7 +46,6 @@
                 <data android:host="${jamLinkHost}" />
                 <data android:pathPrefix="/j/" />
                 <data android:pathPrefix="/jam/" />
-                <data android:pathPrefix="/jam-invite/" />
             </intent-filter>
 
             <intent-filter>
