@@ -450,6 +450,7 @@ class RemotePlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
     override fun onTaskRemoved(rootIntent: Intent?) {
+        if (`in`.synthora.musicbox.viewmodels.JamSession.active && remote.snapshot.playing) {super.onTaskRemoved(rootIntent);return}
         RemoteNotificationDiagnostics.record("task_removed")
         MobileDeviceConnection.stop()
         PlaybackCoordinator.dismiss(this)

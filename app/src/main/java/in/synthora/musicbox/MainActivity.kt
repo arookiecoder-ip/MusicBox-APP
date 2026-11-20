@@ -249,11 +249,15 @@ class MainActivity : ComponentActivity() {
                         startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(`in`.synthora.musicbox.network.Backend.baseUrl + "/jam-invite/" + inviteToken)))
                     }
                 }
+                val joiningState by jamViewModel.state.collectAsStateWithLifecycle()
+                LaunchedEffect(joiningState.active,joiningState.busy,joiningState.error) {
+                    if(inviteToken!=null && joiningState.active && joiningState.url.endsWith("/"+inviteToken) && !joiningState.busy && joiningState.error==null)pendingJamInvite.value=null
+                }
                 if (inviteToken != null && accountState.stage == AuthStage.SIGNED_IN) {
                     GlassAlertDialog(onDismissRequest={pendingJamInvite.value=null},
                         title={Text("Join this Jam?")},
-                        text={Text("Share one playback control and queue. The host can select your current audio output for the group. Likes and playlist saves stay in your account.")},
-                        confirmButton={TextButton(onClick={jamViewModel.join(inviteToken); pendingJamInvite.value=null}){Text("Join Jam")}},
+                        text={Column {Text("Your personal playback will pause. The host keeps playing, and you join the shared queue.");joiningState.error?.let {Text(it,color=MaterialTheme.colorScheme.error)}}},
+                        confirmButton={TextButton(onClick={jamViewModel.join(inviteToken)},enabled=!joiningState.busy){Text(if(joiningState.busy)"Joining…" else "Join Jam")}},
                         dismissButton={TextButton(onClick={pendingJamInvite.value=null}){Text("Cancel")}})
                 }
                 accountState.browserUrl?.let { url ->
@@ -330,6 +334,7 @@ class MainActivity : ComponentActivity() {
 
                 val context = LocalContext.current
                 var showPlayerModal by remember { mutableStateOf(false) }
+                LaunchedEffect(inviteToken){if(inviteToken!=null)showPlayerModal=false}
                 var showProfile by remember { mutableStateOf(false) }
                 val profileConfig = androidx.compose.ui.platform.LocalConfiguration.current
                 val tabletProfilePopup = profileConfig.smallestScreenWidthDp >= 600 &&

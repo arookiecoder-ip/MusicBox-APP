@@ -35,4 +35,7 @@ class JamSnapshotTest {
         mergeJamPlayback(kotlinx.serialization.json.Json.parseToJsonElement("""{"queue_epoch":"room-A","queue":[]}""").jsonObject,
             kotlinx.serialization.json.Json.parseToJsonElement("""{"queue_epoch":"room-B"}""").jsonObject)
     }
+    @Test fun nativeInviteLandingPathsAreRecognizedToo() {
+        assertEquals("abcdefghijk",jamInviteToken("https://alexa.synthora.in/jam-invite/abcdefghijk","https://alexa.synthora.in"))
+    }
 }

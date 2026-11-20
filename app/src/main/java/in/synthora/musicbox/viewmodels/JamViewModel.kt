@@ -31,7 +31,7 @@ internal fun jamInviteToken(url: String, base: String): String? = runCatching {
     if (uri.scheme != "https" || !uri.host.equals(expected.host, ignoreCase=true) ||
         (if(uri.port==-1) 443 else uri.port) != (if(expected.port==-1) 443 else expected.port) || uri.userInfo != null) return null
     val parts=uri.rawPath.split('/').filter { it.isNotEmpty() }
-    parts.takeIf { it.size == 2 && it[0] in setOf("j", "jam") }?.get(1)
+    parts.takeIf { it.size == 2 && it[0] in setOf("j", "jam", "jam-invite") }?.get(1)
         ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,128}")) }
 }.getOrNull()
 
@@ -48,7 +48,8 @@ open class JamClient internal constructor(
     private val write: suspend (String, JsonObject) -> JsonElement,
     private val deviceId: () -> String,
     private val clock: () -> Long,
-    private val feedback: (String) -> Unit
+    private val feedback: (String) -> Unit,
+    private val foreground: ()->Boolean = {true}
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(JamUiState())
@@ -162,7 +163,7 @@ open class JamClient internal constructor(
         polling = scope.launch {
             while (isActive && active) {
                 refreshNow()
-                delay(if (_state.value.playback.flag("playing")) 300 else 1_000)
+                delay(if (_state.value.playback.flag("playing")) {if(foreground())300 else 1000} else 5000)
             }
         }
     }
@@ -354,7 +355,7 @@ open class JamClient internal constructor(
 object JamSession : JamClient(
     CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate),
     {path,query->Backend.get(path,query)}, {path,body->Backend.post(path,body)},
-    {PhonePlaybackOwnership.ownerId}, {android.os.SystemClock.elapsedRealtime()}, {NetworkFeedback.notify(it)}
+    {PhonePlaybackOwnership.ownerId}, {android.os.SystemClock.elapsedRealtime()}, {NetworkFeedback.notify(it)}, {NetworkFeedback.isForeground}
 )
 
 class JamViewModel : ViewModel() {
@@ -364,7 +365,10 @@ class JamViewModel : ViewModel() {
     fun start() = JamSession.start()
     fun stop() = JamSession.action("/alexa/jam/stop/")
     fun leave() = JamSession.action("/api/jam/leave/")
-    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject { put("device_id", PhonePlaybackOwnership.ownerId) })
+    fun join(token: String) = JamSession.action("/j/$token", buildJsonObject {
+        put("device_id", PhonePlaybackOwnership.ownerId);put("name",android.os.Build.MODEL)
+        put("devices",JamSession.outputDevices());put("listen",true)
+    })
     fun remove(id: String) = JamSession.action("/alexa/jam/remove/", buildJsonObject { put("member_id", id) })
     fun selectDevice(mode:String, selected:List<String>, output:String, target:String) = JamSession.command("configure",buildJsonObject {
         put("mode",mode);put("selected",JsonArray(selected.map(::JsonPrimitive)))

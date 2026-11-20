@@ -1,6 +1,12 @@
 package `in`.synthora.musicbox
 
 import android.app.Application
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.test.assertIsDisplayed
@@ -111,7 +117,7 @@ class AccountUiRegressionTest {
             ), {}) }
         }
         compose.onAllNodesWithText("Earlier email action completed").assertCountEquals(0)
-        compose.onNodeWithText("Copy account ID").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithContentDescription("Copy account ID").performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("stable-account-id").assertIsDisplayed()
         compose.onNodeWithText("Set up authenticator").performScrollTo().performClick()
         compose.onNodeWithText("Send code").assertIsDisplayed()
@@ -120,4 +126,39 @@ class AccountUiRegressionTest {
         compose.onAllNodesWithText("Resend in", substring = true).assertCountEquals(0)
     }
 
+    @Test fun passwordIdentityDialogShowsSendThenOnlyOtpAndVerify() {
+        val account=account()
+        val profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+            verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+            sessions=emptyList(),providers=emptyList(),minPasswordLength=10)
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.SIGNED_IN,profile=profile))
+        compose.setContent{JUKETheme(darkTheme=true){AccountSettingsScreen(account,state,{})}}
+        compose.onAllNodesWithText("User").assertCountEquals(0)
+        compose.onAllNodesWithText("Copy account ID").assertCountEquals(0)
+        compose.onAllNodesWithText("Change")[1].performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.onAllNodesWithText("Verify").assertCountEquals(0)
+        compose.runOnIdle{state=state.copy(codeDeliveries=mapOf("reset" to AccountCodeDelivery(System.currentTimeMillis()+600000,0)))}
+        compose.onNodeWithText("Verification code").assertIsDisplayed()
+        compose.onAllNodesWithText("Send code").assertCountEquals(0)
+        compose.onNodeWithText("Verify").assertIsNotEnabled()
+        compose.onNodeWithText("Verification code").performTextInput("123456")
+        compose.onNodeWithText("Verify").assertIsEnabled()
+    }
+    @Test fun emailIdentityUsesTheSameSeparatedDeliveryAndVerificationSteps() {
+        val account=account()
+        val profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+            verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+            sessions=emptyList(),providers=emptyList(),minPasswordLength=10)
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.SIGNED_IN,profile=profile))
+        compose.setContent{JUKETheme(darkTheme=true){AccountSettingsScreen(account,state,{})}}
+        compose.onAllNodesWithText("Change")[0].performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.runOnIdle{state=state.copy(codeDeliveries=mapOf("email-change" to AccountCodeDelivery(System.currentTimeMillis()+600000,0)))}
+        compose.onNodeWithText("Verification code").assertIsDisplayed()
+        compose.onNodeWithText("Verify").assertIsDisplayed()
+        compose.onAllNodesWithText("Send code").assertCountEquals(0)
+    }
 }

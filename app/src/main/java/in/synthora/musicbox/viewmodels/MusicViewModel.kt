@@ -304,7 +304,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var jamAppliedOutput = ""
     private var jamAppliedPlaying = false
     private var jamSeekRevision = -1L
+    private var jamRateCorrection:Job?=null
+    private var jamTimingIntent=""
+    private fun resetJamRate() {if(jamRateCorrection==null)return;jamRateCorrection?.cancel();jamRateCorrection=null;playbackManager.setJamPlaybackSpeed(1f)}
     private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean) {
+        val timingIntent=listOf(snapshot.text("entry_id"),snapshot.number("seek_revision"),snapshot.flag("playing")).joinToString(":")
+        if(!listen || timingIntent!=jamTimingIntent){resetJamRate();jamTimingIntent=timingIntent}
         if(listen) {
             if(jamOriginalOutput==null)jamOriginalOutput=_output.value
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback=true
@@ -814,8 +819,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         JamSession.localCorrection = { position ->
             if(JamSession.active && JamSession.state.value.listen && !isAlexa && !isRemotePhone &&
-                !jamApplying.value && playbackManager.isPlayingFlow.value && !playbackManager.isBufferingFlow.value)
-                playbackManager.seekTo(position)
+                !jamApplying.value && playbackManager.isPlayingFlow.value && !playbackManager.isBufferingFlow.value) {
+                resetJamRate()
+                val drift=position-playbackManager.getCurrentPosition()
+                val speed=1f+(drift/5000f).coerceIn(-.02f,.02f)
+                playbackManager.setJamPlaybackSpeed(speed)
+                jamRateCorrection=viewModelScope.launch {try{delay(5000)}finally{playbackManager.setJamPlaybackSpeed(1f)}}
+            }
         }
         JamSession.outputDevices = {
             JsonArray(listOf(buildJsonObject {put("id","phone");put("name",android.os.Build.MODEL);put("kind","phone");put("active",!isAlexa && !isRemotePhone);put("online",true)})+
@@ -1809,7 +1819,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startRadio(track: Track) {
-        if (JamSession.active) { JamSession.tracks("queue", listOf(track)); return }
+        if (JamSession.active) { JamSession.tracks("radio", listOf(track)); return }
         if (deferUntilPlaybackTargetReady { startRadio(track) }) return
         if (!isRemotePhone && uiState.value.currentTrack?.ytVideoId == track.ytVideoId && pendingPlayback.value == null) {
             startRadio()
@@ -1955,14 +1965,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Mix: replace the upcoming songs with a fresh radio from the current song. */
     fun startRadio() {
-        if (JamSession.active) {
-            val current=uiState.value.currentTrack ?: return
-            viewModelScope.launch {
-                try { JamSession.tracks("append", AlexaBackendApi.getRadio(requireNotNull(current.ytVideoId)).map { BrowseParser.item(kotlinx.serialization.json.Json.encodeToJsonElement(AlexaBackendApi.BackendTrack.serializer(), it).objectOrEmpty()).toTrack() }) }
-                catch(e: CancellationException) { throw e }
-                catch(e: Exception) { _messages.tryEmit(e.message ?: "Couldn't load radio") }
-            }; return
-        }
+        if (JamSession.active) {JamSession.command("radio");return}
         if (deferUntilPlaybackTargetReady { startRadio() }) return
         if (isRemotePhone) { uiState.value.currentTrack?.let { startRadio(it) }; return }
         val current = uiState.value.currentTrack ?: return

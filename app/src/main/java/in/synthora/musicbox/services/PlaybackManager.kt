@@ -729,6 +729,8 @@ class PlaybackManager private constructor(private val context: Context) {
         }
     }
 
+    fun setJamPlaybackSpeed(speed:Float) {controller?.setPlaybackSpeed(speed.coerceIn(.98f,1.02f))}
+
     fun seekTo(positionMs: Long) {
         val ctrl = controller ?: return
         val target = positionMs.coerceAtLeast(0)

@@ -43,7 +43,7 @@ internal object LocalJamProtocol {
         if(rtt !in 0..200 || local<0 || peer<0)return null
         val target=peer+rtt/2
         val drift=target-local
-        if(kotlin.math.abs(drift) !in 350..2000)return null
+        if(kotlin.math.abs(drift) !in 40..2000)return null
         val corrected=(local+drift.coerceIn(-250,250)).coerceAtLeast(0)
         if(duration>0 && corrected>=duration-500)return null
         return corrected

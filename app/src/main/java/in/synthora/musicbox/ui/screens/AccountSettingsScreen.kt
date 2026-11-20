@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -160,9 +161,6 @@ fun AccountSettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (profile.roleText.isNotBlank()) {
-                        Text(profile.roleText, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    }
                 }
             }
 
@@ -184,8 +182,10 @@ fun AccountSettingsScreen(
             }
 
             AccountSection("Account ID") {
-                Text(profile.id, style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { clipboard.setText(AnnotatedString(profile.id)) }) { Text("Copy account ID") }
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text(profile.id,modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                    IconButton(onClick={clipboard.setText(AnnotatedString(profile.id));haptic.click()}) {Icon(Icons.Default.ContentCopy,"Copy account ID")}
+                }
             }
 
             AccountSection("Email and password") {
@@ -212,7 +212,10 @@ fun AccountSettingsScreen(
                 if (profile.totpEnabled) {
                     TextButton(onClick = { dialog = AccountDialog.TOTP_BEGIN }, enabled = !state.busy) { Text("Change authenticator") }
                 }
-                TextButton(
+                androidx.compose.material3.FilledTonalButton(
+                    shape=RoundedCornerShape(6.dp),
+                    colors=ButtonDefaults.filledTonalButtonColors(containerColor=if(profile.totpEnabled)MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor=if(profile.totpEnabled)MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer),
                     onClick = {
                         if (state.totp != null) dialog = AccountDialog.TOTP_CONFIRM
                         else if (profile.totpEnabled) dialog = AccountDialog.TOTP_DISABLE
@@ -265,6 +268,7 @@ fun AccountSettingsScreen(
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Button(
+                    shape=RoundedCornerShape(6.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error, contentColor = MaterialTheme.colorScheme.onError),
                     onClick = { haptic.click(); dialog = AccountDialog.DELETE_WARNING },
                     enabled = !state.busy,
@@ -319,7 +323,7 @@ private fun AccountSection(
             title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.Bold,
-            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            color = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
         )
         Spacer(Modifier.height(16.dp))
         content()
@@ -334,7 +338,7 @@ private fun AccountActionRow(title: String, detail: String, action: String, onCl
             Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
-        androidx.compose.material3.OutlinedButton(onClick = onClick) { Text(action) }
+        androidx.compose.material3.OutlinedButton(onClick = onClick,shape=RoundedCornerShape(6.dp),colors=ButtonDefaults.outlinedButtonColors(contentColor=MaterialTheme.colorScheme.onSurface)) { Text(action) }
     }
 }
 
@@ -386,6 +390,24 @@ private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel,
 }
 
 @Composable
+private fun rememberIdentityDelivery(state:AccountUiState,scope:String):Boolean {
+    val expiry=state.codeDeliveries[scope]?.expiresAt ?: 0L
+    val initial=remember {expiry}
+    var expired by remember(expiry){mutableStateOf(expiry<=System.currentTimeMillis())}
+    LaunchedEffect(expiry){
+        val remaining=expiry-System.currentTimeMillis()
+        if(remaining>0){delay(remaining);expired=true}
+    }
+    return expiry!=initial && !expired
+}
+
+@Composable
+private fun IdentityOtpField(code:String,onCode:(String)->Unit) {
+    GlassTextField(code,{onCode(it.filter(Char::isDigit).take(6))},"Verification code",
+        keyboardOptions=androidx.compose.foundation.text.KeyboardOptions(keyboardType=KeyboardType.NumberPassword))
+}
+
+@Composable
 private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewModel, onDismiss: () -> Unit) {
     var current by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
@@ -393,15 +415,19 @@ private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewMode
     var confirm by remember { mutableStateOf("") }
     var verified by remember { mutableStateOf(false) }
     val mailbox = !state.profile?.email.isNullOrBlank()
+    val delivery=rememberIdentityDelivery(state,"reset")
     DismissOnAction(state, ACTION_PASSWORD, onDismiss)
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
         title = { Text(if (verified) "Choose your password" else "Verify your identity") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (verified) "Step 2 of 2" else "Step 1 of 2", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if(verified || !delivery)Text(if (verified) "Step 2 of 2" else "Step 1 of 2", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!verified) {
-                    if (mailbox) SecurityCodeFields(state, account, "reset", code, { code = it })
+                    if (mailbox) {
+                        if(delivery) IdentityOtpField(code){code=it}
+                        else Text("We'll send a verification code to ${state.profile?.email.orEmpty()}")
+                    }
                     else GlassTextField(current, { current = it }, "Current password", password = true)
                 } else {
                     Text("Use at least ${state.profile?.minPasswordLength ?: 10} characters.")
@@ -414,11 +440,15 @@ private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewMode
         confirmButton = {
             TextButton(onClick = {
                 if (!verified) {
-                    if (mailbox) account.verifySecurityCode("reset", code) { verified = true }
+                    if (mailbox && !delivery) account.sendPasswordResetCode()
+                    else if (mailbox) account.verifySecurityCode("reset", code) { verified = true }
                     else account.verifyIdentity(current) { verified = true }
                 } else if (mailbox) account.resetPasswordWithCode(code, password, confirm)
                 else account.changePassword(current, password, confirm)
-            }, enabled = !state.busy) { Text(if (verified) "Save password" else "Verify and continue") }
+            }, enabled = !state.busy && (verified || !mailbox || !delivery || code.length==6)) {
+                if(state.busy)CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp)
+                else Text(if(verified)"Save password" else if(mailbox && !delivery)"Send code" else "Verify")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
@@ -430,13 +460,17 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
     var password by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     var verified by remember { mutableStateOf(state.profile?.email.isNullOrBlank()) }
+    val delivery=rememberIdentityDelivery(state,"email-change")
     GlassAlertDialog(
         onDismissRequest = { if (!state.busy) onDismiss() },
-        title = { Text(if (verified) "New email address" else "Verify your current email") },
+        title = { Text(if (verified) "New email address" else "Verify your identity") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(if (verified) "Step 2 of 3" else "Step 1 of 3", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!verified) SecurityCodeFields(state, account, "reauth", code, { code = it }, scope = "email-change")
+                if(verified || !delivery)Text(if (verified) "Step 2 of 3" else "Step 1 of 3", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (!verified) {
+                    if(delivery) IdentityOtpField(code){code=it}
+                    else Text("We'll send a verification code to ${state.profile?.email.orEmpty()}")
+                }
                 else {
                     GlassTextField(email, { email = it.trimStart() }, "New email address", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Email))
                     GlassTextField(password, { password = it }, "Current password", password = true)
@@ -447,9 +481,13 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
         },
         confirmButton = {
             TextButton(onClick = {
-                if (!verified) account.verifySecurityCode("reauth", code) { verified = true }
+                if (!verified && !delivery) account.sendEmailCode("email-change")
+                else if (!verified) account.verifySecurityCode("reauth", code) { verified = true }
                 else account.changeEmail(email, password, code)
-            }, enabled = !state.busy) { Text(if (verified) "Send confirmation code" else "Verify and continue") }
+            }, enabled = !state.busy && (verified || !delivery || code.length==6)) {
+                if(state.busy)CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp)
+                else Text(if(verified)"Send confirmation code" else if(delivery)"Verify" else "Send code")
+            }
         },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )

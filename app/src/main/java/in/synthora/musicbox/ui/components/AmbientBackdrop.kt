@@ -11,6 +11,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
@@ -28,37 +31,58 @@ internal fun homeBlendPalette(seed: Long, minute: Long): List<Color> {
     return listOf(0f,95f,225f).map { shift -> Color.hsv((hue+shift)%360,.6f,.95f) }
 }
 
+/** One small texture is shared by the sheet and the foreground of its swiping rows. */
+@Stable
+internal class AmbientBackdropState {
+    var current by mutableStateOf<android.graphics.Bitmap?>(null)
+    var previous by mutableStateOf<android.graphics.Bitmap?>(null)
+    val blend=androidx.compose.animation.core.Animatable(1f)
+    var dimensions by mutableStateOf(androidx.compose.ui.unit.IntSize.Zero)
+    var base by mutableStateOf(Color(0xFF101015))
+    var colors by mutableStateOf(listOf(Color(0xFF9276DF),Color(0xFF457FB8),Color(0xFFB45986)))
+}
+
 /** Gradients are drawn behind content and never participate in pointer input. */
 @Composable
 internal fun AnimatedAmbientBackdrop(palette: List<Color>, modifier: Modifier = Modifier,
-    extent: Float = 1f, baseColor: Color = MaterialTheme.colorScheme.background) {
+    extent: Float = 1f, baseColor: Color = MaterialTheme.colorScheme.background,
+    state:AmbientBackdropState=remember{AmbientBackdropState()}) {
     val fallback=listOf(Color(0xFF9276DF),Color(0xFF457FB8),Color(0xFFB45986))
-    val colors=palette.takeIf { it.size>=3 && it.any { color -> color.luminance()>.04f } } ?: fallback
-    var dimensions by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
-    var previous by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    var current by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    val blend = remember { androidx.compose.animation.core.Animatable(1f) }
-    LaunchedEffect(colors, dimensions, baseColor, extent) {
-        if (dimensions.width <= 0 || dimensions.height <= 0) return@LaunchedEffect
-        val next = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            ambientRaster(colors, baseColor, dimensions.width,
-                (dimensions.height * extent.coerceIn(0f, 1f)).toInt().coerceAtLeast(1))
+    val colors=palette.takeIf{it.size>=3 && it.any{color->color.luminance()>.04f}} ?: fallback
+    SideEffect{state.colors=colors;state.base=baseColor}
+    val dimensions=state.dimensions
+    LaunchedEffect(colors,dimensions,baseColor,extent) {
+        if(dimensions.width<=0 || dimensions.height<=0)return@LaunchedEffect
+        val next=kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            ambientRaster(colors,baseColor,dimensions.width,(dimensions.height*extent.coerceIn(0f,1f)).toInt().coerceAtLeast(1))
         }
-        val old = current
-        blend.snapTo(if (old == null) 1f else 0f)
-        previous = old; current = next
-        if (old != null) blend.animateTo(1f, tween(1100, easing = FastOutSlowInEasing))
-        previous = null
+        val old=state.current
+        state.blend.snapTo(if(old==null)1f else 0f)
+        state.previous=old;state.current=next
+        if(old!=null)state.blend.animateTo(1f,tween(1100,easing=FastOutSlowInEasing))
+        state.previous=null
     }
-    Canvas(modifier.background(baseColor).testTag("Ambient backdrop").onSizeChanged { dimensions = it }) {
-        // Sheet measurement and rasterization are asynchronous. Keep a visible
-        // blend during the first frame, resize, or cancelled palette raster work.
-        if(current==null) drawRect(Brush.verticalGradient(listOf(colors[0].copy(alpha=.25f),colors[1].copy(alpha=.20f),baseColor)))
-        val destination = androidx.compose.ui.unit.IntSize(size.width.toInt(), (size.height * extent.coerceIn(0f, 1f)).toInt())
-        if (destination.width > 0 && destination.height > 0) {
-            previous?.let { drawImage(it.asImageBitmap(), dstSize = destination, filterQuality = FilterQuality.Low) }
-            current?.let { drawImage(it.asImageBitmap(), dstSize = destination, alpha = blend.value, filterQuality = FilterQuality.Low) }
-        }
+    Canvas(modifier.background(baseColor).testTag("Ambient backdrop").onSizeChanged{state.dimensions=it}) {
+        drawAmbientTexture(state,size.width.toInt(),(size.height*extent.coerceIn(0f,1f)).toInt(),0)
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawAmbientTexture(state:AmbientBackdropState,width:Int,height:Int,y:Int) {
+    drawRect(state.base)
+    if(state.current==null)drawRect(Brush.verticalGradient(listOf(state.colors[0].copy(alpha=.25f),state.colors[1].copy(alpha=.20f),state.base)))
+    if(width<=0 || height<=0)return
+    val destination=androidx.compose.ui.unit.IntSize(width,height)
+    val offset=androidx.compose.ui.unit.IntOffset(0,-y)
+    state.previous?.let{drawImage(it.asImageBitmap(),dstOffset=offset,dstSize=destination,filterQuality=FilterQuality.Low)}
+    state.current?.let{drawImage(it.asImageBitmap(),dstOffset=offset,dstSize=destination,alpha=state.blend.value,filterQuality=FilterQuality.Low)}
+}
+
+/** Keep the original artwork patch attached to the row; only its uncovered strip is red. */
+@Composable
+internal fun AmbientRowBackground(state:AmbientBackdropState,sheetTop:Float,modifier:Modifier=Modifier) {
+    var top by remember{mutableFloatStateOf(0f)}
+    Canvas(modifier.then(Modifier.fillMaxSize()).clipToBounds().onGloballyPositioned{top=it.positionInRoot().y}) {
+        drawAmbientTexture(state,state.dimensions.width,state.dimensions.height,(top-sheetTop).toInt())
     }
 }
 
