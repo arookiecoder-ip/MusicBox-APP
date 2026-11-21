@@ -1045,8 +1045,9 @@ class PlaybackService : MediaLibraryService() {
                         StreamCacheManager.removeTrackCache(config?.customCacheKey ?: config?.uri?.toString())
                     }
                 }
+                val selectedLanguage = `in`.synthora.musicbox.network.selectedAudioLanguage(original.localConfiguration?.uri?.toString())
                 val local = DownloadRepository.get(applicationContext).localTrack(track).takeUnless {
-                    malformed && sameAudioSource(it?.localUri, original.localConfiguration?.uri?.toString())
+                    selectedLanguage != null || malformed && sameAudioSource(it?.localUri, original.localConfiguration?.uri?.toString())
                 }
                 if (malformed && local == null && !`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
                     malformedAudioRetried.remove(trackId)
@@ -1061,7 +1062,10 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     val video = track.ytVideoId ?: return@launch
                     if (!manual || httpFailure?.responseCode == 429) delay(retryDelay)
-                    val url = withContext(Dispatchers.IO) { AlexaBackendApi.getStreamUrl(video) }
+                    val url = withContext(Dispatchers.IO) {
+                        if (selectedLanguage != null) AlexaBackendApi.languageAudioUrl(video, selectedLanguage)
+                        else AlexaBackendApi.getStreamUrl(video)
+                    }
                     track.copy(localUri = url, isStream = true)
                 }
                 if (player.currentMediaItem?.mediaId != trackId || !(PhonePlaybackOwnership.permitsPlayback(claim) ||
