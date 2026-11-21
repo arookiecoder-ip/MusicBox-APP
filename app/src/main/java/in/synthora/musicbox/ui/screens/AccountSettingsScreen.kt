@@ -23,6 +23,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Security
+import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Smartphone
+import androidx.compose.material.icons.filled.Computer
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.CircularProgressIndicator
@@ -146,11 +152,11 @@ fun AccountSettingsScreen(
                 .padding(bottom = bottomPadding + 24.dp)
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 24.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(56.dp).glassPane(RoundedCornerShape(8.dp), GlassLevel.Thick),
+                    Modifier.size(64.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), RoundedCornerShape(20.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -161,7 +167,7 @@ fun AccountSettingsScreen(
                     )
                 }
                 Column(Modifier.padding(start = 14.dp).weight(1f)) {
-                    Text(profile.username, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(profile.username, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text(
                         if (profile.emailVerified) profile.email else "Email not confirmed",
                         style = MaterialTheme.typography.bodyMedium,
@@ -184,13 +190,6 @@ fun AccountSettingsScreen(
                             enabled = !state.busy
                         ) { Text("Send a new code") }
                     }
-                }
-            }
-
-            AccountSection("Account ID") {
-                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                    Text(profile.id,modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
-                    IconButton(onClick={clipboard.setText(AnnotatedString(profile.id));haptic.click()}) {Icon(Icons.Default.ContentCopy,"Copy account ID")}
                 }
             }
 
@@ -224,19 +223,29 @@ fun AccountSettingsScreen(
                 if (profile.sessions.isEmpty()) {
                     Text("No other sessions.", style = MaterialTheme.typography.bodyMedium)
                 }
-                profile.sessions.forEach { session ->
+                Text("Review where you're signed in. Remove devices you no longer use.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                profile.sessions.sortedByDescending { it.current }.forEachIndexed { index, session ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                        Modifier.fillMaxWidth().padding(vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Box(Modifier.padding(end = 12.dp).size(40.dp).background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = .10f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            Icon(if (session.current || session.device.contains("Music Box", true)) Icons.Default.Smartphone else Icons.Default.Computer,
+                                null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                        }
                         Column(Modifier.weight(1f)) {
+                            if (session.current) Text("THIS DEVICE", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                             Text(
-                                session.device.ifBlank { "Unknown device" } + if (session.current) " · this phone" else "",
+                                session.device.ifBlank { "Unknown device" },
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = if (session.current) FontWeight.SemiBold else FontWeight.Normal
                             )
                             Text(
-                                listOf(session.address, session.seen).filter { it.isNotBlank() }.joinToString(" · "),
+                                listOf(session.seen.takeIf { it.isNotBlank() }?.let { "Last active $it" }, session.address.takeIf { it.isNotBlank() }).filterNotNull().joinToString(" · "),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -255,6 +264,13 @@ fun AccountSettingsScreen(
                 }
             }
 
+
+            AccountSection("Account ID") {
+                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                    Text(profile.id,modifier=Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                    IconButton(onClick={clipboard.setText(AnnotatedString(profile.id));haptic.click()}) {Icon(Icons.Default.ContentCopy,"Copy account ID")}
+                }
+            }
 
             AccountSection("Delete account", danger = true) {
                 Text(
@@ -306,17 +322,23 @@ private fun AccountSection(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(vertical = 10.dp)
-            .glassPane(RoundedCornerShape(8.dp), GlassLevel.Regular)
+            .padding(vertical = 8.dp)
+            .background(if (danger) MaterialTheme.colorScheme.error.copy(alpha = .045f) else MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
             .border(
                 1.dp,
-                if (danger) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
-                RoundedCornerShape(8.dp)
+                if (danger) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f),
+                RoundedCornerShape(16.dp)
             )
             .padding(20.dp)
     ) {
         Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleSmall,fontWeight=FontWeight.Bold,
+            Icon(when (title) {
+                "Signed-in devices" -> Icons.Default.Devices
+                "Delete account" -> Icons.Default.Warning
+                "Account ID" -> Icons.Default.Person
+                else -> Icons.Default.Security
+            }, null, Modifier.padding(end = 10.dp).size(20.dp), tint = if (danger) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+            Text(title,Modifier.weight(1f),style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold,
                 color=if(danger)MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
             status?.let{Text(it,color=if(statusOn)Color(0xFF81C784) else MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.labelLarge)}
         }

@@ -166,6 +166,7 @@ fun PlayerScreen(
     BackHandler(onBack = onDismiss)
 
     val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+    var showAudioLanguages by remember { mutableStateOf(false) }
     val playerContext = LocalContext.current
     fun openArtist(artist: `in`.synthora.musicbox.models.ArtistCredit) {
         if (!artist.id.isNullOrBlank()) onNavigateToArtist(artist.id)
@@ -412,7 +413,8 @@ fun PlayerScreen(
                             track = currentTrack,
                             onAddToPlaylist = { showAddToPlaylistDialog = currentTrack },
                             onToggleLyrics = { showLyrics = !showLyrics },
-                            showLyrics = showLyrics
+                            showLyrics = showLyrics,
+                            onAudioLanguage = { showAudioLanguages = true }
                         )
                         }
                         if (!showLyrics) PlayerBannerMetadata(currentTrack, compact,
@@ -530,6 +532,21 @@ fun PlayerScreen(
         )
     }
 
+    if (showAudioLanguages && currentTrack != null) {
+        AudioLanguageDialog(currentTrack, output == PlaybackOutput.PHONE,
+            onDismiss = { showAudioLanguages = false },
+            onSelect = { language ->
+                val latest = musicViewModel.uiState.value.currentTrack
+                if (latest?.uuid == currentTrack.uuid) {
+                    val source = `in`.synthora.musicbox.network.AlexaBackendApi.languageAudioUrl(requireNotNull(currentTrack.ytVideoId), language.id)
+                    val replaced = musicViewModel.playbackManager.replaceTrackInQueue(currentTrack.uuid,
+                        currentTrack.copy(localUri = source, isStream = true))
+                    if (!replaced) `in`.synthora.musicbox.network.NetworkFeedback.notify("Couldn't change audio language. Try again.")
+                }
+                showAudioLanguages = false
+            })
+    }
+
     showAddToPlaylistDialog?.let { track ->
         AddToPlaylistDialog(
             playlists = editablePlaylists,
@@ -564,7 +581,8 @@ fun PlayerHeader(
     onRefreshLyrics: () -> Unit, onToggleRomanizedLyrics: () -> Unit,
     isRomanizedLyricsEnabled: Boolean, showMenuOption: Boolean, isAlbumAvailable: Boolean,
     track: Track? = null,
-    onAddToPlaylist: () -> Unit = {}, onToggleLyrics: () -> Unit = {}, showLyrics: Boolean = false
+    onAddToPlaylist: () -> Unit = {}, onToggleLyrics: () -> Unit = {}, showLyrics: Boolean = false,
+    onAudioLanguage: () -> Unit = {}
 ) {
     val mediaMenu = `in`.synthora.musicbox.ui.components.LocalMediaMenu.current
     var showMenu by remember { mutableStateOf(false) }
@@ -574,6 +592,7 @@ fun PlayerHeader(
         else if (showMenuOption) IconButton(onClick = {
             if (track != null && mediaMenu != null) {
                 val extras = listOf(
+                    `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, "Audio language", onAudioLanguage),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Lyrics, "Lyrics", onToggleLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Refresh, "Refresh lyrics", onRefreshLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off", onToggleRomanizedLyrics)
@@ -590,6 +609,7 @@ fun PlayerHeader(
                 track?.let { `in`.synthora.musicbox.ui.components.MusicMenuHeader(it.title, it.artist, it.thumbnailUri) }
                 fun run(action: () -> Unit) { showMenu = false; action() }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Lyrics, if (showLyrics) "Hide lyrics" else "Lyrics") { run(onToggleLyrics) }
+                `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, "Audio language") { run(onAudioLanguage) }
                 if (isAlbumAvailable) `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Album, "Go to album") { run(onNavigateToAlbum) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Refresh, "Refresh lyrics") { run(onRefreshLyrics) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off") { run(onToggleRomanizedLyrics) }
@@ -869,4 +889,41 @@ internal fun PlayOnHeader(refreshing:Boolean,onRefresh:()->Unit) {
             else Icon(Icons.Outlined.Refresh,"Refresh devices",tint=MaterialTheme.colorScheme.primary)
         }
     }
+}
+
+@Composable
+private fun AudioLanguageDialog(track: Track, phoneOutput: Boolean, onDismiss: () -> Unit,
+    onSelect: (`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguage) -> Unit) {
+    var languages by remember(track.ytVideoId) { mutableStateOf<`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages?>(null) }
+    var error by remember(track.ytVideoId) { mutableStateOf<String?>(null) }
+    var retry by remember { mutableStateOf(0) }
+    val offline = track.localUri?.startsWith("file:") == true
+    LaunchedEffect(track.ytVideoId, retry) {
+        error = null
+        if (track.ytVideoId == null || offline || !phoneOutput) return@LaunchedEffect
+        try { languages = `in`.synthora.musicbox.network.AlexaBackendApi.audioLanguages(track.ytVideoId) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { error = "Couldn't load audio languages. Try again." }
+    }
+    GlassAlertDialog(onDismissRequest = onDismiss, title = { Text("Audio language") },
+        text = {
+            Column {
+                when {
+                    !phoneOutput -> Text("Switch playback to this phone to change audio language.")
+                    offline -> Text("This download uses its original audio. Stream this episode to choose another language.")
+                    track.ytVideoId == null -> Text("Audio language is unavailable for this track.")
+                    error != null -> { Text(error.orEmpty()); TextButton(onClick = { retry++ }) { Text("Try again") } }
+                    languages == null -> androidx.compose.material3.CircularProgressIndicator()
+                    languages!!.tracks.size < 2 -> Text("Only the original audio is available for this track.")
+                    else -> {
+                        Text("Original audio plays by default.", style = MaterialTheme.typography.bodySmall)
+                        languages!!.tracks.forEach { language ->
+                            TextButton(modifier = Modifier.fillMaxWidth(), onClick = { onSelect(language) }) {
+                                Text(language.label + if (language.original) " · Original" else if (language.autoDubbed) " · AI generated" else "")
+                            }
+                        }
+                    }
+                }
+            }
+        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
 }

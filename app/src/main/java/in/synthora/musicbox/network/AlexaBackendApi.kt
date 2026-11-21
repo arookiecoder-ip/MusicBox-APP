@@ -111,6 +111,24 @@ object AlexaBackendApi {
     fun audioUrl(videoId: String): String =
         deviceAudioUrl(Backend.audioBaseUrl, videoId)
 
+    @Serializable
+    data class AudioLanguage(val id: String, val label: String, val original: Boolean = false,
+        @SerialName("auto_dubbed") val autoDubbed: Boolean = false)
+    @Serializable
+    data class AudioLanguages(@SerialName("audio_tracks") val tracks: List<AudioLanguage> = emptyList(), val selected: String = "")
+
+    suspend fun audioLanguages(videoId: String): AudioLanguages {
+        val response = ApiClient.httpClient.get(audioUrl(videoId)) {
+            AudioCredentials.header().let { header(it.first, it.second) }
+            parameter("audio_tracks", "1")
+        }
+        check(response.status.value in 200..299) { "Audio languages are temporarily unavailable. Try again." }
+        return response.body()
+    }
+
+    fun languageAudioUrl(videoId: String, trackId: String): String = audioUrl(videoId) +
+        "&audio_track=" + URLEncoder.encode(trackId, "UTF-8")
+
     fun proxyUrl(videoId: String): String = audioUrl(videoId)
 
     /** The audio route itself prepares the file; no separate legacy stream lookup is required. */

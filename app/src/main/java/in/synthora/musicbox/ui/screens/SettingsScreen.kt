@@ -187,23 +187,6 @@ fun SettingsScreen(
                 }
             }
 
-            item {
-                GlassCard(Modifier.fillMaxWidth().border(1.dp,MaterialTheme.colorScheme.outlineVariant,RectangleShape).clickable {
-                    val intent=android.content.Intent(android.provider.Settings.ACTION_APP_OPEN_BY_DEFAULT_SETTINGS,
-                        android.net.Uri.parse("package:"+context.packageName))
-                    if(intent.resolveActivity(context.packageManager)!=null)context.startActivity(intent)
-                    else context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.parse("package:"+context.packageName)))
-                }) {
-                    Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Open supported links",fontWeight=FontWeight.SemiBold)
-                            Text("Music Box and YouTube Music",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        Text("›",style=MaterialTheme.typography.titleLarge)
-                    }
-                }
-            }
-
             if (powerUnlocked) {
                 item {
                     GlassCard(Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.outlineVariant, RectangleShape).clickable { haptic.click(); onNavigateToPowerTools() }) {

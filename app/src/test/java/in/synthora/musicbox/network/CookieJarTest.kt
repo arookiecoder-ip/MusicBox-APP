@@ -58,4 +58,17 @@ class CookieJarTest {
         cookies.clear()
         assertTrue(jar(prefs).loadForRequest(url).isEmpty())
     }
+    @Test fun signOutRetainsDeviceIdentityAcrossRestartWithoutAuthenticating() {
+        val prefs = preferences()
+        val url = "https://example.com/login/".toHttpUrl()
+        val cookies = jar(prefs)
+        cookies.saveFromResponse(url, listOf(
+            Cookie.parse(url, "session=owner; Path=/; Secure")!!,
+            Cookie.parse(url, "musicbox_device=signed-random-device; Path=/; Secure; Max-Age=31536000; HttpOnly")!!))
+        cookies.clear()
+        val restored = jar(prefs)
+        assertFalse(restored.hasCookies())
+        assertEquals("musicbox_device", restored.loadForRequest(url).single().name)
+        assertTrue(restored.loadForRequest("https://other.com/".toHttpUrl()).isEmpty())
+    }
 }

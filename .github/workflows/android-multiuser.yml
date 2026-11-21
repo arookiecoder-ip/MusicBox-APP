@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/podcast-download-account
       - feat/multi-user
       - release/production-cutover
   workflow_dispatch:
