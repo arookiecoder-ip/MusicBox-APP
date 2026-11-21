@@ -2,7 +2,7 @@
 
 Native Android music playback, offline downloads, lyrics and shared control of phones, browsers and Alexa Echo devices.
 
-**Source snapshot:** 2.4.54 (106), `feat/alexa-backend`, reviewed 2026-10-25. Source versions and verified debug builds are not the same as published GitHub releases.
+**Source snapshot:** 2.5.16 (134), production line `main`, updated 2026-11-21. A source version is published only after its signed GitHub Actions artifact and upgrade checks pass.
 
 [Changelog](CHANGELOG.md) · [Architecture](ARCHITECTURE.md) · [Published releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) · [Companion backend](https://github.com/arookiecoder-ip/youtube-music-alexa-skill)
 
@@ -16,6 +16,8 @@ Native Android music playback, offline downloads, lyrics and shared control of p
 - **Artists:** on-demand artist portraits; top songs, releases, artist playlists, featured-on collections and music-video songs. Additional provider shelves, such as live performances and items from your library, retain their names and item actions; empty shelves stay hidden. Videos show a five-song preview and a separate full-list page. These entries use the music playback path; this is not a video-rendering player.
 - **Lyrics:** timestamp-preserving romanization with damaged-cache repair; LRCLib timed lookup, caption/YouTube Music fallbacks, synchronized Now Playing and mini-player presentation, offsets and optional romanization. Tracks without usable timestamps retain plain lyrics.
 - **Interface:** consistent queue/navigation surfaces, compact create/rename/delete playlist dialogs, square collection/download buttons, phone/tablet layouts, speed-dial song menus and labels, compact matching navigation/mini-player surfaces, artwork-derived player blends and a changing Home blend. The status-bar fill clears when scrolling back to the top; expanded artist descriptions keep the banner fixed.
+- **Podcasts:** original audio is the server default. Use **Audio language** in the player menu to stream another available language on this phone while preserving position. AI-generated tracks are labelled; offline files and other output devices show an explanatory state.
+- **App links:** Music Box and YouTube Music links open through Android intent filters and sharing. This remains an app feature without a settings row.
 - **Permissions:** microphone access is neither requested nor declared in the installed manifest.
 - **Account and tools:** owner login/TOTP, YouTube account and audio-cookie reconnect flows, likes, playlists, artist subscriptions, listening history, Jam sharing and bounded playback/crash diagnostics. Spotify metadata/import and local-library support remain in the codebase.
 
@@ -23,9 +25,8 @@ Native Android music playback, offline downloads, lyrics and shared control of p
 
 Requires **Android 8.0 / API 26 or later**. Current package: `in.synthora.musicbox`.
 
-For the current feature build, use the signed **app-debug** artifact from [Android Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/workflows/android-feature.yml), on `feat/alexa-backend`, with `stable_release=false`.
+Install the stable signed APK from [GitHub Releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases). Candidate builds and test reports are produced by [Android Feature Build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/workflows/android-feature.yml); `stable_release=true` enables optimized release checks and upgrade/install validation. Build only on GitHub Actions, never on the deployment server.
 
-The [verified 2.4.54 build](https://github.com/arookiecoder-ip/MusicBox-APP/actions/runs/40160853198) contains a debug APK with version code 106. Actions artifacts have finite retention. For published stable packages, check [GitHub Releases](https://github.com/arookiecoder-ip/MusicBox-APP/releases) rather than assuming every source version has a release tag.
 
 Android updates require the same package, the original signing certificate and a compatible version code. The 2.4.54 artifact was checked against the signed 2.4.51 feature build. Earlier `com.example.juke` builds have a different package identity. A disposable-key installation also cannot be updated with a differently signed APK.
 
@@ -93,3 +94,11 @@ See [architecture](ARCHITECTURE.md), [performance measurement](docs/PERFORMANCE_
 Report reproducible issues with the app version, output device, steps and redacted diagnostics at [Issues](https://github.com/arookiecoder-ip/MusicBox-APP/issues). Keep credentials, keystores and APK binaries out of commits. Target the active feature branch unless the maintainer directs otherwise.
 
 Licensed under [GNU AGPL v3](LICENSE). Music Box retains its JUKES history and original contributor credits: **MADE WITH ❤️ BY MEEK**.
+
+## Download and account reliability
+
+Download transfers use Android DownloadManager with at most three active preparations/transfers. Each attempt owns a unique destination and queue generation: cancellation and immediate retry cannot share/delete each other's file. Actions wait for Room manifest restoration, completed files are validated, and cancellation during validation cannot resurrect an item. Collection membership is retained when removing files so explicit retry can re-download them. Rate-limited downloads use the existing bounded cooldown/retry path.
+
+The Account screen distinguishes the profile, security actions, current device, other sessions and account deletion. The server rotates the session for a signed browser installation instead of adding a duplicate at every login. This cookie survives logout but grants no authentication; independent devices with identical browser names/IPs remain separate. Older sessions without device identity must be signed out explicitly.
+
+The [backend audit](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/docs/security/playback-download-account-audit-2026-11-21.md) documents validation, cleanup and remaining physical-device limits.
