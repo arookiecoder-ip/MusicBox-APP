@@ -45,7 +45,10 @@ class AccountUiRegressionTest {
                 // Write through shell stdin instead of crossing Android's
                 // app-storage boundary. This survives target-data cleanup.
                 val output = "/data/local/tmp/musicbox-account-previews/account-$name.png"
-                val pipes = instrumentation.uiAutomation.executeShellCommandRw("mkdir -p /data/local/tmp/musicbox-account-previews && cat > $output")
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                    instrumentation.uiAutomation.executeShellCommand("mkdir -p /data/local/tmp/musicbox-account-previews")
+                ).use { it.readBytes() }
+                val pipes = instrumentation.uiAutomation.executeShellCommandRw("dd of=$output")
                 android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use {
                     check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
                 }
