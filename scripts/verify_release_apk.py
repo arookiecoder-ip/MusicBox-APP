@@ -49,6 +49,9 @@ def main(build_tools: Path, apk: Path) -> None:
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     (output / "SHA256SUMS.txt").write_text(f"{digest}  {target.name}\n")
     (output / "signing-certificate.sha256").write_text(expected + "\n")
+    (output / "release-metadata.json").write_text(json.dumps({"versionName": version,
+        "versionCode": code, "package": metadata["applicationId"], "sha256": digest,
+        "signingCertificateSha256": expected}, indent=2) + "\n")
     print(f"Verified stable {version} ({code}), package in.synthora.musicbox, non-debuggable, matching signature")
     print(f"SHA256: {digest}")
 

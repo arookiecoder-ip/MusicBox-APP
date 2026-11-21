@@ -19,6 +19,10 @@ on:
         description: Build a signed, optimized stable APK and run release JVM checks (no emulator)
         type: boolean
         default: false
+      publish_release:
+        description: Publish the verified stable APK from main after upgrade checks pass
+        type: boolean
+        default: false
       performance_tools:
         description: Build optional debug performance and benchmark tools
         type: boolean
@@ -372,3 +376,25 @@ jobs:
         with:
           name: stable-install-api-${{ matrix.api }}
           path: install-results/
+
+  publish-stable:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.stable_release == true && inputs.publish_release == true && github.ref == 'refs/heads/main' }}
+    needs: [verify-connect, build, stable-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-release
+          path: release-artifacts
+      - name: Publish verified update-compatible APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          cd release-artifacts
+          sha256sum --check SHA256SUMS.txt
+          version=$(python3 -c 'import json; print(json.load(open("release-metadata.json"))["versionName"])')
+          gh release create "v$version" ./*.apk SHA256SUMS.txt release-metadata.json --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Music Box $version" --notes-file ../docs/release-2.5.16.md
