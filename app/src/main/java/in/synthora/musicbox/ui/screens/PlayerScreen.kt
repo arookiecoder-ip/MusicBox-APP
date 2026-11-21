@@ -533,7 +533,7 @@ fun PlayerScreen(
     }
 
     if (showAudioLanguages && currentTrack != null) {
-        AudioLanguageDialog(currentTrack, output == PlaybackOutput.PHONE,
+        AudioLanguageDialog(currentTrack, output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE,
             onDismiss = { showAudioLanguages = false },
             onSelect = { language ->
                 val latest = musicViewModel.uiState.value.currentTrack

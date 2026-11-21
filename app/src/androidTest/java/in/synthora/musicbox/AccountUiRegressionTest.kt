@@ -215,4 +215,24 @@ class AccountUiRegressionTest {
         compose.onNodeWithText("Scan and confirm").assertIsDisplayed()
     }
 
+    @Test fun deviceHierarchyShowsCurrentDeviceAndKeepsIndependentSessions() {
+        val account = account()
+        val profile = AccountWebApi.AccountProfile(
+            id = "test-account", username = "testuser", email = "test@example.test", pendingEmail = "",
+            emailVerified = true, verificationPending = false, role = "user", roleText = "User",
+            totpEnabled = true, totpPending = false, mustChangePassword = false,
+            sessions = listOf(
+                AccountWebApi.AccountSession("browser", false, "Chrome on Windows", "Today, 10:30", "Yesterday", "192.0.2.1"),
+                AccountWebApi.AccountSession("phone", true, "Music Box app", "Just now", "Today", "192.0.2.2")),
+            providers = emptyList(), minPasswordLength = 10)
+        compose.setContent {
+            JUKETheme { AccountSettingsScreen(account, AccountUiState(stage = AuthStage.SIGNED_IN, profile = profile), {}) }
+        }
+        screenshot("security-overview")
+        compose.onNodeWithText("THIS DEVICE").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Music Box app").assertIsDisplayed()
+        screenshot("device-hierarchy")
+        compose.onNodeWithText("Chrome on Windows").performScrollTo().assertIsDisplayed()
+        compose.onAllNodesWithText("Sign out").assertCountEquals(1)
+    }
 }
