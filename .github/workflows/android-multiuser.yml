@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - fix/podcast-download-account
       - feat/multi-user
       - release/production-cutover
   workflow_dispatch:
@@ -82,8 +83,15 @@ jobs:
           arch: x86_64
           profile: pixel_2
           disable-animations: true
-          script: sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.QueueSelectionRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest --no-daemon
+          script: |
+            sh ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=in.synthora.musicbox.AlexaAccessUiTest,in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.QueueSelectionRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest --no-daemon; test_status=$?; adb pull /sdcard/Android/data/in.synthora.musicbox.test/files/jam-screenshots account-screenshots || true; exit "$test_status"
 
+      - name: Upload account screen previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: account-screen-previews
+          path: account-screenshots/
 
       - name: Build the signed debug APK
         run: sh ./gradlew assembleDebug --no-daemon

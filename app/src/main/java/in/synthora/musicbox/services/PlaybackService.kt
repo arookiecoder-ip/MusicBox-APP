@@ -920,8 +920,11 @@ class PlaybackService : MediaLibraryService() {
             `in`.synthora.musicbox.network.NetworkFeedback.notify("Playback task interrupted. Retry playback when connected.")
         })
 
+    private val recoveryCancelAuthorization = RecoveryCancelAuthorization()
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "in.synthora.musicbox.CANCEL_RECOVERY") {
+            if (!recoveryCancelAuthorization.accepts(runCatching { intent.getStringExtra("recovery_cancel_proof") }.getOrNull())) return START_NOT_STICKY
             cancelSessionResume()
             leaseInterruption.clear()
             networkInterruption.clear()
@@ -1045,8 +1048,9 @@ class PlaybackService : MediaLibraryService() {
                         StreamCacheManager.removeTrackCache(config?.customCacheKey ?: config?.uri?.toString())
                     }
                 }
+                val selectedLanguage = `in`.synthora.musicbox.network.selectedAudioLanguage(original.localConfiguration?.uri?.toString())
                 val local = DownloadRepository.get(applicationContext).localTrack(track).takeUnless {
-                    malformed && sameAudioSource(it?.localUri, original.localConfiguration?.uri?.toString())
+                    selectedLanguage != null || malformed && sameAudioSource(it?.localUri, original.localConfiguration?.uri?.toString())
                 }
                 if (malformed && local == null && !`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
                     malformedAudioRetried.remove(trackId)
@@ -1061,7 +1065,10 @@ class PlaybackService : MediaLibraryService() {
                 } else {
                     val video = track.ytVideoId ?: return@launch
                     if (!manual || httpFailure?.responseCode == 429) delay(retryDelay)
-                    val url = withContext(Dispatchers.IO) { AlexaBackendApi.getStreamUrl(video) }
+                    val url = withContext(Dispatchers.IO) {
+                        if (selectedLanguage != null) AlexaBackendApi.languageAudioUrl(video, selectedLanguage)
+                        else AlexaBackendApi.getStreamUrl(video)
+                    }
                     track.copy(localUri = url, isStream = true)
                 }
                 if (player.currentMediaItem?.mediaId != trackId || !(PhonePlaybackOwnership.permitsPlayback(claim) ||
@@ -1672,7 +1679,8 @@ class PlaybackService : MediaLibraryService() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, `in`.synthora.musicbox.MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val cancel = PendingIntent.getService(this, 91, Intent(this, PlaybackService::class.java)
-            .setAction("in.synthora.musicbox.CANCEL_RECOVERY"), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            .setAction("in.synthora.musicbox.CANCEL_RECOVERY")
+                .putExtra("recovery_cancel_proof", recoveryCancelAuthorization.proof), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = androidx.core.app.NotificationCompat.Builder(this, "media_playback")
             .setSmallIcon(R.drawable.media3_notification_small_icon)
             .setContentTitle(player.mediaMetadata.title ?: "Music Box")

@@ -42,6 +42,7 @@ class DownloadRepository private constructor(private val context: Context) {
     private val completed = mutableListOf<DownloadEntry>()
     private val queued = mutableMapOf<String, Track>()
     private val starting = mutableSetOf<String>()
+    private val attempts = DownloadAttempts()
     private val savedCollections = mutableListOf<DownloadedCollection>()
     private val dao = `in`.synthora.musicbox.database.DownloadManifestDatabase.get(context).manifests()
     private val codec = DownloadManifestCodec()
@@ -146,12 +147,16 @@ class DownloadRepository private constructor(private val context: Context) {
         if (enqueue(listOf(track)) && !silent) NetworkFeedback.notify("Downloading ${track.title}")
     }
     private fun enqueue(tracks: List<Track>): Boolean {
+        if (!initialized) {
+            scope.launch { awaitReady(); if (initialized) enqueue(tracks) }
+            return true
+        }
         val pendingIds = pending.map { it.track.ytVideoId }.toSet()
         val additions = tracks.filter { it.ytVideoId?.matches(Regex("[A-Za-z0-9_-]{11}")) == true &&
             it.ytVideoId !in queued && it.ytVideoId !in pendingIds && localTrack(it) == null }.distinctBy { it.ytVideoId }
         if (additions.isEmpty()) return false
         if (_status.value.active == 0) { batchTotal = 0; batchCompleted = 0; batchFailed = 0 }
-        additions.forEach { unavailable.remove(it.ytVideoId); queued[requireNotNull(it.ytVideoId)] = it }; batchTotal += additions.size
+        additions.forEach { unavailable.remove(it.ytVideoId); queued[requireNotNull(it.ytVideoId)] = it; attempts.enqueue(it.ytVideoId!!) }; batchTotal += additions.size
         save(); publishStatus(); DownloadService.start(context); pump()
         return true
     }
@@ -168,11 +173,12 @@ class DownloadRepository private constructor(private val context: Context) {
         val slots = (3 - pending.size - starting.size).coerceAtLeast(0)
         queued.filterKeys { it !in starting }.entries.take(slots).forEach { (video, track) ->
             starting += video
+            val generation = attempts.restoring(video)
             scope.launch {
                 try {
                     check(AlexaBackendApi.isConfigured()) { "Device downloads are unavailable in this build" }
                     val directory = context.getExternalFilesDir(Environment.DIRECTORY_MUSIC) ?: error("Device storage is unavailable")
-                    val target = File(directory, "$video.audio")
+                    val target = File(directory, "$video-${java.util.UUID.randomUUID()}.m4a")
                     val credential = `in`.synthora.musicbox.network.AudioCredentials.header(download = true)
                     val id = withContext(Dispatchers.IO) {
                         directory.mkdirs(); target.delete()
@@ -184,15 +190,16 @@ class DownloadRepository private constructor(private val context: Context) {
                             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN)
                             .setDestinationUri(target.toUri()))
                     }
-                    if (video in queued) pending += DownloadEntry(id, track.copy(localUri = target.toUri().toString(), isStream = false))
+                    if (video in queued && attempts.owns(video, generation)) pending += DownloadEntry(id, track.copy(localUri = target.toUri().toString(), isStream = false))
                     else withContext(Dispatchers.IO) { manager.remove(id); target.delete() }
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { batchFailed++; NetworkFeedback.notify("Couldn't download ${track.title}. Please try again.") }
-                finally { starting -= video; queued.remove(video); save(); publishStatus(); poll(); pump() }
+                catch (e: Exception) { if (attempts.owns(video, generation) && video in queued) { batchFailed++; NetworkFeedback.notify("Couldn't download ${track.title}. Please try again.") } }
+                finally { starting -= video; if (attempts.finish(video, generation)) queued.remove(video); save(); publishStatus(); poll(); pump() }
             }
         }
     }
     fun downloadCollection(item: BrowseItem, tracks: List<Track>) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) downloadCollection(item, tracks) }; return }
         val eligible = tracks.filter { it.ytVideoId?.matches(Regex("[A-Za-z0-9_-]{11}")) == true }
         check(eligible.isNotEmpty()) { "This collection has no downloadable songs" }
         val collection = DownloadedCollection(item.id, item.kind, item.title, item.image, item.subtitle, eligible, item.raw.text("year"), item.raw.text("description"))
@@ -201,6 +208,7 @@ class DownloadRepository private constructor(private val context: Context) {
         NetworkFeedback.notify("Downloading ${collection.title}")
     }
     fun updateCollectionDetails(item: BrowseItem) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) updateCollectionDetails(item) }; return }
         val index = savedCollections.indexOfFirst { it.id == item.id && it.kind == item.kind }
         if (index < 0) return
         savedCollections[index] = savedCollections[index].copy(title = item.title, image = item.image,
@@ -209,15 +217,17 @@ class DownloadRepository private constructor(private val context: Context) {
     }
     fun retryCollection(collection: DownloadedCollection) { enqueue(collection.tracks) }
     fun removeCollection(collection: DownloadedCollection) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) removeCollection(collection) }; return }
         savedCollections.removeAll { it.key == collection.key }
         val retained = savedCollections.flatMap { it.tracks }.map { it.ytVideoId }.toSet()
         save(); removeAll(collection.tracks.filter { it.ytVideoId !in retained })
     }
     fun remove(track: Track) = removeAll(listOf(track))
     fun removeAll(tracks: List<Track>) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) removeAll(tracks) }; return }
         val videos = tracks.mapNotNull { it.ytVideoId }.toSet()
         // Collection membership deliberately survives deletion, so re-download rejoins its collection.
-        videos.forEach { queued.remove(it); unavailable.remove(it); rateLimitAttempts.remove(it) }
+        videos.forEach { attempts.cancel(it); queued.remove(it); unavailable.remove(it); rateLimitAttempts.remove(it) }
         scope.launch {
             val entries = (pending + completed).filter { it.track.ytVideoId in videos }
             pending.removeAll(entries.toSet()); completed.removeAll(entries.toSet())
@@ -226,7 +236,10 @@ class DownloadRepository private constructor(private val context: Context) {
             pump(); NetworkFeedback.notify(if (videos.size == 1) "Download removed" else "${videos.size} downloads removed")
         }
     }
-    fun cancelAll() { removeAll(pending.map { it.track } + queued.values) }
+    fun cancelAll() {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) cancelAll() }; return }
+        removeAll(pending.map { it.track } + queued.values)
+    }
     private fun save() {
         if (initialized) {
             // Conflate before serialization: bursts never encode every obsolete manifest on Main.
@@ -277,11 +290,14 @@ class DownloadRepository private constructor(private val context: Context) {
                     val (status, bytes, total, reason) = result
                     when (status) {
                         DownloadManager.STATUS_SUCCESSFUL -> {
+                            val valid = withContext(Dispatchers.IO) { validCompletedAudio(file(entry.track), bytes, total) }
+                            if (entry !in pending) continue
                             pending.remove(entry); entry.track.ytVideoId?.let { rateLimitAttempts.remove(it) }; changed = true
-                            if (withContext(Dispatchers.IO) { validCompletedAudio(file(entry.track), bytes, total) }) {
+                            if (valid) {
                                 completed.removeAll { it.track.ytVideoId == entry.track.ytVideoId }; completed += entry; unavailable.remove(entry.track.ytVideoId); batchCompleted++
                             } else { batchFailed++
                                 unavailable[entry.track.ytVideoId.orEmpty()] = manifest("unavailable", entry.track.ytVideoId.orEmpty(), "missing", json.encodeToString(entry))
+                                withContext(Dispatchers.IO) { manager.remove(entry.id); file(entry.track)?.delete() }
                                 NetworkFeedback.notify("Couldn't save ${entry.track.title}. Please download it again.") }
                         }
                         DownloadManager.STATUS_FAILED -> {

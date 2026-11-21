@@ -1,10 +1,10 @@
 # Music Box Android architecture
 
-Verified against `feat/alexa-backend` at `364ab96ad9d7d2eb75f7c898399fb252cc84e71b` (2.4.54 / 106), 2026-10-25. [History and PR provenance](CHANGELOG.md) · [Backend architecture](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/ARCHITECTURE.md).
+Updated for the 2.5.16 / 134 production candidate, 2026-11-21. [History and PR provenance](CHANGELOG.md) · [Backend architecture](https://github.com/arookiecoder-ip/youtube-music-alexa-skill/blob/master/ARCHITECTURE.md).
 
 ## System boundary
 
-Music Box is a native Kotlin/Compose client for a single-owner, multiple-output system. The backend owns shared output selection and queue revisions; the device selected as renderer owns audible playback. A controller phone can display/control browser or Echo playback without rendering that audio locally. The backend now gives API and browser services independent bridge networking, with a private gateway that prefers VPN egress and falls back to direct networking. The Android client uses the same HTTPS server origin and does not require an Android VPN service.
+Music Box is a native Kotlin/Compose client for an account-isolated, multiple-output system. The backend owns shared output selection and queue revisions; the device selected as renderer owns audible playback. A controller phone can display/control browser or Echo playback without rendering that audio locally. The backend now gives API and browser services independent bridge networking, with a private gateway that prefers VPN egress and falls back to direct networking. The Android client uses the same HTTPS server origin and does not require an Android VPN service.
 
 ```mermaid
 flowchart LR
@@ -143,3 +143,15 @@ At this source snapshot, [451 JVM tests](https://github.com/arookiecoder-ip/Musi
 Physical Samsung Android 17 carrier/Bluetooth, frame timing and battery discharge were not certified. A single live Echo seek probe took about 90 ms for HTTP acknowledgment and 3.7 seconds to server confirmation; its longer boundary probe was interrupted by a separate Pause request. Deterministic backend boundary tests pass, but that probe did not prove an audible device transition.
 
 When extending playback: preserve occurrence IDs and monotonic revisions; capture a generation before slow work; reject stale continuations after every suspension; separate optimistic UI from confirmed output; retain bounded queues/retries and error backoff; never let a metadata/audio read acquire another renderer's ownership. Add targeted race coverage instead of weakening these fences to make an interaction appear faster.
+
+## Podcast language and download attempt boundaries
+
+The authenticated audio language lookup returns labels, provider track IDs and original/AI-dub flags, never signed media URLs. Phone playback replaces the existing MediaItem in place, retaining queue occurrence, position and play/pause intent. The request URL contains the selected track ID so Media3 cache keys differ between languages. The backend also separates URL/coalescing/cache/ETag identities. Every new unselected episode uses original audio; downloaded copies retain original audio.
+
+`DownloadAttempts` fences queue preparation completion against cancellation/retry. Each DownloadManager request owns a unique `.m4a` path. Cancellation invalidates its attempt before asynchronous removal, and late completion cannot publish into or remove a replacement. Completion validation checks byte counts and rejects error documents, then rechecks pending membership after IO. Manifest writes remain conflated and transactional; initialization gates download mutations.
+
+The persistent cookie jar keeps the signed `musicbox_device` installation cookie during logout while deleting authentication cookies. `hasCookies` explicitly excludes device identity. Session tokens and credentials remain protected by the existing encrypted persistence and origin/path/HTTPS cookie routing.
+
+## Verification and publishing
+
+JVM tests, Android emulator tests, signing-certificate verification, release optimization, APK entry-point validation and upgrade/install smoke checks run in GitHub Actions. The app is never compiled on the backend server. Physical OEM battery/storage/network behavior remains a separate validation step; emulator checks cannot prove it.

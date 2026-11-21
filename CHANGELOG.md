@@ -1,3 +1,11 @@
+## 2.5.16 — podcast audio, downloads and account reliability
+
+- Prefer original podcast audio; add player audio-language selection with AI-dub labels and position preservation for phone streaming.
+- Fence cancelled download preparation against immediate retries, use unique destinations, await manifest restoration and clean invalid completed files.
+- Improve Account profile/security/device hierarchy and preserve non-authenticating installation identity across logout.
+- Remove the supported-links settings row while retaining app-link and share routing.
+- Build and verify only in GitHub Actions; update production architecture and audit documentation.
+
 # Music Box changelog
 
 ## 2.5.8

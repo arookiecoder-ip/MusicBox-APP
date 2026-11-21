@@ -371,15 +371,16 @@ internal class PersistentCookieJar(
     }
 
     @Synchronized
-    fun hasCookies(): Boolean = cookies.values.any { it.expiresAt >= System.currentTimeMillis() }
+    fun hasCookies(): Boolean = cookies.values.any { it.name != "musicbox_device" && it.expiresAt >= System.currentTimeMillis() }
 
     @Synchronized
     fun all(): List<Cookie> = cookies.values.toList()
 
     @Synchronized
     fun clear() {
-        cookies.clear()
+        cookies.entries.removeAll { it.value.name != "musicbox_device" }
         prefs.edit().remove(ENCRYPTED_KEY).remove(LEGACY_KEY).apply()
+        persist()
     }
 
     private fun persist() {
