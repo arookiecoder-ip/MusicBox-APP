@@ -208,6 +208,7 @@ class DownloadRepository private constructor(private val context: Context) {
         NetworkFeedback.notify("Downloading ${collection.title}")
     }
     fun updateCollectionDetails(item: BrowseItem) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) updateCollectionDetails(item) }; return }
         val index = savedCollections.indexOfFirst { it.id == item.id && it.kind == item.kind }
         if (index < 0) return
         savedCollections[index] = savedCollections[index].copy(title = item.title, image = item.image,
@@ -216,6 +217,7 @@ class DownloadRepository private constructor(private val context: Context) {
     }
     fun retryCollection(collection: DownloadedCollection) { enqueue(collection.tracks) }
     fun removeCollection(collection: DownloadedCollection) {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) removeCollection(collection) }; return }
         savedCollections.removeAll { it.key == collection.key }
         val retained = savedCollections.flatMap { it.tracks }.map { it.ytVideoId }.toSet()
         save(); removeAll(collection.tracks.filter { it.ytVideoId !in retained })
@@ -234,7 +236,10 @@ class DownloadRepository private constructor(private val context: Context) {
             pump(); NetworkFeedback.notify(if (videos.size == 1) "Download removed" else "${videos.size} downloads removed")
         }
     }
-    fun cancelAll() { removeAll(pending.map { it.track } + queued.values) }
+    fun cancelAll() {
+        if (!initialized) { scope.launch { awaitReady(); if (initialized) cancelAll() }; return }
+        removeAll(pending.map { it.track } + queued.values)
+    }
     private fun save() {
         if (initialized) {
             // Conflate before serialization: bursts never encode every obsolete manifest on Main.
