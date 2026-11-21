@@ -38,7 +38,7 @@ class AccountUiRegressionTest {
     private fun screenshot(name:String) {
         compose.waitForIdle()
         val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val directory=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
+        val directory=java.io.File(instrumentation.context.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
         val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
         java.io.File(directory,"account-$name.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
         bitmap.recycle()
