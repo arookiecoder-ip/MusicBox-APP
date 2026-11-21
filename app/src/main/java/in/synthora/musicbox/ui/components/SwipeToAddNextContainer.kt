@@ -14,6 +14,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -114,7 +116,15 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
         }) {
         if (abs(offset) > 1f) {
             val positive = offset > 0
-            Row(Modifier.matchParentSize().background(if (removing) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer)
+            Row(Modifier.matchParentSize().drawWithContent {
+                // A transparent queue row must not reveal the removal color
+                // through its still-visible surface. Paint only the vacated edge.
+                if (removing) clipRect(
+                    left = if (positive) 0f else (size.width + offset).coerceAtLeast(0f),
+                    right = if (positive) offset.coerceAtMost(size.width) else size.width
+                ) { this@drawWithContent.drawContent() }
+                else drawContent()
+            }.background(if (removing) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer)
                 .padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (positive) Arrangement.Start else Arrangement.End) {
                 Icon(if (removing) Icons.Default.Delete else if (positive) Icons.Default.QueueMusic else Icons.Default.PlayArrow, null)

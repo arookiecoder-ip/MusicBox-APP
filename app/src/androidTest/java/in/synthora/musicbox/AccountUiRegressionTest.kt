@@ -229,8 +229,8 @@ class AccountUiRegressionTest {
             JUKETheme { AccountSettingsScreen(account, AccountUiState(stage = AuthStage.SIGNED_IN, profile = profile), {}) }
         }
         screenshot("security-overview")
-        compose.onNodeWithText("THIS DEVICE").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("Music Box app").assertIsDisplayed()
+        compose.onNodeWithText("Music Box app").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("THIS DEVICE").assertIsDisplayed()
         screenshot("device-hierarchy")
         compose.onNodeWithText("Chrome on Windows").performScrollTo().assertIsDisplayed()
         compose.onAllNodesWithText("Sign out").assertCountEquals(1)
