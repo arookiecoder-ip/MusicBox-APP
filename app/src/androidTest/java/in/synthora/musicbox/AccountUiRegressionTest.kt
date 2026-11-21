@@ -38,10 +38,16 @@ class AccountUiRegressionTest {
     private fun screenshot(name:String) {
         compose.waitForIdle()
         val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val directory=java.io.File(instrumentation.context.getExternalFilesDir(null),"jam-screenshots").apply{mkdirs()}
+        val directory=java.io.File(requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"jam-screenshots").apply{mkdirs()}
         val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
-        java.io.File(directory,"account-$name.png").outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
+        require(name.matches(Regex("[a-z0-9-]+")))
+        val file = java.io.File(directory,"account-$name.png")
+        file.outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
         bitmap.recycle()
+        // The orchestrator clears target-app data between tests. Export each
+        // finished screenshot while it exists; shell-owned output survives it.
+        val command = "mkdir -p /data/local/tmp/musicbox-account-previews && cp '${file.absolutePath}' /data/local/tmp/musicbox-account-previews/"
+        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
     }
     private fun account() = AccountViewModel(
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
