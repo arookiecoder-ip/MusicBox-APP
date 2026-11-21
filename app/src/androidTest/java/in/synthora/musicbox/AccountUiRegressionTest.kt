@@ -38,16 +38,23 @@ class AccountUiRegressionTest {
     private fun screenshot(name:String) {
         compose.waitForIdle()
         val instrumentation=InstrumentationRegistry.getInstrumentation()
-        val directory=java.io.File(requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)),"jam-screenshots").apply{mkdirs()}
-        val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
         require(name.matches(Regex("[a-z0-9-]+")))
-        val file = java.io.File(directory,"account-$name.png")
-        file.outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}
-        bitmap.recycle()
-        // The orchestrator clears target-app data between tests. Export each
-        // finished screenshot while it exists; shell-owned output survives it.
-        val command = "mkdir -p /data/local/tmp/musicbox-account-previews && cp '${file.absolutePath}' /data/local/tmp/musicbox-account-previews/"
-        android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+        val bitmap=requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= 31) {
+                // Write through shell stdin instead of crossing Android's
+                // app-storage boundary. This survives target-data cleanup.
+                val output = "/data/local/tmp/musicbox-account-previews/account-$name.png"
+                val pipes = instrumentation.uiAutomation.executeShellCommandRw("mkdir -p /data/local/tmp/musicbox-account-previews && cat > $output")
+                android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipes[1]).use {
+                    check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+                android.os.ParcelFileDescriptor.AutoCloseInputStream(pipes[0]).use { it.readBytes() }
+            } else {
+                val directory=java.io.File(requireNotNull(instrumentation.targetContext.getExternalFilesDir(null)), "jam-screenshots").apply { mkdirs() }
+                java.io.File(directory, "account-$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            }
+        } finally { bitmap.recycle() }
     }
     private fun account() = AccountViewModel(
         InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as Application
