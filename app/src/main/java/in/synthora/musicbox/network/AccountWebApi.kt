@@ -183,6 +183,8 @@ object AccountWebApi {
             mapOf("_csrf" to csrf, "identifier" to identifier, "website" to "")
         )
         return DoorHtml.doorResult(response, listOf("if an account matches")).copy(
+            notice = if (response.status in 200..299 && response.body.contains("if an account matches", ignoreCase = true))
+                "If an account exists for this address, a reset code has been sent. Check your email, or correct the address and try again." else "",
             codeTtlSeconds = DoorHtml.codeTiming(response.body, "ttl") ?: 0,
             codeResendSeconds = DoorHtml.codeTiming(response.body, "resend") ?: 60)
     }

@@ -256,11 +256,18 @@ private fun VerifyDoor(state: AccountUiState, account: AccountViewModel) {
 @Composable
 private fun ForgotDoor(state: AccountUiState, account: AccountViewModel) {
     var identifier by rememberSaveable { mutableStateOf(state.door.username) }
+    val requested = state.door.resetCodeRequested && identifier.trim() == state.door.username
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.door.resendAtMillis, state.door.codeExpiresAtMillis) {
+        val end = maxOf(state.door.resendAtMillis, state.door.codeExpiresAtMillis)
+        do { now = System.currentTimeMillis(); if (now < end) delay(1000) } while (now < end)
+    }
+    val resendWait = ((state.door.resendAtMillis - now + 999) / 1000).coerceAtLeast(0)
     val busy = state.busy
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = rememberJukeHaptics()
 
-    DoorTitle("Reset your password", "We send a six-digit code if the address or username matches an account. Nothing is revealed either way.")
+    DoorTitle("Reset your password", "Enter the email address or username for your account.")
     DoorMessage(state)
     GlassTextField(
         value = identifier,
@@ -274,7 +281,14 @@ private fun ForgotDoor(state: AccountUiState, account: AccountViewModel) {
     )
     DoorFieldError(state, "identifier")
     Spacer(Modifier.height(20.dp))
-    SubmitButton("Send reset code", busy) {
+    if (requested) {
+        SubmitButton("Enter reset code", busy, enabled = state.door.codeExpiresAtMillis == 0L || state.door.codeExpiresAtMillis > now) {
+            haptic.click(); keyboard?.hide(); account.enterRequestedResetCode()
+        }
+        TextButton(onClick = { account.resendResetCode(identifier) }, enabled = !busy && resendWait == 0L) {
+            Text(if (resendWait > 0) "Resend in ${resendWait / 60}:${(resendWait % 60).toString().padStart(2, '0')}" else "Resend code")
+        }
+    } else SubmitButton("Send reset code", busy) {
         haptic.click()
         keyboard?.hide()
         account.submitForgotPassword(identifier)
