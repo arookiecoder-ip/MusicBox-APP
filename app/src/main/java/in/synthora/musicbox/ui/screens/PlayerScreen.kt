@@ -920,7 +920,7 @@ internal fun AudioLanguageSheet(track: Track,
     onDismiss: () -> Unit,
     onSelect: (`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguage) -> Unit) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val sheetScope = rememberCoroutineScope()
+    val sheetScope = androidx.compose.runtime.rememberCoroutineScope()
     var selecting by remember { mutableStateOf(false) }
     val selected = `in`.synthora.musicbox.network.selectedAudioLanguage(track.localUri)
         ?: languages.selected.ifBlank { languages.tracks.firstOrNull { it.original }?.id.orEmpty() }
