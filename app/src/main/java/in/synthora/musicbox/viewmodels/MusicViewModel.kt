@@ -2880,8 +2880,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     installSleepTimer(minutes * 60_000L, local)
                 } else {
                     val reply = Backend.post("/api/app/sleep-timer/", buildJsonObject { put("minutes", minutes) }).objectOrEmpty()
-                    val remaining = (reply.number("deadline_ms") - System.currentTimeMillis()).coerceAtLeast(1)
+                    val remaining = reply.number("remaining_ms")
                     if (!signedIn || account != `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) return@launch
+                    if (remaining <= 0) {
+                        playbackManager.cancelSleepTimer()
+                        sleepTimerServerBacked = false
+                        return@launch
+                    }
                     sleepTimerServerBacked = true
                     installSleepTimer(remaining, local && reply.text("playback_output") == "phone" && reply.text("output_owner") == `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId)
                 }
@@ -2895,7 +2900,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         sleepTimerRequest = viewModelScope.launch {
             try {
                 val reply = Backend.get("/api/app/sleep-timer/").objectOrEmpty()
-                val remaining = reply.number("deadline_ms") - System.currentTimeMillis()
+                val remaining = reply.number("remaining_ms")
                 if (remaining > 0) {
                     sleepTimerServerBacked = true
                     installSleepTimer(remaining, reply.text("playback_output") == "phone" && reply.text("output_owner") == `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId)
