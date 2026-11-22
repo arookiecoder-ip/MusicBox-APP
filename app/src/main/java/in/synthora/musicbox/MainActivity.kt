@@ -262,8 +262,8 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val joiningState by jamViewModel.state.collectAsStateWithLifecycle()
-                LaunchedEffect(inviteToken, joiningState.active, joiningState.busy, joiningState.url) {
-                    if (`in`.synthora.musicbox.viewmodels.joinedJamInvitation(joiningState, inviteToken)) {
+                LaunchedEffect(inviteToken, accountState.stage, joiningState.active, joiningState.busy, joiningState.url) {
+                    if (accountState.stage == AuthStage.SIGNED_IN && `in`.synthora.musicbox.viewmodels.joinedJamInvitation(joiningState, inviteToken)) {
                         pendingJamInvite.value = null
                         showPlayerOnLaunch.value = true
                     }
