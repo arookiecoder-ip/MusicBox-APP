@@ -36,6 +36,13 @@ internal fun jamInviteToken(url: String, base: String): String? = runCatching {
         ?.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,128}")) }
 }.getOrNull()
 
+/** Membership URLs come from our authenticated API and may use its canonical host. */
+internal fun joinedJamInvitation(state: JamUiState, token: String?): Boolean =
+    token != null && state.active && !state.busy && runCatching {
+        val path = java.net.URI(state.url).path.trimEnd('/').split('/').filter { it.isNotBlank() }
+        path.size == 2 && path[0] in setOf("j", "jam", "jam-invite") && path[1] == token
+    }.getOrDefault(false)
+
 internal fun mergeJamPlayback(previous: JsonObject, incoming: JsonObject): JsonObject {
     if(incoming["queue"] != null) return incoming
     check(incoming.text("queue_epoch").isNotBlank() && incoming.text("queue_epoch") == previous.text("queue_epoch")) { "Jam queue needs a refresh" }
@@ -93,10 +100,13 @@ open class JamClient internal constructor(
         val duration=room.playback.number("duration_ms")
         return if(duration>0) position.coerceAtMost(duration) else position
     }
-    private suspend fun silence() {
+    private suspend fun silence(keepHostPlayback: Boolean = false) {
         applying?.cancelAndJoin()
-        try { withTimeout(6_000) { applyPlayback?.invoke(_state.value.playback, false) } }
-        catch (_: TimeoutCancellationException) { feedback("The audio output did not confirm its pause.") }
+        try { withTimeout(6_000) {
+            if (keepHostPlayback && exitPlayback != null) exitPlayback?.invoke(_state.value.playback, true)
+            else applyPlayback?.invoke(_state.value.playback, false)
+        } }
+        catch (_: TimeoutCancellationException) { feedback(if (keepHostPlayback) "Jam ended. Personal playback is reconnecting." else "The audio output did not confirm its pause.") }
         catch(e: CancellationException) { throw e }
         catch(_: Exception) { feedback("Couldn't pause this audio output. Check its connection.") }
     }
@@ -106,6 +116,7 @@ open class JamClient internal constructor(
     private var transportSequence=0L
     private var optimisticTransport: Long? = null
     var enterPlayback: (suspend () -> Unit)? = null
+    var exitPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
     var applyPlayback: (suspend (JsonObject, Boolean) -> Unit)? = null
     var outputStatus: () -> JsonObject = {JsonObject(emptyMap())}
     var outputDevices: () -> JsonArray = {JsonArray(emptyList())}
@@ -178,8 +189,7 @@ open class JamClient internal constructor(
             if(requestGeneration != generation) return
             if (!result.flag("active")) {
                 if (active) {
-                    silence()
-
+                    silence(_state.value.host && result.flag("keep_playing"))
                 }
                 generation++;optimisticTransport=null
                 playbackError=null
@@ -327,8 +337,10 @@ open class JamClient internal constructor(
     })
     fun action(path: String, body: JsonObject = JsonObject(emptyMap())) {
         if (_state.value.busy) return
+        // Retire reads begun before this action. An old inactive response must
+        // not clear a join that the server has already accepted.
+        val actionGeneration=++generation
         _state.update { it.copy(busy=true,pendingAction=path,error=null) }
-        val actionGeneration=generation
         scope.launch { mutex.withLock {
             try {
                 val response=write(path, body).objectOrEmpty()
@@ -343,7 +355,7 @@ open class JamClient internal constructor(
                 }
                 if (path.endsWith("leave/") || path.endsWith("stop/")) {
                     polling?.cancel()
-                    silence()
+                    silence(path.endsWith("stop/") && _state.value.host && response.flag("keep_playing"))
                     rememberActive(false)
                     _state.value=JamUiState()
                     polling?.cancel()

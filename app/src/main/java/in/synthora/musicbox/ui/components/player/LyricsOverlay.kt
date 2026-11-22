@@ -252,29 +252,20 @@ fun LyricsOverlay(
                                 )
                             }
 
-                            Slider(
-                                value = localOffsetMs.coerceIn(-12000f, 12000f),
-                                onValueChange = { value ->
+                            ExpandableTrackSlider(
+                                value = (localOffsetMs.coerceIn(-12000f, 12000f) + 12000f) / 24000f,
+                                label = "Lyrics delay",
+                                onValueChange = { fraction ->
+                                    val value = ((fraction * 24000f - 12000f) / 100f).roundToInt() * 100f
                                     val currentStep = (value / 100f).roundToInt()
-                                    if (currentStep != lastTick) {
-                                        haptic.tick()
-                                        lastTick = currentStep
-                                    }
+                                    if (currentStep != lastTick) { haptic.tick(); lastTick = currentStep }
                                     localOffsetMs = value
                                 },
-                                onValueChangeFinished = {
+                                onValueChangeFinished = { fraction ->
+                                    localOffsetMs = ((fraction * 24000f - 12000f) / 100f).roundToInt() * 100f
                                     musicViewModel.saveLyricsOffset(currentTrack, localOffsetMs.toLong())
                                 },
-                                valueRange = -12000f..12000f,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .padding(horizontal = 8.dp)
-                                    .height(36.dp),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = MaterialTheme.colorScheme.primary,
-                                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                                    inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
-                                )
+                                modifier = Modifier.weight(1f).padding(horizontal = 8.dp)
                             )
 
                             IconButton(onClick = {

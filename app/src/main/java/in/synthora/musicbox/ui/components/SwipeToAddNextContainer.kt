@@ -116,6 +116,9 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
         }) {
         if (abs(offset) > 1f) {
             val positive = offset > 0
+            val swipeColor = if (removing) MaterialTheme.colorScheme.errorContainer
+                else if (positive) Color(0xFF124D49) else Color(0xFF3D3068)
+            val swipeContent = if (removing) MaterialTheme.colorScheme.onErrorContainer else Color.White
             Row(Modifier.matchParentSize().drawWithContent {
                 // A transparent queue row must not reveal the removal color
                 // through its still-visible surface. Paint only the vacated edge.
@@ -124,12 +127,12 @@ private fun DirectionalRowSwipe(onLeft: (() -> Unit)?, onRight: (() -> Unit)?,
                     right = if (positive) offset.coerceAtMost(size.width) else size.width
                 ) { this@drawWithContent.drawContent() }
                 else drawContent()
-            }.background(if (removing) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer)
+            }.background(swipeColor)
                 .padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = if (positive) Arrangement.Start else Arrangement.End) {
-                Icon(if (removing) Icons.Default.Delete else if (positive) Icons.Default.QueueMusic else Icons.Default.PlayArrow, null)
+                Icon(if (removing) Icons.Default.Delete else if (positive) Icons.Default.QueueMusic else Icons.Default.PlayArrow, null, tint = swipeContent)
                 Spacer(Modifier.width(8.dp))
-                Text(if (removing) "Remove from queue" else if (positive) "Add to queue" else "Play next")
+                Text(if (removing) "Remove from queue" else if (positive) "Add to queue" else "Play next", color = swipeContent)
             }
         }
         Box(Modifier.fillMaxWidth().graphicsLayer { translationX = offset }.background(rowBackground)) {

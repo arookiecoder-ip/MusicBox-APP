@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class JamInviteTest {
+    @Test fun acceptedInviteOpensPlayerEvenWithCanonicalAliasOrPlaybackError() {
+        val state = JamUiState(active=true, url="https://canonical.example/j/abcdefghijk/", error="Output is reconnecting")
+        assertTrue(joinedJamInvitation(state, "abcdefghijk"))
+        assertFalse(joinedJamInvitation(state.copy(busy=true), "abcdefghijk"))
+        assertFalse(joinedJamInvitation(state.copy(active=false), "abcdefghijk"))
+        assertFalse(joinedJamInvitation(state, "different-room"))
+        assertFalse(joinedJamInvitation(state, null))
+    }
+
     private val base="https://testalexa.synthora.in"
     @Test fun invitationAcceptsOnlyConfiguredHttpsHost() {
         assertEquals("abcdefgh_123",jamInviteToken("$base/j/abcdefgh_123",base))

@@ -321,7 +321,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         jamRateCorrection?.cancel();jamRateCorrection=null
         playbackManager.setJamPlaybackSpeed(1f)
     }
-    private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean) {
+    private suspend fun applyJamPlayback(snapshot: JsonObject, listen: Boolean, keepHostPlayback: Boolean = false) {
         val timingIntent=listOf(snapshot.text("entry_id"),snapshot.number("seek_revision"),snapshot.flag("playing")).joinToString(":")
         if(!listen || timingIntent!=jamTimingIntent){resetJamRate();jamTimingIntent=timingIntent}
         if(listen) {
@@ -332,12 +332,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val outputKey = _output.value.name + ":" + echo.serial.value + ":" + _remoteMobileOutput.value.owner
         if (!listen) {
             val audible = if(isAlexa || isRemotePhone) echo.state.value.playing else playbackManager.shouldResumeAfterTrackChange()
-            // This follower owns only the local phone; Echo rendering belongs to the server.
-            if (jamWasListening && !isAlexa && !isRemotePhone && audible) playbackManager.pause()
+            // Return the host's original phone renderer to personal ownership
+            // without reinstalling its queue or pausing the current media item.
+            val keepLocal = keepHostPlayback && jamWasListening && jamOriginalOutput == PlaybackOutput.PHONE && !isAlexa && !isRemotePhone
+            val personal = if (keepLocal) uiState.value else null
+            if (keepLocal) {
+                try {
+                    if (`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
+                        withTimeout(4_000) { `in`.synthora.musicbox.services.PhonePlaybackOwnership.claim(echo.serial.value) }
+                        serverPlaybackChecked = true
+                    } else `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
+                } catch (e: CancellationException) {
+                    `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
+                    serverPlaybackChecked = false
+                    if (e !is kotlinx.coroutines.TimeoutCancellationException) throw e
+                } catch (_: Exception) {
+                    `in`.synthora.musicbox.services.PhonePlaybackOwnership.forget(allowOffline = true)
+                    serverPlaybackChecked = false
+                    _messages.tryEmit("Jam ended. Playback continues on this phone while its connection recovers.")
+                }
+            } else if (jamWasListening && !isAlexa && !isRemotePhone && audible) playbackManager.pause()
             `in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback=false
             jamOriginalOutput?.let {setOutputPreference(it)}
             jamOriginalOutput=null
             jamWasListening=false; jamAppliedEntry=""; jamAppliedQueue=-1
+            if (personal != null) {
+                _uiState.update { it.copy(currentTrack=personal.currentTrack, queue=personal.queue, queueIndex=personal.queueIndex,
+                    isPlaying=playbackManager.isPlayingFlow.value, position=playbackManager.getCurrentPosition()) }
+                viewModelScope.launch { kotlinx.coroutines.yield(); synchronizePhoneQueue() }
+            }
             return
         }
         val room = decodeJamSnapshot(snapshot)
@@ -811,6 +834,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             ready
         }
+        JamSession.exitPlayback = { snapshot, keepPlaying -> applyJamPlayback(snapshot, false, keepPlaying) }
         JamSession.applyPlayback = { snapshot, listen ->
             jamApplying.value = listen
             try { applyJamPlayback(snapshot, listen) }

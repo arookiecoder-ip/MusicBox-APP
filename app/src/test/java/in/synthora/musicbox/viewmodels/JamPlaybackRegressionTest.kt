@@ -24,6 +24,42 @@ class JamPlaybackRegressionTest {
         assertEquals(0,pauses)
         client.clear()
     }
+    @Test fun hostEndKeepsHostRendererWhileParticipantLeaveStopsItsFollower() = runTest {
+        var stopped = 0
+        var continued = 0
+        val client = JamClient(backgroundScope, { _, _ -> state(playback(true)) },
+            { _, _ -> buildJsonObject { put("keep_playing", true) } }, { "phone" }, { testScheduler.currentTime }, {})
+        client.applyPlayback = { _, listen -> if (!listen) stopped++ }
+        client.exitPlayback = { _, keep -> if (keep) continued++ }
+        client.refresh(); runCurrent()
+        client.action("/alexa/jam/stop/"); runCurrent()
+        assertEquals(1, continued)
+        assertEquals(0, stopped)
+        assertFalse(client.active)
+        client.refresh(); runCurrent()
+        client.action("/api/jam/leave/"); runCurrent()
+        assertEquals(1, stopped)
+        assertEquals(1, continued)
+        client.clear()
+    }
+
+    @Test fun staleInactiveReadCannotEraseSuccessfulJoin() = runTest {
+        val stale = CompletableDeferred<JsonElement>()
+        var reads = 0
+        val client = JamClient(backgroundScope, { _, _ ->
+            if (++reads == 1) stale.await() else state(playback(true))
+        }, { _, _ -> buildJsonObject { put("host", false) } }, { "phone" }, { testScheduler.currentTime }, {})
+        client.refresh(); runCurrent()
+        client.action("/j/room"); runCurrent()
+        assertTrue(client.active)
+        assertFalse(client.state.value.busy)
+        stale.complete(buildJsonObject { put("active", false) })
+        runCurrent()
+        assertTrue(client.active)
+        assertEquals("https://example/j/room", client.state.value.url)
+        client.clear()
+    }
+
     @Test fun joiningAnotherRoomPausesUnrelatedPersonalPlaybackOnce() = runTest {
         var pauses=0
         val client=JamClient(backgroundScope,{_,_->state(playback(true))},{_,_->buildJsonObject {put("host",false)}},{"phone"},{testScheduler.currentTime},{})
