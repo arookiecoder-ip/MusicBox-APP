@@ -295,11 +295,11 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
 }
 
 @Composable
-internal fun SubmitButton(text: String, busy: Boolean, onClick: () -> Unit) {
+internal fun SubmitButton(text: String, busy: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     GlassPillButton(
         text = if (busy) "" else text,
         onClick = onClick,
-        enabled = !busy,
+        enabled = !busy && enabled,
         modifier = Modifier.testTag("account-submit").fillMaxWidth(),
         leading = if (busy) {
             { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) }

@@ -289,6 +289,21 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var verified by remember { mutableStateOf(false) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(state.door.codeExpiresAtMillis, state.door.resendAtMillis) {
+        while (true) { now = System.currentTimeMillis(); delay(1000) }
+    }
+    LaunchedEffect(state.door.resendAtMillis) { code = "" }
+    val remaining = ((state.door.codeExpiresAtMillis - now + 999) / 1000).coerceAtLeast(0)
+    val resendWait = ((state.door.resendAtMillis - now + 999) / 1000).coerceAtLeast(0)
+    LaunchedEffect(remaining == 0L, verified) {
+        if (verified && state.door.codeExpiresAtMillis > 0 && remaining == 0L) {
+            verified = false
+            code = ""
+            password = ""
+            confirmPassword = ""
+        }
+    }
     val busy = state.busy
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = LocalFocusManager.current
@@ -313,6 +328,23 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Next)
     )
     DoorFieldError(state, "code")
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(
+            if (state.door.codeExpiresAtMillis == 0L) "Request a new code if yours has expired."
+            else if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}"
+            else "Code expired. Resend to continue.",
+            modifier = Modifier.weight(1f).padding(end = 12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (state.door.codeExpiresAtMillis > 0 && remaining == 0L) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        androidx.compose.material3.OutlinedButton(
+            onClick = { code = ""; haptic.click(); account.resendResetCode(identifier) },
+            enabled = !busy && resendWait == 0L && identifier.isNotBlank(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)) {
+            Text(if (resendWait > 0) "Resend in ${resendWait / 60}:${(resendWait % 60).toString().padStart(2, '0')}" else "Resend code")
+        }
+    }
     } else {
     Spacer(Modifier.height(10.dp))
     GlassTextField(
@@ -340,7 +372,8 @@ private fun ResetDoor(state: AccountUiState, account: AccountViewModel) {
     DoorFieldError(state, "confirm_password")
     }
     Spacer(Modifier.height(20.dp))
-    SubmitButton(if (verified) "Change password" else "Verify code", busy) {
+    SubmitButton(if (verified) "Change password" else "Verify code", busy,
+        enabled = verified || (identifier.isNotBlank() && code.length == 6 && (state.door.codeExpiresAtMillis == 0L || remaining > 0))) {
         haptic.click()
         keyboard?.hide()
         if (verified) account.submitResetPassword(code, password, confirmPassword)

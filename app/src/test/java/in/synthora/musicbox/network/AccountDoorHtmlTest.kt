@@ -6,6 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AccountDoorHtmlTest {
+    @Test fun readsConfiguredResetTimingWithoutAcceptingInvalidValues() {
+        val html = """<span data-code-ttl-seconds="900" data-code-resend-seconds="60"></span>"""
+        assertEquals(900L, DoorHtml.codeTiming(html, "ttl"))
+        assertEquals(60L, DoorHtml.codeTiming(html, "resend"))
+        assertEquals(null, DoorHtml.codeTiming("", "ttl"))
+        assertEquals(null, DoorHtml.codeTiming("""data-code-ttl-seconds="0"""", "ttl"))
+        assertEquals(null, DoorHtml.codeTiming("""data-code-ttl-seconds="999999999999"""", "ttl"))
+    }
+
     @Test
     fun readsCsrfFromTheRenderedForm() {
         val html = """<form><input type="hidden" name="_csrf" value="token-123"></form>"""

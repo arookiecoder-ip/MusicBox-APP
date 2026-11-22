@@ -50,7 +50,8 @@ data class AuthDoorState(
     val minPasswordLength: Int = 10,
     val signupOpen: Boolean = true,
     val signupStep: AccountWebApi.SignupStep = AccountWebApi.SignupStep.EMAIL,
-    val resendAtMillis: Long = 0
+    val resendAtMillis: Long = 0,
+    val codeExpiresAtMillis: Long = 0
 )
 
 data class TotpEnrollment(
@@ -642,10 +643,17 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         _state.update {
             it.copy(
                 stage = AuthStage.RESET_PASSWORD,
-                door = AuthDoorState(csrf = resetCsrf, username = clean, message = result.notice.ifBlank { result.message }),
+                door = AuthDoorState(csrf = resetCsrf, username = clean, message = result.notice.ifBlank { result.message },
+                    resendAtMillis = System.currentTimeMillis() + result.codeResendSeconds * 1000,
+                    codeExpiresAtMillis = if (result.codeTtlSeconds > 0) System.currentTimeMillis() + result.codeTtlSeconds * 1000 else 0),
                 error = null
             )
         }
+    }
+
+    fun resendResetCode(identifier: String) {
+        if (_state.value.busy || System.currentTimeMillis() < _state.value.door.resendAtMillis) return
+        submitForgotPassword(identifier)
     }
 
     fun openResetPassword() = runBusy {
