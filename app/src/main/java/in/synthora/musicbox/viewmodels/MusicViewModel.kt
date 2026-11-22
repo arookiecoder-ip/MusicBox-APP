@@ -911,6 +911,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun onSignedOut() {
+        sleepTimerRequest?.cancel()
+        playbackManager.cancelSleepTimer()
+        sleepTimerServerBacked = false
         JamSession.clear()
         `in`.synthora.musicbox.services.PhonePlaybackOwnership.jamPlayback=false
         jamOriginalOutput=null
@@ -1833,7 +1836,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (blockUnavailableAlexaControl()) return
         if (isRemotePhone) { remoteControl("song", buildJsonObject { put("track", kotlinx.serialization.json.Json.encodeToJsonElement(Track.serializer(), track)); put("radio", true) }, requestedTrack = track); return }
         if (isAlexa) {
-            launchPlayback(track) { echo.playSong(track, radio = false) }
+            launchPlayback(track) { echo.playSong(track, radio = true) }
             return
         }
         launchPlayback(track) { phoneSetQueue(listOf(track), 0) }
@@ -2836,15 +2839,95 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Sleep Timer
+    // Local playback has a monotonic deadline; remote deadlines live on the
+    // server so closing this Activity cannot leave an Echo playing all night.
     val sleepTimerRemaining = playbackManager.sleepTimerRemaining
+    private var sleepTimerRequest: Job? = null
+    private var sleepTimerServerBacked = false
+
+    private fun installSleepTimer(remaining: Long, local: Boolean = !isAlexa && !isRemotePhone && !JamSession.active) {
+        val accountId = `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id
+        playbackManager.startSleepTimer(((remaining + 59_999) / 60_000).toInt().coerceIn(1, 180), remaining) {
+            if (local && !isAlexa && !isRemotePhone && !JamSession.active &&
+                accountId == `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) {
+                ++playbackRequestId
+                pendingPlaybackJob?.cancel()
+                youtubeLinkJob?.cancel()
+                phoneQueueSyncJob?.cancel()
+                playlistBackfillJob?.cancel()
+                pendingPlayback.value = null
+                playbackManager.cancelPendingStart()
+                playbackManager.pause()
+                synchronizePhoneQueue()
+            }
+        }
+    }
 
     fun startSleepTimer(minutes: Int) {
-        playbackManager.startSleepTimer(minutes)
+        if (minutes == 0) { cancelSleepTimer(); return }
+        if (minutes !in 1..180) { _messages.tryEmit("Choose a timer between 1 and 180 minutes."); return }
+        if (_isSwitchingOutput.value) { _messages.tryEmit("Wait for the playback device to finish switching."); return }
+        val previousRequest = sleepTimerRequest
+        val local = !isAlexa && !isRemotePhone && !JamSession.active
+        val account = `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id
+        sleepTimerRequest = viewModelScope.launch {
+            previousRequest?.join()
+            if (account != `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) return@launch
+            try {
+                if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value) {
+                    check(!isAlexa && !isRemotePhone && !JamSession.active) { "Connect to the server to set a remote sleep timer." }
+                    check(!sleepTimerServerBacked) { "Reconnect to replace the existing server sleep timer." }
+                    installSleepTimer(minutes * 60_000L, local)
+                } else {
+                    val reply = Backend.post("/api/app/sleep-timer/", buildJsonObject { put("minutes", minutes) }).objectOrEmpty()
+                    val remaining = reply.number("remaining_ms")
+                    if (!signedIn || account != `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) return@launch
+                    if (remaining <= 0) {
+                        playbackManager.cancelSleepTimer()
+                        sleepTimerServerBacked = false
+                        return@launch
+                    }
+                    sleepTimerServerBacked = true
+                    installSleepTimer(remaining, local && reply.text("playback_output") == "phone" && reply.text("output_owner") == `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _messages.tryEmit(`in`.synthora.musicbox.network.networkErrorMessage(e) ?: e.message ?: "Couldn't set sleep timer") }
+        }
+    }
+
+    fun refreshSleepTimer() {
+        if (!`in`.synthora.musicbox.network.NetworkFeedback.online.value || sleepTimerRequest?.isActive == true) return
+        sleepTimerRequest = viewModelScope.launch {
+            try {
+                val reply = Backend.get("/api/app/sleep-timer/").objectOrEmpty()
+                val remaining = reply.number("remaining_ms")
+                if (remaining > 0) {
+                    sleepTimerServerBacked = true
+                    installSleepTimer(remaining, reply.text("playback_output") == "phone" && reply.text("output_owner") == `in`.synthora.musicbox.services.PhonePlaybackOwnership.ownerId)
+                } else if (sleepTimerServerBacked) {
+                    playbackManager.cancelSleepTimer()
+                    sleepTimerServerBacked = false
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { /* Keep an existing local deadline while offline. */ }
+        }
     }
 
     fun cancelSleepTimer() {
-        playbackManager.cancelSleepTimer()
+        val previousRequest = sleepTimerRequest
+        val account = `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id
+        sleepTimerRequest = viewModelScope.launch {
+            previousRequest?.join()
+            if (account != `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) return@launch
+            try {
+                if (`in`.synthora.musicbox.network.NetworkFeedback.online.value)
+                    Backend.post("/api/app/sleep-timer/", buildJsonObject { put("minutes", 0) })
+                else check(!sleepTimerServerBacked) { "Reconnect to cancel the server sleep timer." }
+                playbackManager.cancelSleepTimer()
+                sleepTimerServerBacked = false
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { _messages.tryEmit(e.message ?: "Couldn't cancel sleep timer") }
+        }
     }
 
 

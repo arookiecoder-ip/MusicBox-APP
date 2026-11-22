@@ -34,6 +34,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -203,6 +204,19 @@ fun PlayerScreen(
     val echoDevices by musicViewModel.echo.devices.collectAsStateWithLifecycle()
     val echoSerial by musicViewModel.echo.serial.collectAsStateWithLifecycle()
     val isAlexa = output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.ALEXA
+    var availableAudioLanguages by remember(currentTrack?.ytVideoId, output, jamState.active) {
+        mutableStateOf<`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages?>(null)
+    }
+    LaunchedEffect(currentTrack?.ytVideoId, output, jamState.active) {
+        showAudioLanguages = false
+        val video = currentTrack?.ytVideoId ?: return@LaunchedEffect
+        if (output != `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE || jamState.active || currentTrack.localUri?.let { it.startsWith("file:") || it.startsWith("content:") } == true) return@LaunchedEffect
+        try {
+            availableAudioLanguages = `in`.synthora.musicbox.network.AlexaBackendApi.audioLanguages(video)
+                .let { it.copy(tracks = it.tracks.distinctBy { language -> language.id }) }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { availableAudioLanguages = null }
+    }
     val romanizeLyrics by musicViewModel.isRomanizedLyricsEnabled.collectAsStateWithLifecycle()
     val sleepTimerRemaining by musicViewModel.sleepTimerRemaining.collectAsStateWithLifecycle()
     val haptic = rememberJukeHaptics()
@@ -381,6 +395,7 @@ fun PlayerScreen(
         // where the screen behind (mini player, tab bar) showed through. The backdrop must reach the
         // screen edge; the content already pads itself with safeDrawingPadding below.
         contentWindowInsets = { WindowInsets(0, 0, 0, 0) },
+        shape = androidx.compose.ui.graphics.RectangleShape,
         dragHandle = null
     ) {
         `in`.synthora.musicbox.utils.ObserveWindowFrameTimings("player")
@@ -414,6 +429,7 @@ fun PlayerScreen(
                             onAddToPlaylist = { showAddToPlaylistDialog = currentTrack },
                             onToggleLyrics = { showLyrics = !showLyrics },
                             showLyrics = showLyrics,
+                            audioLanguageAvailable = (availableAudioLanguages?.tracks?.size ?: 0) > 1,
                             onAudioLanguage = { showAudioLanguages = true }
                         )
                         }
@@ -516,6 +532,7 @@ fun PlayerScreen(
     }
 
     // Sleep Timer Dialog
+    LaunchedEffect(showSleepTimerDialog) { if (showSleepTimerDialog) musicViewModel.refreshSleepTimer() }
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             currentTimerRemaining = sleepTimerRemaining,
@@ -532,8 +549,8 @@ fun PlayerScreen(
         )
     }
 
-    if (showAudioLanguages && currentTrack != null) {
-        AudioLanguageDialog(currentTrack, output == `in`.synthora.musicbox.viewmodels.PlaybackOutput.PHONE,
+    if (showAudioLanguages && currentTrack != null && (availableAudioLanguages?.tracks?.size ?: 0) > 1) {
+        AudioLanguageSheet(currentTrack, requireNotNull(availableAudioLanguages),
             onDismiss = { showAudioLanguages = false },
             onSelect = { language ->
                 val latest = musicViewModel.uiState.value.currentTrack
@@ -582,6 +599,7 @@ fun PlayerHeader(
     isRomanizedLyricsEnabled: Boolean, showMenuOption: Boolean, isAlbumAvailable: Boolean,
     track: Track? = null,
     onAddToPlaylist: () -> Unit = {}, onToggleLyrics: () -> Unit = {}, showLyrics: Boolean = false,
+    audioLanguageAvailable: Boolean = false,
     onAudioLanguage: () -> Unit = {}
 ) {
     val mediaMenu = `in`.synthora.musicbox.ui.components.LocalMediaMenu.current
@@ -591,8 +609,9 @@ fun PlayerHeader(
         if (showLyrics) IconButton(onClick = onToggleLyrics) { Icon(Icons.Default.Close, "Hide lyrics") }
         else if (showMenuOption) IconButton(onClick = {
             if (track != null && mediaMenu != null) {
-                val extras = listOf(
-                    `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, "Audio language", onAudioLanguage),
+                val extras = listOfNotNull(
+                    `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Timer, "Sleep timer", onShowSleepTimer),
+                    if (audioLanguageAvailable) `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, "Audio language", onAudioLanguage) else null,
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Lyrics, "Lyrics", onToggleLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Refresh, "Refresh lyrics", onRefreshLyrics),
                     `in`.synthora.musicbox.ui.components.ExtraSongOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off", onToggleRomanizedLyrics)
@@ -609,7 +628,8 @@ fun PlayerHeader(
                 track?.let { `in`.synthora.musicbox.ui.components.MusicMenuHeader(it.title, it.artist, it.thumbnailUri) }
                 fun run(action: () -> Unit) { showMenu = false; action() }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Lyrics, if (showLyrics) "Hide lyrics" else "Lyrics") { run(onToggleLyrics) }
-                `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, "Audio language") { run(onAudioLanguage) }
+                `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Timer, "Sleep timer") { run(onShowSleepTimer) }
+                if (audioLanguageAvailable) `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, "Audio language") { run(onAudioLanguage) }
                 if (isAlbumAvailable) `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Album, "Go to album") { run(onNavigateToAlbum) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Refresh, "Refresh lyrics") { run(onRefreshLyrics) }
                 `in`.synthora.musicbox.ui.components.MusicMenuOption(Icons.Outlined.Translate, if (isRomanizedLyricsEnabled) "Romanized lyrics: On" else "Romanized lyrics: Off") { run(onToggleRomanizedLyrics) }
@@ -645,12 +665,12 @@ fun SleepTimerDialog(
     onCancelTimer: () -> Unit
 ) {
     var sliderValue by remember {
-        mutableFloatStateOf(currentTimerRemaining?.let { it / 60000f } ?: 0f)
+        mutableFloatStateOf(currentTimerRemaining?.let { it / 60000f } ?: 30f)
     }
 
     GlassAlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Sleep Timer") },
+        title = { Text("Sleep timer") },
         text = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -668,7 +688,7 @@ fun SleepTimerDialog(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                "Playback will pause in:",
+                                "Scheduled playback will pause in:",
                                 style = MaterialTheme.typography.bodyMedium
                             )
                             Spacer(modifier = Modifier.height(8.dp))
@@ -692,11 +712,13 @@ fun SleepTimerDialog(
                         modifier = Modifier.fillMaxWidth(),
                         textAlign = TextAlign.Center
                     )
+                    Text("Pauses the selected output, including Alexa. In a Jam, pauses shared playback.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Slider(
                         value = sliderValue,
                         onValueChange = { sliderValue = it },
-                        valueRange = 0f..180f,
-                        steps = 179,
+                        valueRange = 1f..180f,
+                        steps = 178,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -891,39 +913,38 @@ internal fun PlayOnHeader(refreshing:Boolean,onRefresh:()->Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AudioLanguageDialog(track: Track, phoneOutput: Boolean, onDismiss: () -> Unit,
+internal fun AudioLanguageSheet(track: Track,
+    languages: `in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages,
+    onDismiss: () -> Unit,
     onSelect: (`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguage) -> Unit) {
-    var languages by remember(track.ytVideoId) { mutableStateOf<`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages?>(null) }
-    var error by remember(track.ytVideoId) { mutableStateOf<String?>(null) }
-    var retry by remember { mutableStateOf(0) }
-    val offline = track.localUri?.startsWith("file:") == true
-    LaunchedEffect(track.ytVideoId, retry) {
-        error = null
-        if (track.ytVideoId == null || offline || !phoneOutput) return@LaunchedEffect
-        try { languages = `in`.synthora.musicbox.network.AlexaBackendApi.audioLanguages(track.ytVideoId) }
-        catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { error = "Couldn't load audio languages. Try again." }
-    }
-    GlassAlertDialog(onDismissRequest = onDismiss, title = { Text("Audio language") },
-        text = {
-            Column {
-                when {
-                    !phoneOutput -> Text("Switch playback to this phone to change audio language.")
-                    offline -> Text("This download uses its original audio. Stream this episode to choose another language.")
-                    track.ytVideoId == null -> Text("Audio language is unavailable for this track.")
-                    error != null -> { Text(error.orEmpty()); TextButton(onClick = { retry++ }) { Text("Try again") } }
-                    languages == null -> androidx.compose.material3.CircularProgressIndicator()
-                    languages!!.tracks.size < 2 -> Text("Only the original audio is available for this track.")
-                    else -> {
-                        Text("Original audio plays by default.", style = MaterialTheme.typography.bodySmall)
-                        languages!!.tracks.forEach { language ->
-                            TextButton(modifier = Modifier.fillMaxWidth(), onClick = { onSelect(language) }) {
-                                Text(language.label + if (language.original) " · Original" else if (language.autoDubbed) " · AI generated" else "")
-                            }
-                        }
-                    }
-                }
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetScope = androidx.compose.runtime.rememberCoroutineScope()
+    var selecting by remember { mutableStateOf(false) }
+    val selected = `in`.synthora.musicbox.network.selectedAudioLanguage(track.localUri)
+        ?: languages.selected.ifBlank { languages.tracks.firstOrNull { it.original }?.id.orEmpty() }
+    ModalBottomSheet(onDismissRequest = onDismiss,
+        sheetState = sheet,
+        shape = androidx.compose.ui.graphics.RectangleShape,
+        containerColor = `in`.synthora.musicbox.ui.theme.glassSheetColor()) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).stableNavigationBarsPadding().padding(bottom = 16.dp)) {
+            Text("Audio language", Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text(track.title, Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            languages.tracks.forEach { language ->
+                androidx.compose.material3.ListItem(
+                    headlineContent = { Text(language.label) },
+                    supportingContent = { Text(if (language.original) "Original audio" else if (language.autoDubbed) "AI generated" else "Alternate audio") },
+                    leadingContent = { androidx.compose.material3.RadioButton(selected = language.id == selected, onClick = null) },
+                    modifier = Modifier.fillMaxWidth().selectable(selected = language.id == selected,
+                        enabled = !selecting, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                        selecting = true
+                        sheetScope.launch { sheet.hide(); onSelect(language) }
+                    },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent))
             }
-        }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+        }
+    }
 }

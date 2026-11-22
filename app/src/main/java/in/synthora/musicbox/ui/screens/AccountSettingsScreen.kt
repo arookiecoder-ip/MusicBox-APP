@@ -156,7 +156,7 @@ fun AccountSettingsScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Box(
-                    Modifier.size(64.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), RoundedCornerShape(20.dp)),
+                    Modifier.size(64.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f), androidx.compose.ui.graphics.RectangleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -232,7 +232,7 @@ fun AccountSettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(Modifier.padding(end = 12.dp).size(40.dp).background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = .10f), RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = .10f), androidx.compose.ui.graphics.RectangleShape), contentAlignment = Alignment.Center) {
                             Icon(if (session.current || session.device.contains("Music Box", true)) Icons.Default.Smartphone else Icons.Default.Computer,
                                 null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
                         }
@@ -300,7 +300,7 @@ fun AccountSettingsScreen(
             title = { Text("Delete this account?") },
             text = { Text("This permanently removes your account, playlists, likes and connected services. It cannot be undone.") },
             confirmButton = { TextButton(onClick = { dialog = AccountDialog.DELETE }) { Text("Continue") } },
-            dismissButton = { TextButton(onClick = { dialog = null }) { Text("Keep my account") } }
+            dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = { dialog = null }) { Text("Keep my account") } }
         )
         AccountDialog.DELETE -> state.profile?.let { DeleteAccountDialog(it, state, account) { dialog = null } }
         null -> Unit
@@ -323,11 +323,11 @@ private fun AccountSection(
         Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp)
-            .background(if (danger) MaterialTheme.colorScheme.error.copy(alpha = .045f) else MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(16.dp))
+            .background(if (danger) MaterialTheme.colorScheme.error.copy(alpha = .045f) else MaterialTheme.colorScheme.surfaceContainerLow, androidx.compose.ui.graphics.RectangleShape)
             .border(
                 1.dp,
                 if (danger) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f),
-                RoundedCornerShape(16.dp)
+                androidx.compose.ui.graphics.RectangleShape
             )
             .padding(20.dp)
     ) {
@@ -404,15 +404,16 @@ private fun SecurityCodeFields(state: AccountUiState, account: AccountViewModel,
     val remaining = ((expiresAt - now + 999) / 1000).coerceAtLeast(0)
     val destination = if (purpose == "verify") state.profile?.pendingEmail?.ifBlank { state.profile?.email.orEmpty() }.orEmpty() else state.profile?.email.orEmpty()
     Text("Code delivery: $destination", style = MaterialTheme.typography.bodyMedium)
-    TextButton(onClick = { requested = true; when (purpose) { "reset" -> account.sendPasswordResetCode(scope); "verify" -> account.resendEmailVerification(scope); else -> account.sendEmailCode(scope) } }, enabled = !state.busy && wait == 0L) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(if (wait > 0) "Resend in ${wait}s" else "Send code", modifier = Modifier.alpha(labelAlpha))
-            if (sending) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
-    }
+
     AnimatedVisibility(visible = sent && expiresAt > now) {
         Column(Modifier.animateContentSize()) {
             GlassTextField(code, { onCode(it.filter(Char::isDigit).take(6)) }, "Verification code", keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.NumberPassword))
+        }
+    }
+    TextButton(onClick = { requested = true; when (purpose) { "reset" -> account.sendPasswordResetCode(scope); "verify" -> account.resendEmailVerification(scope); else -> account.sendEmailCode(scope) } }, enabled = !state.busy && wait == 0L) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(if (wait > 0) "Resend in ${wait}s" else if (sent) "Resend code" else "Send code", modifier = Modifier.alpha(labelAlpha))
+            if (sending) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
     }
     if (sent && expiresAt > 0) Text(if (remaining > 0) "Code expires in ${remaining / 60}:${(remaining % 60).toString().padStart(2, '0')}" else "Code expired. Send a new code.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -454,7 +455,7 @@ private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewMode
                 if(verified || !delivery)Text(if (verified) "Step 2 of 2" else "Step 1 of 2", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!verified) {
                     if (mailbox) {
-                        if(delivery) IdentityOtpField(code){code=it}
+                        if(delivery) SecurityCodeFields(state, account, "reset", code, { code = it }, requireSend = false, scope = "reset")
                         else Text("We'll send a verification code to ${state.profile?.email.orEmpty()}")
                     }
                     else GlassTextField(current, { current = it }, "Current password", password = true)
@@ -479,7 +480,7 @@ private fun ChangePasswordDialog(state: AccountUiState, account: AccountViewMode
                 else Text(if(verified)"Save password" else if(mailbox && !delivery)"Send code" else "Verify")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -497,7 +498,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if(verified || !delivery)Text(if (verified) "Step 2 of 3" else "Step 1 of 3", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!verified) {
-                    if(delivery) IdentityOtpField(code){code=it}
+                    if(delivery) SecurityCodeFields(state, account, "reauth", code, { code = it }, requireSend = false, scope = "email-change")
                     else Text("We'll send a verification code to ${state.profile?.email.orEmpty()}")
                 }
                 else {
@@ -518,7 +519,7 @@ private fun ChangeEmailDialog(state: AccountUiState, account: AccountViewModel, 
                 else Text(if(verified)"Send confirmation code" else if(delivery)"Verify" else "Send code")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -542,7 +543,7 @@ private fun VerifyEmailDialog(state: AccountUiState, account: AccountViewModel, 
                 enabled = !state.busy && code.length == 6
             ) { Text("Confirm") }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -551,19 +552,30 @@ private fun BeginTotpDialog(state: AccountUiState, account: AccountViewModel, on
     var password by remember { mutableStateOf("") }
     var emailCode by remember { mutableStateOf("") }
     var verified by remember { mutableStateOf(state.profile?.email.isNullOrBlank()) }
+    val delivery = rememberIdentityDelivery(state, "totp-setup")
     GlassAlertDialog(
-        onDismissRequest = { if (!state.busy) onDismiss() }, title = { Text("Set up authenticator") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(if (verified) "Confirm your password to create a setup key." else "First, verify your email.")
-            if (!verified) SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, scope = "totp-setup")
-            else GlassTextField(password, { password = it }, "Current password", password = true)
+        onDismissRequest = { if (!state.busy) onDismiss() },
+        title = { Text(if (verified) "Create authenticator key" else if (delivery) "Enter verification code" else "Verify your identity") },
+        text = { Column(Modifier.animateContentSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (verified) "Confirm your password to create a setup key."
+                else if (delivery) "Enter the six-digit code sent to your email."
+                else "We'll send a verification code to ${state.profile?.email.orEmpty()}")
+            if (!verified && delivery) {
+                SecurityCodeFields(state, account, "reauth", emailCode, { emailCode = it }, requireSend = false, scope = "totp-setup")
+            } else if (verified) GlassTextField(password, { password = it }, "Current password", password = true)
             DialogError(state)
         } },
-        confirmButton = { TextButton(onClick = {
-            if (!verified) account.verifySecurityCode("reauth", emailCode) { verified = true }
+        confirmButton = { Button(shape = RoundedCornerShape(6.dp), onClick = {
+            if (!verified && !delivery) account.sendEmailCode("totp-setup")
+            else if (!verified) account.verifySecurityCode("reauth", emailCode) { verified = true }
             else account.beginTotp(password, emailCode)
-        }, enabled = !state.busy) { Text(if (verified) "Create setup key" else "Verify and continue") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
+        }, enabled = !state.busy && (if (verified) password.isNotBlank() else !delivery || emailCode.length == 6)) {
+            if (state.busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+            else Text(if (verified) "Create setup key" else if (delivery) "Verify code" else "Send code")
+        } },
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+            onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -623,7 +635,7 @@ private fun TotpConfirmDialog(
                 enabled = !state.busy && code.length == 6
             ) { Text("Turn on") }
         },
-        dismissButton = { TextButton(onClick = { account.cancelTotp(); onDismiss() }, enabled = !state.busy) { Text("Cancel") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = { account.cancelTotp(); onDismiss() }, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -647,7 +659,7 @@ private fun DisableTotpDialog(state: AccountUiState, account: AccountViewModel, 
             if (!verified) account.verifySecurityCode("reauth", emailCode) { verified = true }
             else account.disableTotp(password, emailCode)
         }, enabled = !state.busy) { Text(if (verified) "Remove authenticator" else "Verify and continue") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = onDismiss, enabled = !state.busy) { Text("Cancel") } }
     )
 }
 
@@ -687,6 +699,6 @@ private fun DeleteAccountDialog(
                     password.isNotBlank() && (profile.email.isBlank() || emailCode.length == 6)
             ) { Text("Delete forever", color = MaterialTheme.colorScheme.error) }
         },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !state.busy) { Text("Keep my account") } }
+        dismissButton = { androidx.compose.material3.FilledTonalButton(shape = RoundedCornerShape(6.dp), colors = ButtonDefaults.filledTonalButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest, contentColor = MaterialTheme.colorScheme.onSurfaceVariant), onClick = onDismiss, enabled = !state.busy) { Text("Keep my account") } }
     )
 }

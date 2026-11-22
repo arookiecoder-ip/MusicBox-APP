@@ -999,25 +999,19 @@ class PlaybackManager private constructor(private val context: Context) {
      * Start sleep timer that will pause playback after specified minutes.
      * @param minutes Duration in minutes
      */
-    fun startSleepTimer(minutes: Int) {
+    fun startSleepTimer(minutes: Int, durationMs: Long = minutes * 60_000L,
+        onExpire: suspend () -> Unit = { pause() }) {
+        require(minutes in 1..180)
         cancelSleepTimer()
-
-        val durationMs = minutes * 60 * 1000L
-        sleepTimerJob = scope.launch {
-            var remaining = durationMs
-            while (remaining > 0) {
-                _sleepTimerRemaining.value = remaining
-                kotlinx.coroutines.delay(1000)
-                remaining -= 1000
+        _sleepTimerRemaining.value = durationMs
+        sleepTimerJob = scope.launch(Dispatchers.Main.immediate) {
+            awaitSleepDeadline(durationMs.coerceIn(1, 180 * 60_000L), android.os.SystemClock::elapsedRealtime) {
+                _sleepTimerRemaining.value = it
             }
-
-            // Timer finished - pause playback
             _sleepTimerRemaining.value = null
-            controller?.pause()
-            Log.d(TAG, "Sleep timer finished - paused playback")
+            onExpire()
+            Log.d(TAG, "Sleep timer finished")
         }
-
-        Log.d(TAG, "Sleep timer started for $minutes minutes")
     }
 
     /**

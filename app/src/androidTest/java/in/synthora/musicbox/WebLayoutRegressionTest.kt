@@ -41,6 +41,19 @@ class WebLayoutRegressionTest {
         compose.onNode(hasSetTextAction()).assertIsFocused().performTextInput("Song")
         assertTrue(opened)
     }
+    @Test fun tappingHomeSongDoesNotInstallShelfButPlayAllDoes() {
+        val tracks = (0..3).map { song.copy(uuid="$it", title="Home song $it") }
+        var selected = -1
+        var all = false
+        compose.setContent { JUKETheme { Surface {
+            SongOnlyShelf("Songs", tracks, onPlayAll = { all = true }) { selected = it }
+        } } }
+        compose.onNodeWithText("Home song 2").performClick()
+        assertTrue(selected == 2 && !all)
+        compose.onNodeWithText("Play all").performClick()
+        assertTrue(all)
+    }
+
     @Test fun songShelfShowsFourCompactRowsAndPlayAll() {
         var selected = -1
         val tracks = (0..4).map { song.copy(uuid = "$it", title = "Song $it") }

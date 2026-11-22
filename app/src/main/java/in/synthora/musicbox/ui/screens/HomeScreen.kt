@@ -140,6 +140,7 @@ fun HomeScreen(
         onSettingsClick = { haptic.click(); onSettingsClick() }, onRefresh = homeViewModel::refresh,
         onSearchClick = onSearchClick, onOpenItem = onOpenItem,
         onPlayTracks = { tracks, index -> musicViewModel.setQueue(tracks, index) },
+        onPlaySong = musicViewModel::playTrack,
         onPlayCollection = musicViewModel::playCollection,
         onPlaySomething = {
             if (!musicViewModel.uiState.value.isLoading) homeViewModel.pickSomething(
@@ -159,6 +160,7 @@ internal fun HomeContent(
     onSearchClick: () -> Unit = {},
     onOpenItem: (BrowseItem) -> Unit = {},
     onPlayTracks: (List<Track>, Int) -> Unit = { _, _ -> },
+    onPlaySong: (Track) -> Unit = { onPlayTracks(listOf(it), 0) },
     onPlayCollection: (BrowseItem) -> Unit = {},
     jamActive: Boolean = false,
     onPlaySomething: () -> Unit = {}
@@ -188,7 +190,7 @@ internal fun HomeContent(
                         val track = uiState.recentTracks.firstOrNull { it.ytVideoId == item.videoId }
                             ?: uiState.shelves.asSequence().flatMap { it.tracks.asSequence() }
                                 .firstOrNull { it.ytVideoId == item.videoId }
-                        onPlayTracks(listOf(track ?: item.toTrack()), 0)
+                        onPlaySong(track ?: item.toTrack())
                     }
                 }
             }
@@ -211,12 +213,13 @@ internal fun HomeContent(
                     when {
                         shelf.tracks.isNotEmpty() && shelf.items.all { it.kind == "track" } -> SongOnlyShelf(
                             title = shelf.title, tracks = shelf.tracks, availableWidth = availableWidth,
-                            onTrackClick = { onPlayTracks(shelf.tracks, it) }
+                            onPlayAll = { onPlayTracks(shelf.tracks, 0) },
+                            onTrackClick = { shelf.tracks.getOrNull(it)?.let(onPlaySong) }
                         )
                         shelf.items.all { it.kind == "artist" } -> ArtistShelf(shelf.title, shelf.items, onOpenItem)
                         else -> BrowseShelfRow(
                             title = shelf.title, items = shelf.items, tracks = shelf.tracks,
-                            onTrackClick = { onPlayTracks(shelf.tracks, it) },
+                            onTrackClick = { shelf.tracks.getOrNull(it)?.let(onPlaySong) },
                             onOpen = onOpenItem, onPlayCollection = { onPlayCollection(it) }
                         )
                     }
@@ -310,6 +313,7 @@ private fun HomeHeader(
 @Composable
 internal fun SongOnlyShelf(title: String, tracks: List<Track>,
     availableWidth: Dp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp,
+    onPlayAll: (() -> Unit)? = null,
     onTrackClick: (Int) -> Unit) {
     val menu = LocalMediaMenu.current
     val columns = remember(tracks) { tracks.chunked(4) }
@@ -317,7 +321,7 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>,
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
-            androidx.compose.material3.OutlinedButton(onClick = { onTrackClick(0) }, enabled = tracks.isNotEmpty(),
+            androidx.compose.material3.OutlinedButton(onClick = { onPlayAll?.invoke() ?: onTrackClick(0) }, enabled = tracks.isNotEmpty(),
                 modifier = Modifier.height(32.dp), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)) { Text("Play all") }
         }
         Box(Modifier.fillMaxWidth()) {
@@ -349,7 +353,7 @@ internal fun SongOnlyShelf(title: String, tracks: List<Track>,
     }
 }
 
-/** A shelf of songs, albums, playlists and stations. Songs play the shelf; the rest open. */
+/** A shelf of songs, albums, playlists and stations. Songs seed their own radio; collections open. */
 @Composable
 private fun BrowseShelfRow(
     title: String,
