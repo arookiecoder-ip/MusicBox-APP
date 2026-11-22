@@ -150,6 +150,26 @@ class AccountUiRegressionTest {
         compose.onAllNodesWithText("Resend in", substring = true).assertCountEquals(0)
     }
 
+    @Test fun authenticatorSetupShowsSendThenOtpResendCountdownAndVerify() {
+        val account = account()
+        val profile = AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
+            verificationPending=false,role="user",roleText="User",totpEnabled=false,totpPending=false,mustChangePassword=false,
+            sessions=emptyList(),providers=emptyList(),minPasswordLength=10)
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.SIGNED_IN,profile=profile))
+        compose.setContent { JUKETheme { AccountSettingsScreen(account,state,{}) } }
+        compose.onNodeWithText("Set up authenticator").performScrollTo().performClick()
+        compose.onNodeWithText("Send code").assertIsDisplayed()
+        compose.onAllNodesWithText("Verify and continue").assertCountEquals(0)
+        compose.onAllNodesWithText("Verification code").assertCountEquals(0)
+        compose.runOnIdle { state=state.copy(codeDeliveries=mapOf("totp-setup" to AccountCodeDelivery(System.currentTimeMillis()+600000,System.currentTimeMillis()+60000))) }
+        compose.onNodeWithText("Verification code").assertIsDisplayed()
+        compose.onNodeWithText("Resend in",substring=true).assertIsNotEnabled()
+        compose.onNodeWithText("Code expires in",substring=true).assertIsDisplayed()
+        compose.onNodeWithText("Verify code").assertIsNotEnabled()
+        compose.onNodeWithText("Verification code").performTextInput("123456")
+        compose.onNodeWithText("Verify code").assertIsEnabled()
+    }
+
     @Test fun passwordIdentityDialogShowsSendThenOnlyOtpAndVerify() {
         val account=account()
         val profile=AccountWebApi.AccountProfile(id="id",username="name",email="person@example.test",pendingEmail="",emailVerified=true,
