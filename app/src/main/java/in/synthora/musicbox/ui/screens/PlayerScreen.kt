@@ -714,11 +714,11 @@ fun SleepTimerDialog(
                     )
                     Text("Pauses the selected output, including Alexa. In a Jam, pauses shared playback.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Slider(
-                        value = sliderValue,
-                        onValueChange = { sliderValue = it },
-                        valueRange = 1f..180f,
-                        steps = 178,
+                    `in`.synthora.musicbox.ui.components.player.ExpandableTrackSlider(
+                        value = (sliderValue - 1f) / 179f,
+                        label = "Sleep timer duration",
+                        onValueChange = { sliderValue = (1f + it * 179f).roundToInt().toFloat() },
+                        onValueChangeFinished = { sliderValue = (1f + it * 179f).roundToInt().toFloat() },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

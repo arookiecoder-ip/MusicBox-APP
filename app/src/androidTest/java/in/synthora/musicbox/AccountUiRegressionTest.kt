@@ -124,6 +124,44 @@ class AccountUiRegressionTest {
         compose.onAllNodesWithText("Verification code").assertCountEquals(0)
     }
 
+    @Test fun resetRequestConfirmationDoesNotAutomaticallyShowOtpFields() {
+        val account = account()
+        val now = System.currentTimeMillis()
+        val state = AccountUiState(stage=AuthStage.FORGOT_PASSWORD,
+            door=`in`.synthora.musicbox.viewmodels.AuthDoorState(username="person@example.test",
+                resetCodeRequested=true, resendAtMillis=now+60000, codeExpiresAtMillis=now+900000,
+                message="If an account exists for this address, a reset code has been sent."))
+        compose.setContent { JUKETheme {
+            `in`.synthora.musicbox.ui.screens.AuthDoorScreen(state, account)
+        } }
+        compose.onNodeWithText("If an account exists", substring=true).assertIsDisplayed()
+        compose.onNodeWithText("Enter reset code").assertIsDisplayed()
+        compose.onNodeWithText("Resend in", substring=true).assertIsNotEnabled()
+        compose.onNodeWithText("000000").assertDoesNotExist()
+        compose.onNodeWithText("Verify your reset code").assertDoesNotExist()
+    }
+
+    @Test fun resetCodeShowsExpiryAndSeparateResendCooldown() {
+        val account = account()
+        val now = System.currentTimeMillis()
+        var state by mutableStateOf(AccountUiState(stage=AuthStage.RESET_PASSWORD,
+            door=`in`.synthora.musicbox.viewmodels.AuthDoorState(username="person@example.test",
+                resendAtMillis=now+60000, codeExpiresAtMillis=now+900000)))
+        compose.setContent { JUKETheme {
+            `in`.synthora.musicbox.ui.screens.AuthDoorScreen(state, account)
+        } }
+        compose.onNodeWithText("Code expires in", substring=true).assertIsDisplayed()
+        compose.onNodeWithText("Resend in", substring=true).assertIsNotEnabled()
+        compose.onNodeWithText("Verify code").assertIsNotEnabled()
+        compose.onNodeWithText("000000").performTextInput("123456")
+        compose.onNodeWithText("Verify code").assertIsEnabled()
+        compose.runOnIdle { state=state.copy(door=state.door.copy(resendAtMillis=0)) }
+        compose.onNodeWithText("Resend code").assertIsEnabled()
+        compose.runOnIdle { state=state.copy(door=state.door.copy(codeExpiresAtMillis=System.currentTimeMillis()-1000)) }
+        compose.onNodeWithText("Code expired. Resend to continue.").assertIsDisplayed()
+        compose.onNodeWithText("Verify code").assertIsNotEnabled()
+    }
+
     @Test fun anotherActionsOtpDoesNotAppearInAuthenticatorSetup() {
         val account = account()
         val profile = AccountWebApi.AccountProfile(

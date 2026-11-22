@@ -32,7 +32,9 @@ object AccountWebApi {
         val ok: Boolean,
         val message: String,
         val fieldErrors: Map<String, String> = emptyMap(),
-        val notice: String = ""
+        val notice: String = "",
+        val codeTtlSeconds: Long = 0,
+        val codeResendSeconds: Long = 60
     )
 
     data class AccountSession(
@@ -180,7 +182,11 @@ object AccountWebApi {
             "/forgot-password",
             mapOf("_csrf" to csrf, "identifier" to identifier, "website" to "")
         )
-        return DoorHtml.doorResult(response, listOf("if an account matches"))
+        return DoorHtml.doorResult(response, listOf("if an account matches")).copy(
+            notice = if (response.status in 200..299 && response.body.contains("if an account matches", ignoreCase = true))
+                "If an account exists for this address, a reset code has been sent. Check your email, or correct the address and try again." else "",
+            codeTtlSeconds = DoorHtml.codeTiming(response.body, "ttl") ?: 0,
+            codeResendSeconds = DoorHtml.codeTiming(response.body, "resend") ?: 60)
     }
 
     suspend fun openReset(): String {
@@ -433,6 +439,10 @@ internal object DoorHtml {
     private val spaces = Regex("""\s+""")
 
     fun csrf(html: String): String? = csrf.find(html)?.groupValues?.getOrNull(1)?.trim()?.takeIf(String::isNotBlank)
+
+    fun codeTiming(html: String, field: String): Long? =
+        Regex("""data-code-$field-seconds="([0-9]+)"""").find(html)?.groupValues?.get(1)
+            ?.toLongOrNull()?.takeIf { it in 1..86400 }
 
     fun signupGate(html: String): AccountWebApi.SignupGate? {
         val raw = Regex("""data-signup-step="(email|code|details)"""").find(html)?.groupValues?.get(1)

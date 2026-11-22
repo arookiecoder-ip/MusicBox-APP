@@ -262,8 +262,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val joiningState by jamViewModel.state.collectAsStateWithLifecycle()
-                LaunchedEffect(joiningState.active,joiningState.busy,joiningState.error) {
-                    if(inviteToken!=null && joiningState.active && joiningState.url.endsWith("/"+inviteToken) && !joiningState.busy && joiningState.error==null)pendingJamInvite.value=null
+                LaunchedEffect(inviteToken, accountState.stage, joiningState.active, joiningState.busy, joiningState.url) {
+                    if (accountState.stage == AuthStage.SIGNED_IN && `in`.synthora.musicbox.viewmodels.joinedJamInvitation(joiningState, inviteToken)) {
+                        pendingJamInvite.value = null
+                        showPlayerOnLaunch.value = true
+                    }
                 }
                 if (inviteToken != null && accountState.stage == AuthStage.SIGNED_IN) {
                     GlassAlertDialog(onDismissRequest={pendingJamInvite.value=null},

@@ -50,7 +50,9 @@ data class AuthDoorState(
     val minPasswordLength: Int = 10,
     val signupOpen: Boolean = true,
     val signupStep: AccountWebApi.SignupStep = AccountWebApi.SignupStep.EMAIL,
-    val resendAtMillis: Long = 0
+    val resendAtMillis: Long = 0,
+    val codeExpiresAtMillis: Long = 0,
+    val resetCodeRequested: Boolean = false
 )
 
 data class TotpEnrollment(
@@ -633,6 +635,8 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
             _state.update { it.copy(door = it.door.copy(fieldErrors = mapOf("identifier" to "Enter your email or username."))) }
             return@runBusy
         }
+        if (clean == _state.value.door.username && System.currentTimeMillis() < _state.value.door.resendAtMillis) return@runBusy
+        val codeEntry = _state.value.stage == AuthStage.RESET_PASSWORD
         val result = AccountWebApi.requestPasswordReset(_state.value.door.csrf, clean)
         if (!result.ok) {
             _state.update { it.copy(door = it.door.copy(message = result.message, fieldErrors = result.fieldErrors)) }
@@ -641,11 +645,25 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         val resetCsrf = runCatching { AccountWebApi.openReset() }.getOrDefault("")
         _state.update {
             it.copy(
-                stage = AuthStage.RESET_PASSWORD,
-                door = AuthDoorState(csrf = resetCsrf, username = clean, message = result.notice.ifBlank { result.message }),
+                stage = if (codeEntry) AuthStage.RESET_PASSWORD else AuthStage.FORGOT_PASSWORD,
+                door = AuthDoorState(csrf = resetCsrf, username = clean, message = result.notice.ifBlank { result.message },
+                    resendAtMillis = System.currentTimeMillis() + result.codeResendSeconds * 1000,
+                    codeExpiresAtMillis = if (result.codeTtlSeconds > 0) System.currentTimeMillis() + result.codeTtlSeconds * 1000 else 0,
+                    resetCodeRequested = true),
                 error = null
             )
         }
+    }
+
+    fun resendResetCode(identifier: String) {
+        if (_state.value.busy || System.currentTimeMillis() < _state.value.door.resendAtMillis) return
+        submitForgotPassword(identifier)
+    }
+
+    fun enterRequestedResetCode() {
+        if (!_state.value.door.resetCodeRequested || _state.value.busy) return
+        _state.update { it.copy(stage = AuthStage.RESET_PASSWORD, error = null,
+            door = it.door.copy(message = "", fieldErrors = emptyMap())) }
     }
 
     fun openResetPassword() = runBusy {
