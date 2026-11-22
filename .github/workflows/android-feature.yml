@@ -39,6 +39,10 @@ on:
         description: Run only the focused player and feature regression tests
         type: boolean
         default: false
+      account_player_tests:
+        description: Run profile verification, audio selection, player menus and home song UI tests
+        type: boolean
+        default: false
       local_ui_tests:
         description: Run local audio and UI fixtures on phone and tablet without live-server credentials
         type: boolean
@@ -201,7 +205,7 @@ jobs:
           if-no-files-found: error
 
       - name: Build optional UI test APK
-        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
+        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true || inputs.account_player_tests == true) }}
         run: ./gradlew assembleDebugAndroidTest --no-daemon
 
       - name: Report lint findings
@@ -221,7 +225,7 @@ jobs:
           path: app/build/reports/lint-results-debug.*
 
       - name: Upload UI test APK
-        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
+        if: ${{ inputs.stable_release != true && (github.event_name == 'push' || inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true || inputs.account_player_tests == true) }}
         uses: actions/upload-artifact@v4
         with:
           name: ui-test-apk
@@ -233,7 +237,7 @@ jobs:
 
   ui-tests:
     timeout-minutes: 20
-    if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true) }}
+    if: ${{ inputs.stable_release != true && (inputs.full_ui_tests == true || inputs.playback_tests == true || inputs.local_ui_tests == true || inputs.account_player_tests == true) }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
@@ -268,8 +272,8 @@ jobs:
           script: |
             adb install apk/app-debug.apk
             adb install test-apk/app-debug-androidTest.apk
-            bash scripts/run-native-tests.sh "${{ inputs.local_ui_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest#uncachedHttpAudioPlaysThroughProductionPipeline,in.synthora.musicbox.PlaybackStreamRegressionTest#configuredAudioPathPrefixStillAuthenticatesAndPlays,in.synthora.musicbox.PlaybackStreamRegressionTest#largeQueueShuffleAndReorderPreserveEverySongAndCurrentItem,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }}"
-            [ "${{ inputs.full_ui_tests }}" != "true" ] || adb pull /sdcard/Android/data/in.synthora.musicbox/files/screenshots screenshots
+            bash scripts/run-native-tests.sh "${{ inputs.account_player_tests && 'in.synthora.musicbox.AccountUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest,in.synthora.musicbox.AudioLanguageSheetTest' || inputs.local_ui_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest#uncachedHttpAudioPlaysThroughProductionPipeline,in.synthora.musicbox.PlaybackStreamRegressionTest#configuredAudioPathPrefixStillAuthenticatesAndPlays,in.synthora.musicbox.PlaybackStreamRegressionTest#largeQueueShuffleAndReorderPreserveEverySongAndCurrentItem,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || matrix.tablet && 'in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || inputs.playback_tests && 'in.synthora.musicbox.PlaybackStreamRegressionTest,in.synthora.musicbox.FeatureInteractionRegressionTest,in.synthora.musicbox.TabletPlaybackRegressionTest,in.synthora.musicbox.CollectionParityRegressionTest,in.synthora.musicbox.QueueRecoveryRegressionTest,in.synthora.musicbox.TabletRenderingRegressionTest,in.synthora.musicbox.PlaybackPresentationRegressionTest,in.synthora.musicbox.MediaControllerSecurityTest' || 'in.synthora.musicbox.DownloadCookieUiTest,in.synthora.musicbox.UiRefinementRegressionTest,in.synthora.musicbox.BetaUiRegressionTest,in.synthora.musicbox.WebLayoutRegressionTest' }}"
+            [ "${{ inputs.full_ui_tests || inputs.account_player_tests }}" != "true" ] || adb pull /sdcard/Android/data/in.synthora.musicbox/files/screenshots screenshots
 
       - name: Upload UI results and screenshots
         if: always()

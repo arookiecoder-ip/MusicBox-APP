@@ -34,6 +34,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -549,7 +550,7 @@ fun PlayerScreen(
     }
 
     if (showAudioLanguages && currentTrack != null && (availableAudioLanguages?.tracks?.size ?: 0) > 1) {
-        AudioLanguageDialog(currentTrack, requireNotNull(availableAudioLanguages),
+        AudioLanguageSheet(currentTrack, requireNotNull(availableAudioLanguages),
             onDismiss = { showAudioLanguages = false },
             onSelect = { language ->
                 val latest = musicViewModel.uiState.value.currentTrack
@@ -914,7 +915,7 @@ internal fun PlayOnHeader(refreshing:Boolean,onRefresh:()->Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AudioLanguageDialog(track: Track,
+internal fun AudioLanguageSheet(track: Track,
     languages: `in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages,
     onDismiss: () -> Unit,
     onSelect: (`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguage) -> Unit) {
@@ -934,7 +935,7 @@ private fun AudioLanguageDialog(track: Track,
                     headlineContent = { Text(language.label) },
                     supportingContent = { Text(if (language.original) "Original audio" else if (language.autoDubbed) "AI generated" else "Alternate audio") },
                     leadingContent = { androidx.compose.material3.RadioButton(selected = language.id == selected, onClick = null) },
-                    modifier = Modifier.fillMaxWidth().clickable { onSelect(language) },
+                    modifier = Modifier.fillMaxWidth().selectable(selected = language.id == selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onSelect(language) },
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent))
             }
         }

@@ -1003,14 +1003,10 @@ class PlaybackManager private constructor(private val context: Context) {
         onExpire: suspend () -> Unit = { pause() }) {
         require(minutes in 1..180)
         cancelSleepTimer()
-        val deadline = android.os.SystemClock.elapsedRealtime() + durationMs.coerceIn(1, 180 * 60_000L)
         _sleepTimerRemaining.value = durationMs
         sleepTimerJob = scope.launch(Dispatchers.Main.immediate) {
-            while (true) {
-                val remaining = (deadline - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0)
-                if (remaining == 0L) break
-                _sleepTimerRemaining.value = remaining
-                kotlinx.coroutines.delay(minOf(1000L, remaining))
+            awaitSleepDeadline(durationMs.coerceIn(1, 180 * 60_000L), android.os.SystemClock::elapsedRealtime) {
+                _sleepTimerRemaining.value = it
             }
             _sleepTimerRemaining.value = null
             onExpire()
