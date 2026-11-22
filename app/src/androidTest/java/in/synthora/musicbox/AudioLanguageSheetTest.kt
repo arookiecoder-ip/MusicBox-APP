@@ -39,6 +39,7 @@ class AudioLanguageSheetTest {
         compose.onNodeWithText("Original audio").assertIsDisplayed()
         compose.onNodeWithText("AI generated").assertIsDisplayed()
         compose.onNodeWithText("Hindi").performClick()
+        compose.waitForIdle()
         assertEquals("hi", selected)
     }
 }

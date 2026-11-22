@@ -919,10 +919,13 @@ internal fun AudioLanguageSheet(track: Track,
     languages: `in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguages,
     onDismiss: () -> Unit,
     onSelect: (`in`.synthora.musicbox.network.AlexaBackendApi.AudioLanguage) -> Unit) {
+    val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetScope = rememberCoroutineScope()
+    var selecting by remember { mutableStateOf(false) }
     val selected = `in`.synthora.musicbox.network.selectedAudioLanguage(track.localUri)
         ?: languages.selected.ifBlank { languages.tracks.firstOrNull { it.original }?.id.orEmpty() }
     ModalBottomSheet(onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheet,
         shape = androidx.compose.ui.graphics.RectangleShape,
         containerColor = `in`.synthora.musicbox.ui.theme.glassSheetColor()) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).stableNavigationBarsPadding().padding(bottom = 16.dp)) {
@@ -935,7 +938,11 @@ internal fun AudioLanguageSheet(track: Track,
                     headlineContent = { Text(language.label) },
                     supportingContent = { Text(if (language.original) "Original audio" else if (language.autoDubbed) "AI generated" else "Alternate audio") },
                     leadingContent = { androidx.compose.material3.RadioButton(selected = language.id == selected, onClick = null) },
-                    modifier = Modifier.fillMaxWidth().selectable(selected = language.id == selected, role = androidx.compose.ui.semantics.Role.RadioButton) { onSelect(language) },
+                    modifier = Modifier.fillMaxWidth().selectable(selected = language.id == selected,
+                        enabled = !selecting, role = androidx.compose.ui.semantics.Role.RadioButton) {
+                        selecting = true
+                        sheetScope.launch { sheet.hide(); onSelect(language) }
+                    },
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = Color.Transparent))
             }
         }
