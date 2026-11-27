@@ -31,6 +31,7 @@ import kotlinx.serialization.json.JsonPrimitive
 enum class AuthStage {
     CHECKING,
     SIGNED_OUT,
+    EMAIL_OTP,
     SIGNUP,
     VERIFY_EMAIL,
     FORGOT_PASSWORD,
@@ -84,6 +85,9 @@ data class AccountStatus(
 data class AccountCodeDelivery(val expiresAt: Long, val resendAt: Long)
 
 data class AccountUiState(
+    val otpIdentifier: String = "",
+    val otpSent: Boolean = false,
+    val otpResendAt: Long = 0,
     val stage: AuthStage = AuthStage.CHECKING,
     /** Whether this server has account pages; null while unknown or offline. */
     val doorsAvailable: Boolean? = null,
@@ -229,10 +233,42 @@ class AccountViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun openEmailLogin() {
+        _state.update { it.copy(stage = AuthStage.EMAIL_OTP, error = null, otpSent = false,
+            otpIdentifier = "", otpResendAt = 0) }
+    }
+
+    fun sendEmailLoginCode(identifier: String) {
+        val target = if (_state.value.otpSent) _state.value.otpIdentifier else identifier.trim()
+        if (target.isBlank()) { _state.update { it.copy(error = "Enter your email or username") }; return }
+        if (android.os.SystemClock.elapsedRealtime() < _state.value.otpResendAt) return
+        runBusy {
+            val seconds = Backend.sendEmailLoginCode(target)
+            _state.update { it.copy(otpIdentifier = target, otpSent = true,
+                otpResendAt = android.os.SystemClock.elapsedRealtime() + seconds * 1000) }
+        }
+    }
+
+    fun verifyEmailLoginCode(code: String) {
+        if (!code.matches(Regex("[0-9]{6}"))) {
+            _state.update { it.copy(error = "Enter the six-digit code from your email") }; return
+        }
+        runBusy {
+            when (val step = Backend.loginWithEmailCode(_state.value.otpIdentifier, code)) {
+                is LoginStep.NeedsCode -> {
+                    codeToken = step.token
+                    _state.update { it.copy(stage = AuthStage.NEEDS_CODE) }
+                }
+                LoginStep.SignedIn -> onSignedIn()
+            }
+        }
+    }
+
     /** Back from the code step to username and password. */
     fun restartLogin() {
         codeToken = ""
-        _state.update { it.copy(stage = AuthStage.SIGNED_OUT, error = null) }
+        _state.update { it.copy(stage = AuthStage.SIGNED_OUT, error = null, otpSent = false,
+            otpIdentifier = "", otpResendAt = 0) }
     }
 
     /**

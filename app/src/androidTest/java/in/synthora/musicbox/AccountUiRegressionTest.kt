@@ -34,6 +34,24 @@ import org.junit.Test
 
 /** Exercise native account screens without sending credentials or changing remote accounts. */
 class AccountUiRegressionTest {
+    @Test fun emailCodeLoginHasNativeIdentifierAndVerificationSteps() {
+        val account = account()
+        var sent by mutableStateOf(false)
+        compose.setContent {
+            JUKETheme { SignInScreen(AccountUiState(stage = AuthStage.EMAIL_OTP,
+                otpSent = sent, otpIdentifier = "listener@example.com"), account) }
+        }
+        compose.onNodeWithText("Send sign-in code").assertIsNotEnabled()
+        compose.onNodeWithText("Email or username").performTextInput("listener@example.com")
+        compose.onNodeWithText("Send sign-in code").assertIsEnabled()
+        compose.runOnIdle { sent = true }
+        compose.onNodeWithText("Verify and sign in").assertIsNotEnabled()
+        compose.onNodeWithText("Six-digit email code").performTextInput("123456")
+        compose.onNodeWithText("Verify and sign in").assertIsEnabled()
+        compose.onNodeWithText("Resend code").assertIsDisplayed()
+        compose.onNodeWithText("Use password instead").assertIsDisplayed()
+        screenshot("email-otp-login")
+    }
     @get:Rule val compose = createComposeRule()
     private fun screenshot(name:String) {
         compose.waitForIdle()

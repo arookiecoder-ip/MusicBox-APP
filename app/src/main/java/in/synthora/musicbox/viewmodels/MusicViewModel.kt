@@ -2871,7 +2871,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun installSleepTimer(remaining: Long, local: Boolean = !isAlexa && !isRemotePhone && !JamSession.active) {
         val accountId = `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id
-        playbackManager.startSleepTimer(((remaining + 59_999) / 60_000).toInt().coerceIn(1, 180), remaining) {
+        playbackManager.startSleepTimer(((remaining + 59_999) / 60_000).toInt().coerceIn(1, 180), remaining, enforceLocal = local) {
             if (local && !isAlexa && !isRemotePhone && !JamSession.active &&
                 accountId == `in`.synthora.musicbox.services.AccountScope.current(getApplication())?.id) {
                 ++playbackRequestId

@@ -1541,6 +1541,22 @@ class PlaybackService : MediaLibraryService() {
                 catch (e: Exception) { Log.w(TAG, "Background playback maintenance failed: ${e.javaClass.simpleName}") }
             }
         }
+        serviceScope.launch {
+            while (isActive) {
+                if (PhoneSleepTimer.consumeExpired(applicationContext,
+                        outputPrefs.getString("playback_output", "PHONE") == "PHONE")) {
+                    callGuard.explicitPause()
+                    cancelSessionResume()
+                    recoveryShouldResume = false
+                    leaseInterruption.clear()
+                    networkInterruption.clear()
+                    streamRecoveryJob?.cancel()
+                    streamRecoveryJob = null
+                    player.pause()
+                }
+                delay(1_000)
+            }
+        }
         player.addListener(object : Player.Listener {
             override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
                 if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED && resumeQueuePublishJob?.isActive == true) {

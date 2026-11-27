@@ -200,6 +200,9 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                                 keyboard?.hide()
                                 account.login(username, password)
                             }
+                            TextButton(onClick = { password = ""; code = ""; account.openEmailLogin() }, enabled = !state.busy) {
+                                Text("Sign in with email code")
+                            }
                             state.door.message.takeIf { it.isNotBlank() }?.let { notice ->
                                 Spacer(Modifier.height(14.dp))
                                 Text(
@@ -209,6 +212,9 @@ fun SignInScreen(state: AccountUiState, account: AccountViewModel) {
                                     textAlign = TextAlign.Center
                                 )
                             }
+                        }
+                        AuthStage.EMAIL_OTP -> {
+                            EmailOtpForm(state, account)
                         }
                         AuthStage.NEEDS_CODE -> {
                             Icon(
@@ -305,6 +311,46 @@ internal fun SubmitButton(text: String, busy: Boolean, enabled: Boolean = true, 
             { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary) }
         } else null
     )
+}
+
+@Composable
+private fun EmailOtpForm(state: AccountUiState, account: AccountViewModel) {
+    var identifier by rememberSaveable { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+    var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(state.otpResendAt) {
+        while (true) {
+            now = android.os.SystemClock.elapsedRealtime()
+            if (now >= state.otpResendAt) break
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+    Text(if (state.otpSent) "Check your email" else "Sign in with email code",
+        style = MaterialTheme.typography.titleLarge)
+    Spacer(Modifier.height(12.dp))
+    Text(if (state.otpSent) "Enter the six-digit code sent to the email on ${state.otpIdentifier}."
+        else "Use your account email or username. We'll email you a sign-in code.",
+        style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+    Spacer(Modifier.height(24.dp))
+    if (state.otpSent) {
+        GlassTextField(code, { code = it.filter { char -> char in '0'..'9' }.take(6) }, "Six-digit email code",
+            centered = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (!state.busy) account.verifyEmailLoginCode(code) }))
+        Spacer(Modifier.height(16.dp))
+        SubmitButton("Verify and sign in", state.busy, enabled = code.length == 6) { account.verifyEmailLoginCode(code) }
+        val seconds = ((state.otpResendAt - now).coerceAtLeast(0) + 999) / 1000
+        TextButton(onClick = { code = ""; account.sendEmailLoginCode(state.otpIdentifier) }, enabled = !state.busy && seconds == 0L) {
+            Text(if (seconds > 0) "Resend code in ${seconds}s" else "Resend code")
+        }
+        TextButton(onClick = { code = ""; account.openEmailLogin() }, enabled = !state.busy) { Text("Use a different account") }
+    } else {
+        GlassTextField(identifier, { identifier = it }, "Email or username",
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (!state.busy) account.sendEmailLoginCode(identifier) }))
+        Spacer(Modifier.height(16.dp))
+        SubmitButton("Send sign-in code", state.busy, enabled = identifier.isNotBlank()) { account.sendEmailLoginCode(identifier) }
+    }
+    TextButton(onClick = { code = ""; account.restartLogin() }, enabled = !state.busy) { Text("Use password instead") }
 }
 
 /** A text field drawn as a glass pill, matching the search header. */

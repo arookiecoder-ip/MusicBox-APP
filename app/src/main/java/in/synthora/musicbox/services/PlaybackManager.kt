@@ -1000,9 +1000,11 @@ class PlaybackManager private constructor(private val context: Context) {
      * @param minutes Duration in minutes
      */
     fun startSleepTimer(minutes: Int, durationMs: Long = minutes * 60_000L,
+        enforceLocal: Boolean = true,
         onExpire: suspend () -> Unit = { pause() }) {
         require(minutes in 1..180)
         cancelSleepTimer()
+        if (enforceLocal) PhoneSleepTimer.set(context, durationMs.coerceIn(1, 180 * 60_000L))
         _sleepTimerRemaining.value = durationMs
         sleepTimerJob = scope.launch(Dispatchers.Main.immediate) {
             awaitSleepDeadline(durationMs.coerceIn(1, 180 * 60_000L), android.os.SystemClock::elapsedRealtime) {
@@ -1017,7 +1019,8 @@ class PlaybackManager private constructor(private val context: Context) {
     /**
      * Cancel active sleep timer.
      */
-    fun cancelSleepTimer() {
+    fun cancelSleepTimer(clearEnforcement: Boolean = true) {
+        if (clearEnforcement) PhoneSleepTimer.cancel(context)
         sleepTimerJob?.cancel()
         sleepTimerJob = null
         _sleepTimerRemaining.value = null
@@ -1027,7 +1030,7 @@ class PlaybackManager private constructor(private val context: Context) {
     fun release() {
         connectionRetry?.cancel()
         connectionRetry = null
-        cancelSleepTimer()
+        cancelSleepTimer(clearEnforcement = false)
         savePlaybackState() // Save state before releasing
         val connection = controllerFuture
         val connected = controller
