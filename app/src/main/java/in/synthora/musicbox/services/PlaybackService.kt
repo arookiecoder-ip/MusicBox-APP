@@ -557,8 +557,6 @@ class PlaybackService : MediaLibraryService() {
         isInCall = ::inCall,
         pause = { player.pause() },
         scheduleResume = {
-            callResumeMediaId=player.currentMediaItem?.mediaId
-            callResumeToken=PhonePlaybackOwnership.token
             mainHandler.removeCallbacks(resumeAfterCall)
             mainHandler.postDelayed(resumeAfterCall,500)
         },
@@ -567,7 +565,11 @@ class PlaybackService : MediaLibraryService() {
             if (::player.isInitialized) player.setAudioAttributes(player.audioAttributes,!manualOverride)
         },
         nowMs = { android.os.SystemClock.elapsedRealtime() },
-        onInterruption = { mainHandler.removeCallbacks(callModePoll); mainHandler.post(callModePoll) }
+        onInterruption = { mainHandler.removeCallbacks(callModePoll); mainHandler.post(callModePoll) },
+        onResumeRemembered = {
+            callResumeMediaId=player.currentMediaItem?.mediaId
+            callResumeToken=PhonePlaybackOwnership.token
+        }
     )
     private var observedCallMode: Int? = null
     private fun observeCallMode() {
@@ -1004,6 +1006,7 @@ class PlaybackService : MediaLibraryService() {
 
     /** Recover in the service so notification controls and background playback work too. */
     private fun recoverCurrentStream(manual: Boolean = false) {
+        if (!shouldRecoverStream(manual, player.playWhenReady, recoveryShouldResume, callBlocksPlayback())) return
         if (outputPrefs.getString("playback_output", "PHONE") == "ALEXA") return
         if (streamRecoveryJob?.isActive == true) {
             if (manual) recoveryShouldResume = true
@@ -1128,19 +1131,18 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var queueContinuationJob: Job? = null
-    private var lastContinuationSeed = ""
-    private var continuationRetryAt = 0L
+    private val continuationRetry = QueueContinuationRetry()
     private fun maybeExtendPhoneQueue() {
         if (`in`.synthora.musicbox.viewmodels.JamSession.active) return
         if (!player.playWhenReady || !`in`.synthora.musicbox.network.NetworkFeedback.online.value ||
             !PhonePlaybackOwnership.permitsPlayback() || PhonePlaybackOwnership.token.isBlank() ||
             outputPrefs.getString("playback_output", "PHONE") == "ALEXA" || queueContinuationJob?.isActive == true ||
-            android.os.SystemClock.elapsedRealtime() < continuationRetryAt || player.mediaItemCount >= 5000 ||
+            player.mediaItemCount >= 5000 ||
             player.mediaItemCount - player.currentMediaItemIndex - 1 > 2) return
         val current = player.currentMediaItem ?: return
         val claim = PhonePlaybackOwnership.token
         val seedKey = "$claim:${current.mediaId}"
-        if (lastContinuationSeed == seedKey) return
+        if (!continuationRetry.ready(seedKey, android.os.SystemClock.elapsedRealtime())) return
         val before = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
         queueContinuationJob = serviceScope.launch {
             try {
@@ -1156,14 +1158,19 @@ class PlaybackService : MediaLibraryService() {
                 val now = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }
                 if (!canApplyQueueContinuation(before, now, claim, PhonePlaybackOwnership.token,
                         PhonePlaybackOwnership.permitsPlayback(claim))) return@launch
-                if (tracks.isEmpty()) { lastContinuationSeed = seedKey; return@launch }
+                if (tracks.isEmpty()) {
+                    // A partial/empty radio response is not a completed queue.
+                    // Retry with backoff, including after the last item ends.
+                    continuationRetry.deferred(android.os.SystemClock.elapsedRealtime())
+                    return@launch
+                }
                 if (oldTracks.size != before.size) return@launch
                 withContext(Dispatchers.IO) { database.trackDao().insertTracks(tracks.map { it.toEntity() }) }
                 if (!canApplyQueueContinuation(before, (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId },
                         claim, PhonePlaybackOwnership.token, PhonePlaybackOwnership.permitsPlayback(claim))) return@launch
                 val ended = player.playbackState == Player.STATE_ENDED
                 val previousIndex = player.currentMediaItemIndex
-                lastContinuationSeed = seedKey
+                continuationRetry.completed(seedKey)
                 player.addMediaItems(tracks.mapNotNull(::createValidatedMediaItem))
                 if (shouldAdvanceExhaustedQueue(ended, previousIndex, player.currentMediaItemIndex, player.playWhenReady, player.hasNextMediaItem())) { player.seekToNextMediaItem(); player.prepare(); player.play() }
                 val index = player.currentMediaItemIndex
@@ -1174,10 +1181,10 @@ class PlaybackService : MediaLibraryService() {
                     player.currentPosition.coerceAtLeast(0), index, player.playbackState == Player.STATE_BUFFERING,
                     expectedToken = claim)
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
-                continuationRetryAt = android.os.SystemClock.elapsedRealtime() + 30_000
+                continuationRetry.deferred(android.os.SystemClock.elapsedRealtime())
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) {
-                continuationRetryAt = android.os.SystemClock.elapsedRealtime() + 30_000
+                continuationRetry.deferred(android.os.SystemClock.elapsedRealtime())
                 PhonePlaybackOwnership.queueNeedsSync.tryEmit(Unit)
             }
         }

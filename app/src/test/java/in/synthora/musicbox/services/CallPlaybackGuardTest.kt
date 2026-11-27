@@ -5,6 +5,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CallPlaybackGuardTest {
+    @Test fun repeatedNormalModePollsKeepTheInterruptedTrackAndLeaseSnapshot() {
+        var calling = true
+        var current = "original-song:original-lease"
+        var remembered = ""
+        var snapshots = 0
+        var schedules = 0
+        val guard = CallPlaybackGuard({ calling }, {}, { schedules++ }, {},
+            onResumeRemembered = { remembered = current; snapshots++ })
+        guard.modeChanged(true)
+        current = "replacement-song:new-lease"
+        calling = false
+        repeat(5) { guard.modeChanged(false) }
+        assertEquals("original-song:original-lease", remembered)
+        assertEquals(1, snapshots)
+        assertTrue(schedules > 1)
+        guard.explicitPause()
+        calling = true
+        guard.modeChanged(true)
+        assertEquals(current, remembered)
+        assertEquals(2, snapshots)
+    }
     @Test fun callEntryPausesAndRetainsIntentAcrossDelayedOwnPauseAcknowledgement() {
         var calling=true
         var pending=false

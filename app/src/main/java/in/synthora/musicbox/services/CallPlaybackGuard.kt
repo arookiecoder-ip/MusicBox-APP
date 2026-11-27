@@ -10,7 +10,8 @@ internal class CallPlaybackGuard(
     private val cancelResume: () -> Unit,
     private val manualFocus: (Boolean) -> Unit = {},
     private val nowMs: () -> Long = { System.nanoTime()/1_000_000 },
-    private val onInterruption: () -> Unit = {}
+    private val onInterruption: () -> Unit = {},
+    private val onResumeRemembered: () -> Unit = {}
 ) : Player.Listener {
     private var ownPauseAck = false
     private var focusOverrideActive = false
@@ -82,7 +83,13 @@ internal class CallPlaybackGuard(
         focusLossAt=null
         cancelResume()
     }
-    private fun remember() { if (!resumePending) { resumePending=true;scheduleResume() } }
+    private fun remember() {
+        if (!resumePending) {
+            resumePending=true
+            onResumeRemembered()
+            scheduleResume()
+        }
+    }
     private fun hold() {
         normalSince=null
         remember() // Notification/foreground retention sees the intent before Pause events.
