@@ -15,7 +15,7 @@ import org.robolectric.shadows.ShadowSystemClock
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE, application = Application::class)
 class PhoneSleepTimerTest {
-    private val context get() = RuntimeEnvironment.getApplication<Application>()
+    private val context get() = RuntimeEnvironment.getApplication()
     @Before fun reset() { PhoneSleepTimer.cancel(context) }
     @After fun cleanup() { PhoneSleepTimer.cancel(context) }
     @Test fun persistedDeadlineExpiresOnceWithoutTheUiCountdown() {
