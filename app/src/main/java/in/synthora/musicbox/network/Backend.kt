@@ -159,6 +159,16 @@ object Backend {
     }
 
     /** Step 2 of the web login: the 6-digit authenticator code. */
+    suspend fun sendEmailLoginCode(identifier: String): Long =
+        post("/login/", JsonObject(mapOf("step" to JsonPrimitive("send_otp"),
+            "username" to JsonPrimitive(identifier.trim())))).objectOrEmpty().number("retry_after").coerceAtLeast(60)
+
+    suspend fun loginWithEmailCode(identifier: String, code: String): LoginStep {
+        val result = post("/login/", JsonObject(mapOf("step" to JsonPrimitive("email_otp"),
+            "username" to JsonPrimitive(identifier.trim()), "code" to JsonPrimitive(code.trim())))).objectOrEmpty()
+        return if (result.flag("totp_required")) LoginStep.NeedsCode(result.text("token")) else LoginStep.SignedIn
+    }
+
     suspend fun verifyCode(token: String, code: String) {
         post("/login/", JsonObject(mapOf(
             "step" to JsonPrimitive("totp"),
